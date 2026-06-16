@@ -94,19 +94,31 @@ export const fonts = {
   bodyBold: 'Nunito_800ExtraBold',
 } as const;
 
-/** Visual tokens for the floating bottom tabbar (from `.lb-tabbar`). */
+/** Visual tokens for the floating bottom tabbar (from `.lb-tabbar`).
+ *  Tuned compact on real hardware (OnePlus Nord 2T): a small, clearly floating
+ *  pill rather than an edge-to-edge bar. */
 export const tabbar = {
-  height: 66,
-  marginX: 16,
-  marginBottom: 16,
-  /** cap so the pill stays a centered floating shape on wide screens/tablets */
-  maxWidth: 480,
-  padding: 7,
-  gap: 4,
-  radius: 26,
-  itemRadius: 19,
-  iconSize: 23,
-  surface: 'rgba(255,255,255,0.92)',
+  height: 58,
+  /** clamp: never wider than 304, never narrower than 268, ~72px side breathing */
+  minWidth: 268,
+  maxWidth: 304,
+  sideAllowance: 72,
+  marginBottom: 18,
+  paddingX: 8,
+  paddingY: 6,
+  gap: 2,
+  radius: 24,
+  /** the full-third tap target inside each tab */
+  tabRadius: 18,
+  tabHeight: 46,
+  /** the small tinted content group that holds the icon + label */
+  chipRadius: 16,
+  chipMinWidth: 68,
+  chipHeight: 42,
+  chipGap: 2,
+  iconSize: 20,
+  labelSize: 9.5,
+  surface: 'rgba(255,255,255,0.94)',
   border: 'rgba(255,255,255,0.7)',
   inactiveColor: colors.inkFaint,
   ...shadows.tabbar,
