@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lullaby — App Reference</title>
+
+<!--
+  ========================================================================
+  LULLABY · APP UI REFERENCE
+  ========================================================================
+  A standalone visual reference for the Lullaby app. Navigate by tapping the
+  real on-screen controls — there is no external bar:
+
+    • Quick log row:  Feed / Sleep / Diaper  -> open that screen
+    • Caregiver chips (M / D / +) in the header -> Partner handoff screen
+    • Bottom tabbar:  Tonight / Log / Reassure (Tonight is the active home)
+
+  The four screen states are: sleep, feed, diaper, partner. Settings is implied
+  behind the baby header/avatar; Partner lives as a state inside Tonight.
+
+  ------------------------------------------------------------------------
+  Programmatic hook (still available if you ever drive states from code):
+
+    window.LullabyPhone.setState('sleep' | 'feed' | 'diaper' | 'partner');
+
+  The on-screen controls call this for you; you don't need to wire anything.
+
+  Scoping: every selector and token is namespaced under `.lb-phone`, and no
+  global/body styles are set by the component. The one <link> below loads the
+  fonts and is the only global-ish line; the font-family applies only within
+  `.lb-phone`. If your app already loads Fredoka/Nunito, you can drop it.
+  ========================================================================
+-->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+<!-- ============================ COMPONENT STYLES ============================ -->
+<style id="lb-styles">
+  /* All tokens live on the component root, NOT :root / body, so nothing leaks. */
+  .lb-phone{
+    --lb-ink:#2E2A40;
+    --lb-ink-soft:#736E86;
+    --lb-ink-faint:#A8A2B8;
+    --lb-bg:#FBF4EF;          /* warm cream app background — stays cream in every state */
+    --lb-surface:#FFFFFF;
+    --lb-surface-2:#FBF6F2;
+    --lb-line:#F0E8E2;
+
+    --lb-feed:#FF7A3D;        --lb-feed-2:#FF9E5E;  --lb-feed-tint:#FFEDE0;
+    --lb-sleep:#5560C6;       --lb-sleep-2:#7C84DA; --lb-sleep-tint:#E9EBFB;
+    --lb-diaper:#23B79E;      --lb-diaper-tint:#DDF5EF;
+
+    --lb-shadow-soft:0 22px 50px -18px rgba(60,40,30,.30);
+    --lb-shadow-card:0 10px 26px -14px rgba(60,40,30,.22);
+    --lb-r-lg:34px; --lb-r-md:24px; --lb-r-sm:16px;
+
+    /* accent + caregiver colors driven by [data-state] below */
+    --lb-accent:var(--lb-sleep);
+    --lb-accent-tint:var(--lb-sleep-tint);
+    --lb-mom:#FF9E5E; --lb-dad:#5560C6;
+
+    /* Fixed height covers the tallest state PLUS the bottom tabbar, so the
+       frame never resizes when scroll changes the state. One value to tune. */
+    width:min(380px,100%); height:840px;
+    background:var(--lb-bg);
+    border-radius:48px;
+    box-shadow:var(--lb-shadow-soft),0 0 0 9px #1d1726,0 0 0 11px #2c2436;
+    overflow:hidden; position:relative; display:flex; flex-direction:column; flex-shrink:0;
+    font-family:'Nunito',system-ui,sans-serif; color:var(--lb-ink);
+    -webkit-tap-highlight-color:transparent;
+  }
+  .lb-phone *{box-sizing:border-box;margin:0;padding:0;}
+
+  /* accent mapping per state */
+  .lb-phone[data-state="feed"]   {--lb-accent:var(--lb-feed);   --lb-accent-tint:var(--lb-feed-tint);}
+  .lb-phone[data-state="sleep"]  {--lb-accent:var(--lb-sleep);  --lb-accent-tint:var(--lb-sleep-tint);}
+  .lb-phone[data-state="diaper"] {--lb-accent:var(--lb-diaper); --lb-accent-tint:var(--lb-diaper-tint);}
+  .lb-phone[data-state="partner"]{--lb-accent:var(--lb-sleep);  --lb-accent-tint:var(--lb-sleep-tint);}
+
+  .lb-notch{position:absolute;top:0;left:50%;transform:translateX(-50%);width:112px;height:26px;background:#1d1726;border-radius:0 0 16px 16px;z-index:60;}
+  .lb-statusbar{height:46px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 5px;font-size:12.5px;font-weight:800;flex-shrink:0;}
+  .lb-statusbar .lb-sb-right{display:flex;gap:6px;align-items:center;}
+
+  /* single, non-scrolling screen */
+  .lb-screen{flex:1;min-height:0;padding:2px 18px 14px;display:flex;flex-direction:column;gap:13px;overflow:hidden;}
+
+  /* the part that swaps when you change screens; fades softly */
+  .lb-dyn{display:flex;flex-direction:column;gap:13px;transition:opacity .32s ease, transform .32s ease;}
+  .lb-phone.is-swapping .lb-dyn{opacity:0;transform:translateY(6px);}
+
+  /* baby header (static across states) */
+  .lb-head{display:flex;align-items:center;gap:12px;padding:6px 2px 0;}
+  .lb-av{width:44px;height:44px;flex-shrink:0;}
+  .lb-head .lb-meta{flex:1;}
+  .lb-head .lb-name{font-family:'Fredoka',sans-serif;font-weight:600;font-size:18px;line-height:1.05;}
+  .lb-head .lb-sub{font-size:12px;color:var(--lb-ink-soft);font-weight:600;}
+  .lb-care{display:flex;cursor:pointer;border:none;background:none;padding:2px;border-radius:999px;transition:transform .12s ease;}
+  .lb-care:active{transform:scale(.95);}
+  .lb-care span{width:29px;height:29px;border-radius:50%;border:2.5px solid var(--lb-bg);margin-left:-9px;font-size:10.5px;font-weight:800;color:#fff;display:flex;align-items:center;justify-content:center;}
+  .lb-care span:first-child{margin-left:0;}
+
+  /* ===== SKY / ORB HERO — the signature ===== */
+  .lb-sky{position:relative;border-radius:var(--lb-r-lg);overflow:hidden;padding:18px 18px 20px;
+    background:linear-gradient(168deg,#FFE0B8 0%,#FFC9B0 42%,#F3D3EC 80%,#FBEFF6 100%);
+    box-shadow:var(--lb-shadow-card);transition:background .7s ease;flex-shrink:0;}
+  .lb-sky.is-night{background:linear-gradient(168deg,#3B3A74 0%,#4A4D9C 50%,#6E6FC2 100%);}
+  .lb-sky.is-dusk{background:linear-gradient(168deg,#EDE7FB 0%,#E7E9FC 48%,#DCF4EE 100%);}
+
+  .lb-cloud{position:absolute;background:rgba(255,255,255,.7);border-radius:40px;transition:opacity .6s;}
+  .lb-sky.is-night .lb-cloud{opacity:0;}
+  .lb-c1{width:54px;height:20px;top:22px;left:22px;box-shadow:16px 5px 0 -4px rgba(255,255,255,.6);}
+  .lb-c2{width:38px;height:14px;top:56px;right:26px;}
+  .lb-star{position:absolute;color:#fff;opacity:0;transition:opacity .6s;}
+  .lb-sky.is-night .lb-star{opacity:.9;}
+  .lb-s1{top:20px;left:30px;} .lb-s2{top:46px;right:36px;} .lb-s3{top:82px;left:54px;} .lb-s4{top:26px;right:72px;}
+
+  .lb-orb-wrap{display:flex;flex-direction:column;align-items:center;position:relative;z-index:2;}
+  .lb-orb{position:relative;width:178px;height:178px;display:flex;align-items:center;justify-content:center;margin-bottom:6px;}
+  .lb-sun{position:absolute;inset:26px;border-radius:50%;
+    background:radial-gradient(circle at 50% 42%,#FFF1D6 0%,#FFC15E 46%,#FF9A3D 78%);
+    box-shadow:0 0 32px 6px rgba(255,168,80,.55);animation:lb-breathe 5.5s ease-in-out infinite;transition:background .7s ease, box-shadow .7s ease;}
+  .lb-sky.is-night .lb-sun{background:radial-gradient(circle at 38% 38%,#EEF0FF 0%,#C9CEFF 55%,#A6ABF2 100%);
+    box-shadow:0 0 30px 4px rgba(150,150,240,.5);clip-path:path('M89 14a74 74 0 1 0 68 102 58 58 0 0 1-68-102Z');}
+  .lb-sky.is-dusk .lb-sun{background:radial-gradient(circle at 44% 42%,#FFFFFF 0%,#E7E9FC 50%,#CFD4F2 100%);box-shadow:0 0 28px 4px rgba(140,150,220,.4);}
+  @keyframes lb-breathe{0%,100%{transform:scale(.97);}50%{transform:scale(1.03);}}
+
+  .lb-ring{position:absolute;inset:0;transform:rotate(-90deg);}
+  .lb-ring .lb-track{fill:none;stroke:rgba(255,255,255,.55);stroke-width:10;}
+  .lb-ring .lb-prog{fill:none;stroke:#fff;stroke-width:10;stroke-linecap:round;
+    transition:stroke-dashoffset .7s ease;filter:drop-shadow(0 2px 5px rgba(255,255,255,.6));}
+
+  .lb-orb-core{position:relative;z-index:3;width:128px;height:128px;border-radius:50%;
+    background:rgba(255,255,255,.82);backdrop-filter:blur(8px);
+    box-shadow:0 10px 26px -12px rgba(60,40,30,.4),inset 0 1px 2px rgba(255,255,255,.9);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:2px;}
+  .lb-orb-state{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--lb-accent);display:flex;align-items:center;gap:5px;transition:color .4s ease;}
+  .lb-orb-time{font-family:'Fredoka',sans-serif;font-weight:600;font-size:38px;line-height:1;font-variant-numeric:tabular-nums;color:var(--lb-ink);}
+  .lb-orb-check{width:40px;height:40px;border-radius:50%;background:var(--lb-diaper-tint);display:flex;align-items:center;justify-content:center;margin-bottom:1px;}
+  .lb-orb-small{font-family:'Fredoka',sans-serif;font-weight:600;font-size:15px;color:var(--lb-ink);}
+  /* partner: two avatars in the core */
+  .lb-orb-pair{display:flex;align-items:center;justify-content:center;margin-bottom:2px;}
+  .lb-orb-pair span{width:34px;height:34px;border-radius:50%;border:3px solid #fff;margin-left:-10px;font-size:13px;font-weight:800;color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Nunito';}
+  .lb-orb-pair span:first-child{margin-left:0;}
+
+  .lb-action{margin-top:14px;border:none;cursor:pointer;font-family:'Nunito';font-size:14px;font-weight:800;color:#fff;
+    background:var(--lb-accent);padding:13px 28px;border-radius:999px;box-shadow:0 12px 24px -10px var(--lb-accent);
+    display:inline-flex;align-items:center;gap:8px;transition:transform .12s ease, background .4s ease, box-shadow .4s ease;z-index:2;position:relative;}
+  .lb-action:active{transform:scale(.96);}
+
+  /* moment line (mainTitle + mainText) */
+  .lb-moment{padding:0 4px;}
+  .lb-moment .lb-m-title{font-family:'Fredoka',sans-serif;font-weight:600;font-size:17px;line-height:1.15;}
+  .lb-moment .lb-m-text{font-size:12.5px;color:var(--lb-ink-soft);font-weight:600;margin-top:2px;line-height:1.35;}
+
+  /* partner sync card (replaces moment line in partner state) */
+  .lb-sync{display:none;align-items:center;gap:12px;border-radius:var(--lb-r-md);padding:13px 15px;
+    background:linear-gradient(120deg,var(--lb-feed-tint),var(--lb-diaper-tint));box-shadow:var(--lb-shadow-card);}
+  .lb-phone[data-state="partner"] .lb-sync{display:flex;}
+  .lb-phone[data-state="partner"] .lb-moment{display:none;}
+  .lb-sync .lb-sync-av{display:flex;}
+  .lb-sync .lb-sync-av span{width:30px;height:30px;border-radius:50%;border:2.5px solid #fff;margin-left:-9px;font-size:11px;font-weight:800;color:#fff;display:flex;align-items:center;justify-content:center;}
+  .lb-sync .lb-sync-av span:first-child{margin-left:0;}
+  .lb-sync .lb-sync-tx{font-size:12.5px;font-weight:800;line-height:1.3;color:var(--lb-ink);}
+  .lb-sync .lb-sync-tx small{display:block;font-weight:700;font-size:11px;color:var(--lb-ink-soft);margin-top:1px;}
+
+  /* quick log — single compact row of 4, active highlighted */
+  .lb-quick{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;}
+  .lb-q{border:none;cursor:pointer;font-family:'Nunito';background:var(--lb-surface);
+    border-radius:var(--lb-r-sm);padding:11px 6px 9px;box-shadow:var(--lb-shadow-card);
+    display:flex;flex-direction:column;align-items:center;gap:6px;transition:transform .12s ease, box-shadow .3s ease;
+    position:relative;}
+  .lb-q:active{transform:scale(.96);}
+  .lb-q .lb-qi{width:38px;height:38px;border-radius:13px;display:flex;align-items:center;justify-content:center;transition:transform .3s ease;}
+  .lb-q .lb-ql{font-size:11px;font-weight:800;color:var(--lb-ink-soft);}
+  .lb-q.feed   .lb-qi{background:linear-gradient(145deg,#FFE0CC,#FFD0B6);}
+  .lb-q.sleep  .lb-qi{background:linear-gradient(145deg,#E5E8FB,#D6DBF7);}
+  .lb-q.diaper .lb-qi{background:linear-gradient(145deg,#DAF4EE,#C9EFE6);}
+  .lb-q.pump   .lb-qi{background:linear-gradient(145deg,#FFF0D2,#FCE6B6);}
+  /* active state */
+  .lb-q.is-active{box-shadow:0 0 0 2px var(--lb-accent), var(--lb-shadow-card);}
+  .lb-q.is-active .lb-ql{color:var(--lb-accent);}
+  .lb-q.is-active .lb-qi{transform:scale(1.05);}
+
+  /* tonight timeline */
+  .lb-tl-card{background:var(--lb-surface);border-radius:var(--lb-r-md);padding:15px 16px 7px;box-shadow:var(--lb-shadow-card);}
+  .lb-tl-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+  .lb-tl-head h3{font-family:'Fredoka',sans-serif;font-size:14.5px;font-weight:500;}
+  .lb-tl-head .lb-link{font-size:11.5px;font-weight:800;color:var(--lb-accent);transition:color .4s ease;}
+  .lb-tl-item{display:flex;gap:12px;padding:8px 0;position:relative;}
+  .lb-tl-item:not(:last-child)::before{content:"";position:absolute;left:13px;top:32px;bottom:-8px;width:2px;background:var(--lb-line);}
+  .lb-tl-time{font-size:11.5px;color:var(--lb-ink-faint);font-weight:800;font-variant-numeric:tabular-nums;padding-top:6px;width:34px;flex-shrink:0;}
+  .lb-tl-dot{width:28px;height:28px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;z-index:1;}
+  .lb-tl-body{flex:1;padding-top:1px;}
+  .lb-tl-body .lb-t1{font-weight:800;font-size:13px;}
+  .lb-tl-body .lb-t2{font-size:11.5px;color:var(--lb-ink-soft);font-weight:600;margin-top:2px;display:flex;align-items:center;gap:6px;}
+  .lb-who{width:17px;height:17px;border-radius:50%;font-size:8.5px;font-weight:800;color:#fff;display:inline-flex;align-items:center;justify-content:center;}
+
+  /* ===== bottom tabbar — floating, native-mobile, pinned below the screen ===== */
+  .lb-tabbar{flex-shrink:0;margin:0 16px 16px;height:66px;display:flex;align-items:stretch;
+    background:rgba(255,255,255,.9);backdrop-filter:blur(18px);
+    border:1px solid rgba(255,255,255,.7);border-radius:26px;
+    box-shadow:0 16px 34px -14px rgba(60,40,30,.34);padding:7px;gap:4px;}
+  .lb-tab{flex:1;border:none;background:none;cursor:pointer;font-family:'Nunito';
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+    border-radius:19px;color:var(--lb-ink-faint);transition:color .3s ease, background .3s ease;
+    min-height:44px;-webkit-tap-highlight-color:transparent;position:relative;}
+  .lb-tab:active{transform:scale(.97);}
+  .lb-tab svg{width:23px;height:23px;display:block;}
+  .lb-tab .lb-tab-l{font-size:10.5px;font-weight:800;letter-spacing:.01em;}
+  /* active tab adopts the current state accent + a soft accent-tint pill */
+  .lb-tab.is-on{color:var(--lb-accent);background:var(--lb-accent-tint);}
+
+  @media (prefers-reduced-motion:reduce){
+    .lb-phone *{animation:none!important;}
+    .lb-dyn,.lb-sky,.lb-sun,.lb-action,.lb-prog,.lb-orb-state,.lb-link,.lb-qi,.lb-tab{transition:none!important;}
+  }
+</style>
+</head>
+<body>
+
+<!-- ===================== PRESENTATION STAGE (page chrome only) =====================
+     This just centers the phone on a warm background for viewing the reference.
+     It contains NO navigation — you navigate with the on-screen controls.
+     Safe to delete when embedding the .lb-phone component elsewhere. -->
+<style id="lb-stage">
+  body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:20px;
+    padding:34px 16px 48px;font-family:'Nunito',system-ui,sans-serif;
+    background:radial-gradient(820px 480px at 16% -6%, #FFE3CC 0%, transparent 55%),
+               radial-gradient(760px 520px at 92% 2%, #E7E9FC 0%, transparent 52%),
+               radial-gradient(680px 680px at 80% 98%, #DCF4EE 0%, transparent 50%),
+               #F4ECF3;}
+  .lb-stage-intro{text-align:center;max-width:440px;}
+  .lb-stage-intro h1{font-family:'Fredoka',sans-serif;font-weight:600;font-size:30px;color:#2E2A40;margin:0 0 4px;}
+  .lb-stage-intro p{color:#736E86;font-size:13.5px;font-weight:600;line-height:1.5;margin:0;}
+</style>
+
+<div class="lb-stage-intro">
+  <h1>Lullaby — app reference</h1>
+  <p>Tap Feed, Sleep, or Diaper to switch screens. Tap the caregiver chips for the partner handoff.</p>
+</div>
+<!-- =================== END PRESENTATION STAGE =================== -->
+
+
+<!-- ============================ APP COMPONENT ============================ -->
+<div class="lb-phone" id="lullabyPhone" data-state="sleep">
+  <div class="lb-notch"></div>
+  <div class="lb-statusbar">
+    <span id="lbClock">3:48</span>
+    <span class="lb-sb-right">
+      <svg width="16" height="11" viewBox="0 0 17 12"><rect x="0" y="7" width="3" height="5" rx="1" fill="#2E2A40"/><rect x="4.5" y="4.5" width="3" height="7.5" rx="1" fill="#2E2A40"/><rect x="9" y="2" width="3" height="10" rx="1" fill="#2E2A40"/><rect x="13.5" y="0" width="3" height="12" rx="1" fill="#2E2A40"/></svg>
+      <svg width="21" height="11" viewBox="0 0 24 12"><rect x="1" y="1" width="20" height="10" rx="3" stroke="#2E2A40" stroke-width="1.2" opacity=".5" fill="none"/><rect x="3" y="3" width="15" height="6" rx="1.5" fill="#2E2A40"/><rect x="22" y="4" width="1.5" height="4" rx="1" fill="#2E2A40" opacity=".5"/></svg>
+    </span>
+  </div>
+
+  <div class="lb-screen">
+    <!-- STATIC: baby header -->
+    <div class="lb-head">
+      <svg class="lb-av" viewBox="0 0 50 50" fill="none">
+        <path d="M25 3c11 0 21 7 21 21 0 14-9 23-21 23S4 38 4 24C4 10 14 3 25 3Z" fill="url(#lbBg1)"/>
+        <path d="M19 1c2 2 2 5 0 7-3-1-5-4-4-6 1-1 3-1 4-1Z" fill="#FFB07A"/>
+        <circle cx="19" cy="25" r="2.4" fill="#5A3A28"/><circle cx="31" cy="25" r="2.4" fill="#5A3A28"/>
+        <path d="M21 32c2 2 6 2 8 0" stroke="#5A3A28" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="15" cy="30" r="2.6" fill="#FF9E7E" opacity=".5"/><circle cx="35" cy="30" r="2.6" fill="#FF9E7E" opacity=".5"/>
+        <defs><linearGradient id="lbBg1" x1="4" y1="3" x2="46" y2="47"><stop stop-color="#FFD9A8"/><stop offset="1" stop-color="#FF9E6B"/></linearGradient></defs>
+      </svg>
+      <div class="lb-meta"><div class="lb-name">Mia</div><div class="lb-sub">7 weeks old</div></div>
+      <button class="lb-care" data-go="partner" aria-label="Caregivers · partner handoff"><span style="background:#FF9E5E">M</span><span style="background:#5560C6">D</span><span style="background:#23B79E">+</span></button>
+    </div>
+
+    <!-- everything below swaps when the active screen changes -->
+    <div class="lb-dyn">
+
+      <!-- sky / orb hero -->
+      <div class="lb-sky is-night" id="lbSky">
+        <div class="lb-cloud lb-c1"></div><div class="lb-cloud lb-c2"></div>
+        <svg class="lb-star lb-s1" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2 7 7 2-7 2-2 7-2-7-7-2 7-2 2-7Z"/></svg>
+        <svg class="lb-star lb-s2" width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2 7 7 2-7 2-2 7-2-7-7-2 7-2 2-7Z"/></svg>
+        <svg class="lb-star lb-s3" width="7" height="7" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2 7 7 2-7 2-2 7-2-7-7-2 7-2 2-7Z"/></svg>
+        <svg class="lb-star lb-s4" width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2 7 7 2-7 2-2 7-2-7-7-2 7-2 2-7Z"/></svg>
+
+        <div class="lb-orb-wrap">
+          <div class="lb-orb">
+            <div class="lb-sun"></div>
+            <svg class="lb-ring" viewBox="0 0 178 178">
+              <circle class="lb-track" cx="89" cy="89" r="79"/>
+              <circle class="lb-prog" id="lbProg" cx="89" cy="89" r="79"/>
+            </svg>
+            <div class="lb-orb-core" id="lbCore"><!-- filled by JS --></div>
+          </div>
+          <button class="lb-action" id="lbAction"><span id="lbActionTx">Wake baby</span></button>
+        </div>
+      </div>
+
+      <!-- moment (mainTitle + mainText) -->
+      <div class="lb-moment">
+        <div class="lb-m-title" id="lbTitle">Sleep started</div>
+        <div class="lb-m-text" id="lbText">Started 4:12 · we’ll keep the night quiet</div>
+      </div>
+
+      <!-- partner sync card (shown only in partner state) -->
+      <div class="lb-sync">
+        <div class="lb-sync-av"><span style="background:#FF9E5E">M</span><span style="background:#5560C6">D</span></div>
+        <div class="lb-sync-tx">Both parents are up to date.<small>Mia’s night log is shared live</small></div>
+      </div>
+
+      <!-- quick log -->
+      <div class="lb-quick" id="lbQuick">
+        <button class="lb-q feed" data-q="feed" data-go="feed">
+          <span class="lb-qi"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 2h6M10 2v3.5a4 4 0 0 0-1.2 2.8L8 19a3 3 0 0 0 3 3h2a3 3 0 0 0 3-3l-.8-10.7A4 4 0 0 0 14 5.5V2" stroke="#FF7A3D" stroke-width="1.9" stroke-linejoin="round"/><path d="M8.4 12h7.2" stroke="#FF7A3D" stroke-width="1.9"/></svg></span>
+          <span class="lb-ql">Feed</span>
+        </button>
+        <button class="lb-q sleep" data-q="sleep" data-go="sleep">
+          <span class="lb-qi"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke="#5560C6" stroke-width="1.9" stroke-linejoin="round"/></svg></span>
+          <span class="lb-ql">Sleep</span>
+        </button>
+        <button class="lb-q diaper" data-q="diaper" data-go="diaper">
+          <span class="lb-qi"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 7h18l-1.5 4.5A8 8 0 0 1 12 17a8 8 0 0 1-7.5-5.5L3 7Z" stroke="#23B79E" stroke-width="1.9" stroke-linejoin="round"/><path d="M9 11c1 1.2 5 1.2 6 0" stroke="#23B79E" stroke-width="1.9" stroke-linecap="round"/></svg></span>
+          <span class="lb-ql">Diaper</span>
+        </button>
+        <button class="lb-q pump" data-q="pump"><!-- no dedicated screen yet -->
+          <span class="lb-qi"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M7 21h10M8 21V11h8v10M6 11h12M9 11V7a3 3 0 0 1 6 0v4" stroke="#FFB12E" stroke-width="1.9" stroke-linejoin="round"/></svg></span>
+          <span class="lb-ql">Pump</span>
+        </button>
+      </div>
+
+      <!-- tonight timeline -->
+      <div class="lb-tl-card">
+        <div class="lb-tl-head"><h3>Tonight</h3><span class="lb-link">See all</span></div>
+        <div id="lbTimeline"><!-- filled by JS --></div>
+      </div>
+
+    </div><!-- /.lb-dyn -->
+  </div><!-- /.lb-screen -->
+
+  <!-- bottom tabbar — sits OUTSIDE .lb-screen so it never scrolls or fades with state.
+       Settings stays implied behind the baby header/avatar; Partner stays a card inside Tonight. -->
+  <nav class="lb-tabbar" id="lbTabbar" aria-label="Lullaby tabs">
+    <button class="lb-tab is-on" data-tab="tonight" aria-label="Tonight">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg>
+      <span class="lb-tab-l">Tonight</span>
+    </button>
+    <button class="lb-tab" data-tab="log" aria-label="Log">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M9 6h11M9 12h11M9 18h7" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="4.5" cy="6" r="1.4" fill="currentColor"/><circle cx="4.5" cy="12" r="1.4" fill="currentColor"/><circle cx="4.5" cy="18" r="1.4" fill="currentColor"/></svg>
+      <span class="lb-tab-l">Log</span>
+    </button>
+    <button class="lb-tab" data-tab="reassure" aria-label="Reassure">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-4 3.5V17a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M12 13.6c-2.2-1.5-3.4-2.7-3.4-4 0-1 .8-1.7 1.7-1.7.6 0 1.2.3 1.7.9.5-.6 1.1-.9 1.7-.9.9 0 1.7.7 1.7 1.7 0 1.3-1.2 2.5-3.4 4Z" fill="currentColor" stroke="currentColor" stroke-width=".4"/></svg>
+      <span class="lb-tab-l">Reassure</span>
+    </button>
+  </nav>
+</div><!-- /.lb-phone -->
+
+
+<!-- ============================ COMPONENT SCRIPT (KEEP) ============================ -->
+<script id="lb-script">
+(function(){
+  "use strict";
+
+  // SVG icons for timeline dots, keyed by event kind.
+  var ICON = {
+    feed:   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 2h6M10 2v3.5a4 4 0 0 0-1.2 2.8L8 19a3 3 0 0 0 3 3h2a3 3 0 0 0 3-3l-.8-10.7A4 4 0 0 0 14 5.5V2" stroke="#FF7A3D" stroke-width="1.9"/></svg>',
+    sleep:  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke="#5560C6" stroke-width="1.9"/></svg>',
+    diaper: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 7h18l-1.5 4.5A8 8 0 0 1 12 17a8 8 0 0 1-7.5-5.5L3 7Z" stroke="#23B79E" stroke-width="1.9"/></svg>'
+  };
+  var TINT = { feed:'var(--lb-feed-tint)', sleep:'var(--lb-sleep-tint)', diaper:'var(--lb-diaper-tint)' };
+  var CARE = { Mom:'#FF9E5E', Dad:'#5560C6' };
+
+  // Orb-state eyebrow icons.
+  var STATE_ICON = {
+    asleep:  '<svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/></svg>',
+    live:    '<svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>',
+    check:   '<svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  };
+
+  var R = 79, C = 2 * Math.PI * R; // ring circumference
+
+  // ---- State data (your phoneStates, adapted to Mia/Lullaby + render metadata) ----
+  var STATES = {
+    sleep: {
+      sky:'night', accent:'sleep', status:'Asleep', statusIcon:STATE_ICON.asleep,
+      core:'timer', timer:'1h 12m', progress:0.36,
+      title:'Sleep started', text:'Started 4:12 · we’ll keep the night quiet',
+      action:'Wake baby', activeQuick:'sleep',
+      timeline:[
+        {time:'Now',  kind:'sleep',  label:'Sleep running', by:null},
+        {time:'3:10', kind:'feed',   label:'Feed · left, 11m', by:'Mom'}
+      ]
+    },
+    feed: {
+      sky:'day', accent:'feed', status:'Feeding', statusIcon:STATE_ICON.live,
+      core:'timer', timer:'04m', progress:0.12,
+      title:'Feed started', text:'Left side · 4 min in',
+      action:'End feed', activeQuick:'feed',
+      timeline:[
+        {time:'Now',  kind:'feed',   label:'Feed in progress', by:'Mom'},
+        {time:'3:48', kind:'diaper', label:'Diaper · wet', by:'Dad'}
+      ]
+    },
+    diaper: {
+      sky:'day', accent:'diaper', status:'Just logged', statusIcon:STATE_ICON.check,
+      core:'check', timer:'Logged', progress:1,
+      title:'Diaper logged', text:'Wet · added to tonight',
+      action:'Done', activeQuick:'diaper',
+      timeline:[
+        {time:'Now',  kind:'diaper', label:'Diaper · wet', by:'Dad'},
+        {time:'3:10', kind:'feed',   label:'Feed · left, 11m', by:'Mom'}
+      ]
+    },
+    partner: {
+      sky:'dusk', accent:'partner', status:'Synced', statusIcon:STATE_ICON.live,
+      core:'avatars', timer:'Live', progress:1,
+      title:'Dad handled the last wake-up', text:'Feed and diaper synced to Mia’s night log',
+      action:'View handoff', activeQuick:null,
+      timeline:[
+        {time:'3:48', kind:'diaper', label:'Diaper · wet', by:'Dad'},
+        {time:'3:10', kind:'feed',   label:'Feed · left, 11m', by:'Mom'}
+      ]
+    }
+  };
+
+  // story-step id -> state key
+  var ALIAS = { 'partner-sync':'partner', 'partner_sync':'partner', partnersync:'partner' };
+
+  var phone   = document.getElementById('lullabyPhone');
+  if(!phone) return;
+  var sky     = document.getElementById('lbSky');
+  var core    = document.getElementById('lbCore');
+  var prog    = document.getElementById('lbProg');
+  var titleEl = document.getElementById('lbTitle');
+  var textEl  = document.getElementById('lbText');
+  var actionTx= document.getElementById('lbActionTx');
+  var quick   = document.getElementById('lbQuick');
+  var tlEl    = document.getElementById('lbTimeline');
+
+  prog.style.strokeDasharray = C;
+
+  function esc(s){ return String(s).replace(/[&<>]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c]; }); }
+
+  function renderCore(s){
+    if(s.core === 'check'){
+      core.innerHTML =
+        '<div class="lb-orb-check"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#23B79E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>'+
+        '<div class="lb-orb-state">'+s.statusIcon+esc(s.status)+'</div>';
+    } else if(s.core === 'avatars'){
+      core.innerHTML =
+        '<div class="lb-orb-pair"><span style="background:#FF9E5E">M</span><span style="background:#5560C6">D</span></div>'+
+        '<div class="lb-orb-state">'+s.statusIcon+esc(s.status)+'</div>';
+    } else {
+      core.innerHTML =
+        '<div class="lb-orb-state">'+s.statusIcon+esc(s.status)+'</div>'+
+        '<div class="lb-orb-time">'+esc(s.timer)+'</div>';
+    }
+  }
+
+  function renderTimeline(s){
+    tlEl.innerHTML = s.timeline.map(function(it){
+      var by = it.by
+        ? '<span class="lb-who" style="background:'+(CARE[it.by]||'#A8A2B8')+'">'+esc(it.by[0])+'</span>'+esc(it.by)
+        : 'On the clock';
+      return '<div class="lb-tl-item">'+
+        '<div class="lb-tl-time">'+esc(it.time)+'</div>'+
+        '<div class="lb-tl-dot" style="background:'+(TINT[it.kind]||'var(--lb-line)')+'">'+(ICON[it.kind]||'')+'</div>'+
+        '<div class="lb-tl-body"><div class="lb-t1">'+esc(it.label)+'</div><div class="lb-t2">'+by+'</div></div>'+
+      '</div>';
+    }).join('');
+  }
+
+  function renderQuick(s){
+    var btns = quick.querySelectorAll('.lb-q');
+    for(var i=0;i<btns.length;i++){
+      btns[i].classList.toggle('is-active', btns[i].getAttribute('data-q') === s.activeQuick);
+    }
+  }
+
+  function applySky(s){
+    sky.classList.remove('is-night','is-dusk');
+    if(s.sky === 'night') sky.classList.add('is-night');
+    else if(s.sky === 'dusk') sky.classList.add('is-dusk');
+  }
+
+  var current = null;
+  function setState(id){
+    if(id == null) return;
+    var key = ALIAS[id] || id;
+    var s = STATES[key];
+    if(!s || key === current) return;
+
+    // soft fade-out of the swapping region, then swap content, then fade back in
+    phone.classList.add('is-swapping');
+
+    window.setTimeout(function(){      phone.setAttribute('data-state', key);
+      applySky(s);
+      renderCore(s);
+      prog.style.strokeDashoffset = C * (1 - s.progress);
+      titleEl.textContent = s.title;
+      textEl.textContent  = s.text;
+      actionTx.textContent = s.action;
+      renderQuick(s);
+      renderTimeline(s);
+      current = key;
+
+      // next frame -> fade back in
+      window.requestAnimationFrame(function(){
+        window.requestAnimationFrame(function(){ phone.classList.remove('is-swapping'); });
+      });
+    }, 180);
+  }
+
+  // Public API — on-screen controls call this for you. Also available if you
+  // ever want to drive screens from code.
+  window.LullabyPhone = {
+    setState: setState,
+    states: Object.keys(STATES)
+  };
+
+  // On-screen navigation — the real in-app controls drive the screens:
+  //   • Quick log Feed/Sleep/Diaper  -> setState('feed'|'sleep'|'diaper')
+  //   • Caregiver chips (M/D/+)       -> setState('partner')  (handoff)
+  //   • Pump has no dedicated screen yet, so it's a no-op for now.
+  (function wireControls(){
+    // delegate on the whole phone so any [data-go] element navigates
+    phone.addEventListener('click', function(e){
+      var el = e.target.closest('[data-go]');
+      if(!el) return;
+      setState(el.getAttribute('data-go'));
+    });
+  })();
+
+  // Bottom tabbar — purely visual, independent of the current screen.
+  // Tonight stays active by default; switching tabs does NOT call setState,
+  // and setState never touches the tabbar. The active tab's color tracks the
+  // current accent automatically via CSS (--lb-accent), no JS needed.
+  (function wireTabbar(){
+    var bar = document.getElementById('lbTabbar');
+    if(!bar) return;
+    var tabs = bar.querySelectorAll('.lb-tab');
+    function setTab(name){
+      for(var i=0;i<tabs.length;i++) tabs[i].classList.toggle('is-on', tabs[i].getAttribute('data-tab')===name);
+    }
+    bar.addEventListener('click', function(e){
+      var t = e.target.closest('.lb-tab'); if(!t) return;
+      setTab(t.getAttribute('data-tab'));
+    });
+    window.LullabyPhone.setTab = setTab; // optional helper; defaults to Tonight
+  })();
+
+  // initialize without the fade
+  (function init(){
+    var s = STATES.sleep;
+    phone.setAttribute('data-state','sleep');
+    applySky(s); renderCore(s);
+    prog.style.strokeDashoffset = C * (1 - s.progress);
+    titleEl.textContent = s.title; textEl.textContent = s.text; actionTx.textContent = s.action;
+    renderQuick(s); renderTimeline(s);
+    current = 'sleep';
+  })();
+})();
+</script>
+
+</body>
+</html>
