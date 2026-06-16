@@ -3,15 +3,10 @@
  *
  * Order (top → bottom): BabyHeader · OrbHero · QuickLogRow · TimelineCard.
  *
- * Local-only interaction model (no backend, no persistence):
- *  - `localEvents` is the source of truth, a copy of the seed.
- *  - `orbView` is a tiny state machine ('feed' | 'sleep' | 'diaper' | 'calm')
- *    that drives the orb AND the active quick-log tile, so they always agree.
- *  - Quick-log taps append at most one event per kind per ~45s (no spam).
- *  - The orb's primary button performs the contextual action (Wake / End / Done
- *    / Start sleep) and returns to a calm state.
+ * State now lives in the shared LocalEventProvider (so Log sees the same
+ * events); this screen is a pure view over it. The interaction rules still come
+ * from the pure helpers in '@/data/localInteractions'.
  */
-import { useState } from 'react';
 import { View } from 'react-native';
 
 import { BabyHeader } from '@/components/BabyHeader';
@@ -19,30 +14,27 @@ import { OrbHero } from '@/components/OrbHero';
 import { QuickLogRow } from '@/components/QuickLogRow';
 import { Screen } from '@/components/Screen';
 import { TimelineCard } from '@/components/TimelineCard';
-import { getOrbView, type PreviewState } from '@/data/currentState';
-import {
-  cappedTimeline,
-  handlePrimaryAction,
-  handleQuickLog,
-  initTonightState,
-  selectActiveTile,
-  type TonightState,
-} from '@/data/localInteractions';
-import { baby, babyAgeInWeeks, caregivers, events as seedEvents } from '@/data/mock';
+import type { PreviewState } from '@/data/currentState';
+import { baby, babyAgeInWeeks, caregivers } from '@/data/mock';
+import { useLocalEvents } from '@/state/LocalEventProvider';
 
 export default function TonightScreen() {
   const ageWeeks = babyAgeInWeeks(new Date('2026-06-16'));
+  const {
+    orb,
+    activeTile,
+    tonightTimeline,
+    handleFeedTap,
+    handleDiaperTap,
+    handleSleepTap,
+    handlePrimaryAction,
+  } = useLocalEvents();
 
-  // All Tonight interaction state lives in one object, driven by the pure
-  // helpers in '@/data/localInteractions' (no backend, no persistence yet).
-  const [state, setState] = useState<TonightState>(() => initTonightState(seedEvents));
-
-  const orb = getOrbView(state.orbView);
-  const activeTile = selectActiveTile(state);
-  const timeline = cappedTimeline(state);
-
-  const handleSelect = (kind: PreviewState) => setState((prev) => handleQuickLog(prev, kind));
-  const handleAction = () => setState((prev) => handlePrimaryAction(prev));
+  const handleSelect = (kind: PreviewState) => {
+    if (kind === 'feed') handleFeedTap();
+    else if (kind === 'diaper') handleDiaperTap();
+    else handleSleepTap();
+  };
 
   return (
     <Screen>
@@ -59,7 +51,7 @@ export default function TonightScreen() {
           actionLabel={orb.actionLabel}
           progress={orb.progress}
           coreKind={orb.coreKind}
-          onActionPress={handleAction}
+          onActionPress={handlePrimaryAction}
         />
       </View>
 
@@ -68,7 +60,7 @@ export default function TonightScreen() {
       </View>
 
       <View style={{ marginTop: 13 }}>
-        <TimelineCard entries={timeline} />
+        <TimelineCard entries={tonightTimeline} />
       </View>
     </Screen>
   );
