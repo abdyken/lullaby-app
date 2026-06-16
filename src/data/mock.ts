@@ -76,6 +76,70 @@ export function getCaregiver(id: string): Caregiver | undefined {
   return caregivers.find((c) => c.id === id);
 }
 
+/** A display-ready timeline row (decoupled from the raw LogEvent shape so the
+ *  TimelineCard stays dumb). The Log tab will read the same builder later. */
+export type TimelineEntry = {
+  id: string;
+  /** "Now" for a running interval, otherwise a "h:mm" clock label */
+  time: string;
+  kind: LogEvent['type'];
+  /** human label, e.g. "Feed · left, 11m" / "Diaper · wet" / "Sleep running" */
+  label: string;
+  caregiverName: string | null;
+  caregiverColor: string | null;
+};
+
+function clockLabel(iso: string): string {
+  const date = new Date(iso);
+  return `${date.getUTCHours()}:${date.getUTCMinutes().toString().padStart(2, '0')}`;
+}
+
+function intervalMinutes(startAt: string, endAt: string): number {
+  return Math.max(0, Math.round((new Date(endAt).getTime() - new Date(startAt).getTime()) / 60000));
+}
+
+function entryLabel(event: LogEvent): string {
+  switch (event.type) {
+    case 'feed': {
+      const side = event.meta.side === 'L' ? 'left' : event.meta.side === 'R' ? 'right' : null;
+      if (event.endAt) {
+        const mins = intervalMinutes(event.startAt, event.endAt);
+        return side ? `Feed · ${side}, ${mins}m` : `Feed · ${mins}m`;
+      }
+      return 'Feed in progress';
+    }
+    case 'sleep':
+      return event.endAt ? `Sleep · ${intervalMinutes(event.startAt, event.endAt)}m` : 'Sleep running';
+    case 'diaper':
+      return `Diaper · ${event.meta.kind ?? 'change'}`;
+    case 'pump':
+      return event.meta.amountMl ? `Pump · ${event.meta.amountMl} ml` : 'Pump';
+    default:
+      return 'Logged';
+  }
+}
+
+/**
+ * Tonight's events as display-ready rows, newest first. Reads the same in-memory
+ * store as the orb. A running interval (feed/sleep with no endAt) reads "Now".
+ */
+export function getTonightTimeline(): TimelineEntry[] {
+  return [...events]
+    .sort((a, b) => new Date(b.startAt).getTime() - new Date(a.startAt).getTime())
+    .map((event) => {
+      const caregiver = getCaregiver(event.caregiverId);
+      const running = event.endAt === null && (event.type === 'feed' || event.type === 'sleep');
+      return {
+        id: event.id,
+        time: running ? 'Now' : clockLabel(event.startAt),
+        kind: event.type,
+        label: entryLabel(event),
+        caregiverName: caregiver?.displayName ?? null,
+        caregiverColor: caregiver?.colorHex ?? null,
+      };
+    });
+}
+
 /** Age in whole weeks, derived from birthDate against a reference date. */
 export function babyAgeInWeeks(reference: Date): number {
   const born = new Date(baby.birthDate).getTime();

@@ -3,7 +3,7 @@ import { events } from '@/data/mock';
 import type { LogEvent } from '@/data/models';
 import type { AccentState } from '@/theme';
 
-type CurrentBabyState = {
+export type CurrentBabyState = {
   state: AccentState;
   skyTone: OrbSky;
   eyebrow: string;
@@ -14,6 +14,49 @@ type CurrentBabyState = {
   progress: number;
   coreKind?: OrbCoreKind;
 };
+
+/** Quick-log tiles can preview a state without creating any data. These are
+ *  canned snapshots mirroring the mockup's STATES — no persistence, no events. */
+export type PreviewState = 'feed' | 'sleep' | 'diaper';
+
+const PREVIEW_STATES: Record<PreviewState, CurrentBabyState> = {
+  sleep: {
+    state: 'sleep',
+    skyTone: 'night',
+    eyebrow: 'Asleep',
+    timerText: '1h 12m',
+    title: 'Sleep started',
+    description: "Started 4:12 · we'll keep the night quiet",
+    actionLabel: 'Wake baby',
+    progress: 0.36,
+  },
+  feed: {
+    state: 'feed',
+    skyTone: 'day',
+    eyebrow: 'Feeding',
+    timerText: '04m',
+    title: 'Feed started',
+    description: 'Left side · 4 min in',
+    actionLabel: 'End feed',
+    progress: 0.12,
+  },
+  diaper: {
+    state: 'diaper',
+    skyTone: 'day',
+    eyebrow: 'Just logged',
+    timerText: 'Done',
+    title: 'Diaper logged',
+    description: 'Wet · added to tonight',
+    actionLabel: 'Done',
+    progress: 1,
+    coreKind: 'check',
+  },
+};
+
+/** Canned orb snapshot for a previewed quick-log state (no data is written). */
+export function getPreviewBabyState(state: PreviewState): CurrentBabyState {
+  return PREVIEW_STATES[state];
+}
 
 const DEMO_NOW = new Date('2026-06-16T05:24:00.000Z');
 

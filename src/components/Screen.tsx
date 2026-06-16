@@ -17,8 +17,12 @@ type Props = {
 
 export function Screen({ children, scroll = true }: Props) {
   const insets = useSafeAreaInsets();
-  // clear the floating bar: its height + bottom margin + safe-area inset
-  const bottomGap = tabbar.height + Math.max(insets.bottom, tabbar.marginBottom) + 16;
+  // Reserve space for the floating tab bar. Mirror its real footprint exactly:
+  // the bar floats at paddingBottom = max(insets.bottom + 8, marginBottom) and
+  // is `height` tall (see LullabyTabBar). Add a comfortable clearance so the
+  // last card (e.g. TimelineCard) is never tucked under the pill.
+  const barFootprint = tabbar.height + Math.max(insets.bottom + 8, tabbar.marginBottom);
+  const bottomGap = barFootprint + 24;
 
   const padding = {
     paddingTop: insets.top + 8,

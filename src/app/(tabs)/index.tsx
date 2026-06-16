@@ -1,22 +1,37 @@
 /**
  * Tonight — the live night loop home.
  *
- * Phase 2 starts with the product's heart: BabyHeader + OrbHero. Quick logging
- * and the tonight timeline intentionally stay as a small placeholder below.
+ * Order (top → bottom): BabyHeader · OrbHero · QuickLogRow · TimelineCard.
+ * The orb reflects the live mock state; tapping a quick-log tile previews that
+ * state so the orb and the row visually agree. No data is written yet — this is
+ * still UI against the in-memory mock store.
  */
-import { Text, View } from 'react-native';
+import { useState } from 'react';
+import { View } from 'react-native';
 
 import { BabyHeader } from '@/components/BabyHeader';
-import { Card } from '@/components/Card';
 import { OrbHero } from '@/components/OrbHero';
+import { QuickLogRow } from '@/components/QuickLogRow';
 import { Screen } from '@/components/Screen';
-import { getCurrentBabyState } from '@/data/currentState';
-import { baby, babyAgeInWeeks, caregivers } from '@/data/mock';
-import { colors, fonts } from '@/theme';
+import { TimelineCard } from '@/components/TimelineCard';
+import { getCurrentBabyState, getPreviewBabyState, type PreviewState } from '@/data/currentState';
+import { baby, babyAgeInWeeks, caregivers, getTonightTimeline } from '@/data/mock';
+
+function toPreviewState(state: string): PreviewState {
+  return state === 'feed' || state === 'diaper' ? state : 'sleep';
+}
 
 export default function TonightScreen() {
   const ageWeeks = babyAgeInWeeks(new Date('2026-06-16'));
-  const currentState = getCurrentBabyState();
+  const liveState = getCurrentBabyState();
+  const timeline = getTonightTimeline();
+
+  // Local preview only — which quick-log tile is "active" / shown on the orb.
+  const [selected, setSelected] = useState<PreviewState>(toPreviewState(liveState.state));
+
+  // Use the rich live snapshot when the selection matches reality; otherwise a
+  // canned preview for the tapped state.
+  const orb = selected === liveState.state ? liveState : getPreviewBabyState(selected);
 
   return (
     <Screen>
@@ -24,23 +39,25 @@ export default function TonightScreen() {
 
       <View style={{ marginTop: 13 }}>
         <OrbHero
-          state={currentState.state}
-          skyTone={currentState.skyTone}
-          eyebrow={currentState.eyebrow}
-          timerText={currentState.timerText}
-          title={currentState.title}
-          description={currentState.description}
-          actionLabel={currentState.actionLabel}
-          progress={currentState.progress}
-          coreKind={currentState.coreKind}
+          state={orb.state}
+          skyTone={orb.skyTone}
+          eyebrow={orb.eyebrow}
+          timerText={orb.timerText}
+          title={orb.title}
+          description={orb.description}
+          actionLabel={orb.actionLabel}
+          progress={orb.progress}
+          coreKind={orb.coreKind}
         />
       </View>
 
-      <Card style={{ marginTop: 13, paddingVertical: 14 }}>
-        <Text style={{ fontFamily: fonts.body, fontSize: 13, lineHeight: 18, color: colors.inkSoft }}>
-          Quick log and tonight timeline come next.
-        </Text>
-      </Card>
+      <View style={{ marginTop: 13 }}>
+        <QuickLogRow selected={selected} onSelect={setSelected} />
+      </View>
+
+      <View style={{ marginTop: 13 }}>
+        <TimelineCard entries={timeline} />
+      </View>
     </Screen>
   );
 }
