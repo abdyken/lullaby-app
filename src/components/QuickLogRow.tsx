@@ -11,8 +11,8 @@ import { QuickLogButton } from '@/components/QuickLogButton';
 import type { PreviewState } from '@/data/currentState';
 
 type Props = {
-  /** the currently previewed state, so the matching tile reads as active */
-  selected: PreviewState;
+  /** the currently active state, so the matching tile reads as active (null = none) */
+  selected: PreviewState | null;
   onSelect: (state: PreviewState) => void;
 };
 

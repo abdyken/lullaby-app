@@ -2,9 +2,14 @@
  * Tonight — the live night loop home.
  *
  * Order (top → bottom): BabyHeader · OrbHero · QuickLogRow · TimelineCard.
- * The orb reflects the live mock state; tapping a quick-log tile previews that
- * state so the orb and the row visually agree. No data is written yet — this is
- * still UI against the in-memory mock store.
+ *
+ * Local-only interaction model (no backend, no persistence):
+ *  - `localEvents` is the source of truth, a copy of the seed.
+ *  - `orbView` is a tiny state machine ('feed' | 'sleep' | 'diaper' | 'calm')
+ *    that drives the orb AND the active quick-log tile, so they always agree.
+ *  - Quick-log taps append at most one event per kind per ~45s (no spam).
+ *  - The orb's primary button performs the contextual action (Wake / End / Done
+ *    / Start sleep) and returns to a calm state.
  */
 import { useState } from 'react';
 import { View } from 'react-native';
@@ -14,24 +19,30 @@ import { OrbHero } from '@/components/OrbHero';
 import { QuickLogRow } from '@/components/QuickLogRow';
 import { Screen } from '@/components/Screen';
 import { TimelineCard } from '@/components/TimelineCard';
-import { getCurrentBabyState, getPreviewBabyState, type PreviewState } from '@/data/currentState';
-import { baby, babyAgeInWeeks, caregivers, getTonightTimeline } from '@/data/mock';
-
-function toPreviewState(state: string): PreviewState {
-  return state === 'feed' || state === 'diaper' ? state : 'sleep';
-}
+import { getOrbView, type PreviewState } from '@/data/currentState';
+import {
+  cappedTimeline,
+  handlePrimaryAction,
+  handleQuickLog,
+  initTonightState,
+  selectActiveTile,
+  type TonightState,
+} from '@/data/localInteractions';
+import { baby, babyAgeInWeeks, caregivers, events as seedEvents } from '@/data/mock';
 
 export default function TonightScreen() {
   const ageWeeks = babyAgeInWeeks(new Date('2026-06-16'));
-  const liveState = getCurrentBabyState();
-  const timeline = getTonightTimeline();
 
-  // Local preview only — which quick-log tile is "active" / shown on the orb.
-  const [selected, setSelected] = useState<PreviewState>(toPreviewState(liveState.state));
+  // All Tonight interaction state lives in one object, driven by the pure
+  // helpers in '@/data/localInteractions' (no backend, no persistence yet).
+  const [state, setState] = useState<TonightState>(() => initTonightState(seedEvents));
 
-  // Use the rich live snapshot when the selection matches reality; otherwise a
-  // canned preview for the tapped state.
-  const orb = selected === liveState.state ? liveState : getPreviewBabyState(selected);
+  const orb = getOrbView(state.orbView);
+  const activeTile = selectActiveTile(state);
+  const timeline = cappedTimeline(state);
+
+  const handleSelect = (kind: PreviewState) => setState((prev) => handleQuickLog(prev, kind));
+  const handleAction = () => setState((prev) => handlePrimaryAction(prev));
 
   return (
     <Screen>
@@ -48,11 +59,12 @@ export default function TonightScreen() {
           actionLabel={orb.actionLabel}
           progress={orb.progress}
           coreKind={orb.coreKind}
+          onActionPress={handleAction}
         />
       </View>
 
       <View style={{ marginTop: 13 }}>
-        <QuickLogRow selected={selected} onSelect={setSelected} />
+        <QuickLogRow selected={activeTile} onSelect={handleSelect} />
       </View>
 
       <View style={{ marginTop: 13 }}>
