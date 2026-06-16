@@ -7,12 +7,12 @@
  * ink-faint. Deliberately NOT the stock React Native / OS tab bar.
  *
  * Accent follows the active state. For this foundation the accent is derived
- * from the focused tab (Tonight → sleep). Once the Tonight screen drives live
+ * from the focused tab (Tonight -> sleep). Once the Tonight screen drives live
  * state, the active accent can be lifted to follow the baby's real status.
  */
 import { Tabs } from 'expo-router';
 import type { ComponentProps } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TabIcon, type TabName } from '@/components/TabIcon';
@@ -41,6 +41,14 @@ const accent = getAccentForState('sleep');
 
 export function LullabyTabBar({ state, navigation }: LullabyTabBarProps) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+
+  // Compact, clearly-floating pill: capped at 304 (320 read too wide on real
+  // hardware), never below 268, with ~72px of side breathing room on small phones.
+  const pillWidth = Math.max(
+    tabbar.minWidth,
+    Math.min(width - tabbar.sideAllowance, tabbar.maxWidth),
+  );
 
   return (
     <View
@@ -50,26 +58,24 @@ export function LullabyTabBar({ state, navigation }: LullabyTabBarProps) {
         left: 0,
         right: 0,
         bottom: 0,
-        // center the pill horizontally and keep equal 16px side margins
         alignItems: 'center',
-        paddingHorizontal: tabbar.marginX,
-        // float clear of the home indicator / Android gesture bar, but never
-        // flush against it and never too high on devices without an inset
-        paddingBottom: Math.max(insets.bottom, tabbar.marginBottom),
+        // float clear of the Android gesture bar / home indicator, but stay put
+        // (never flush, never too high) on devices without a bottom inset
+        paddingBottom: Math.max(insets.bottom + 8, 18),
       }}>
       <View
         style={{
-          width: '100%',
-          maxWidth: tabbar.maxWidth,
+          width: pillWidth,
           alignSelf: 'center',
           height: tabbar.height,
           flexDirection: 'row',
-          alignItems: 'stretch',
+          alignItems: 'center',
           backgroundColor: tabbar.surface,
           borderRadius: tabbar.radius,
           borderWidth: 1,
           borderColor: tabbar.border,
-          padding: tabbar.padding,
+          paddingHorizontal: tabbar.paddingX,
+          paddingVertical: tabbar.paddingY,
           gap: tabbar.gap,
           shadowColor: tabbar.shadowColor,
           shadowOpacity: tabbar.shadowOpacity,
@@ -95,37 +101,46 @@ export function LullabyTabBar({ state, navigation }: LullabyTabBarProps) {
           };
 
           return (
-            // Plain flex:1 wrapper guarantees each tab takes an equal third of
-            // the pill — a row of flex:1 Views always distributes evenly, with
-            // no dependency on the Pressable resolving its own flex. The chip +
-            // press-scale live on the Pressable, which fills the wrapper, so the
-            // active accent-tint pill stays inside the tab and never shifts layout.
-            <View key={route.key} style={{ flex: 1 }}>
+            // Equal wrapper → each tab owns exactly one third of the pill.
+            <View key={route.key} style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+              {/* Pressable fills the third (full tap target), stays transparent. */}
               <Pressable
                 accessibilityRole="button"
                 accessibilityState={focused ? { selected: true } : {}}
                 accessibilityLabel={label}
                 onPress={onPress}
                 style={({ pressed }) => ({
-                  flex: 1,
+                  width: '100%',
+                  height: tabbar.tabHeight,
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: 4,
-                  borderRadius: tabbar.itemRadius,
-                  backgroundColor: focused ? accent.tint : 'transparent',
+                  borderRadius: tabbar.tabRadius,
                   transform: [{ scale: pressed ? 0.97 : 1 }],
                 })}>
-                <TabIcon name={iconName} color={tint} />
-                <Text
-                  numberOfLines={1}
+                {/* Small centered content group — THIS carries the active tint,
+                    so the chip hugs the icon+label instead of filling the tab. */}
+                <View
                   style={{
-                    fontFamily: fonts.bodyBold,
-                    fontSize: 10.5,
-                    letterSpacing: 0.1,
-                    color: tint,
+                    minWidth: tabbar.chipMinWidth,
+                    height: tabbar.chipHeight,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: tabbar.chipGap,
+                    borderRadius: tabbar.chipRadius,
+                    backgroundColor: focused ? accent.tint : 'transparent',
                   }}>
-                  {label}
-                </Text>
+                  <TabIcon name={iconName} color={tint} size={tabbar.iconSize} />
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      fontFamily: fonts.bodyBold,
+                      fontSize: tabbar.labelSize,
+                      letterSpacing: 0.1,
+                      color: tint,
+                    }}>
+                    {label}
+                  </Text>
+                </View>
               </Pressable>
             </View>
           );
