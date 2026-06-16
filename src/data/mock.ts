@@ -9,7 +9,7 @@
  * "tonight" events (sleep, feed, diaper).
  */
 
-import type { Baby, BabyCaregiver, Caregiver, LogEvent } from './models';
+import type { Baby, BabyCaregiver, Caregiver, LogEvent, LogEventType } from './models';
 
 const BABY_ID = 'baby-mia';
 const MOM_ID = 'cg-mom';
@@ -89,9 +89,21 @@ export type TimelineEntry = {
   caregiverColor: string | null;
 };
 
+/** Show recently-created events as "Now" instead of a clock time. */
+const DISPLAY_NOW_MS = 120_000;
+
 function clockLabel(iso: string): string {
   const date = new Date(iso);
   return `${date.getUTCHours()}:${date.getUTCMinutes().toString().padStart(2, '0')}`;
+}
+
+function minutesToLabel(mins: number): string {
+  if (mins >= 60) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return `${h}h ${m.toString().padStart(2, '0')}m`;
+  }
+  return `${mins}m`;
 }
 
 function intervalMinutes(startAt: string, endAt: string): number {
@@ -103,13 +115,13 @@ function entryLabel(event: LogEvent): string {
     case 'feed': {
       const side = event.meta.side === 'L' ? 'left' : event.meta.side === 'R' ? 'right' : null;
       if (event.endAt) {
-        const mins = intervalMinutes(event.startAt, event.endAt);
-        return side ? `Feed · ${side}, ${mins}m` : `Feed · ${mins}m`;
+        const mins = minutesToLabel(intervalMinutes(event.startAt, event.endAt));
+        return side ? `Feed · ${side}, ${mins}` : `Feed · ${mins}`;
       }
       return 'Feed in progress';
     }
     case 'sleep':
-      return event.endAt ? `Sleep · ${intervalMinutes(event.startAt, event.endAt)}m` : 'Sleep running';
+      return event.endAt ? `Sleep · ${minutesToLabel(intervalMinutes(event.startAt, event.endAt))}` : 'Sleep running';
     case 'diaper':
       return `Diaper · ${event.meta.kind ?? 'change'}`;
     case 'pump':
@@ -120,18 +132,21 @@ function entryLabel(event: LogEvent): string {
 }
 
 /**
- * Tonight's events as display-ready rows, newest first. Reads the same in-memory
- * store as the orb. A running interval (feed/sleep with no endAt) reads "Now".
+ * Tonight's events as display-ready rows, newest first (by when they were
+ * logged). Reads whatever event list it's given (defaults to the seed). A row
+ * reads "Now" if it's a running interval or was logged in the last 2 minutes;
+ * otherwise it shows the clock time it happened.
  */
-export function getTonightTimeline(): TimelineEntry[] {
-  return [...events]
-    .sort((a, b) => new Date(b.startAt).getTime() - new Date(a.startAt).getTime())
+export function getTonightTimeline(eventList: LogEvent[] = events, now: number = Date.now()): TimelineEntry[] {
+  return [...eventList]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .map((event) => {
       const caregiver = getCaregiver(event.caregiverId);
       const running = event.endAt === null && (event.type === 'feed' || event.type === 'sleep');
+      const justLogged = now - new Date(event.createdAt).getTime() < DISPLAY_NOW_MS;
       return {
         id: event.id,
-        time: running ? 'Now' : clockLabel(event.startAt),
+        time: running || justLogged ? 'Now' : clockLabel(event.startAt),
         kind: event.type,
         label: entryLabel(event),
         caregiverName: caregiver?.displayName ?? null,
@@ -150,4 +165,106 @@ export function babyAgeInWeeks(reference: Date): number {
 /** Total events logged "tonight" (the whole seed, for now). */
 export function tonightEventCount(): number {
   return events.length;
+}
+
+/* ------------------------------------------------------------------ *
+ * Local-only event creation (P0 quick-log interaction).
+ *
+ * No persistence and no backend — these just mint LogEvent objects the Tonight
+ * screen keeps in component state. New events use the REAL current time, so
+ * they read "Now" in the timeline (see getTonightTimeline) and feel live,
+ * instead of marching fake clock times forward on every tap.
+ * ------------------------------------------------------------------ */
+
+/** Don't append another event of the same kind within this window (demo-safe). */
+const DUPLICATE_WINDOW_MS = 45_000;
+/** Canned sleep duration finalized on "Wake baby" (matches the orb's 1h 12m). */
+const SLEEP_FINALIZE_MIN = 72;
+
+let localCounter = 0;
+function nextId(type: LogEventType): string {
+  localCounter += 1;
+  return `local-${type}-${localCounter}`;
+}
+
+/** Is a sleep currently running (started, not yet ended)? */
+export function hasRunningSleep(list: LogEvent[]): boolean {
+  return list.some((e) => e.type === 'sleep' && e.endAt === null);
+}
+
+/**
+ * Was an event of this kind logged within the last ~45s? Used to swallow rapid
+ * repeat taps so the timeline doesn't fill with identical rows.
+ */
+export function wasLoggedRecently(
+  list: LogEvent[],
+  kind: LogEventType,
+  now: number = Date.now(),
+): boolean {
+  return list.some((e) => e.type === kind && now - new Date(e.createdAt).getTime() < DUPLICATE_WINDOW_MS);
+}
+
+/** A just-finished 8-minute left-side feed → "Feed · left, 8m". */
+export function createFeedEvent(now: number = Date.now()): LogEvent {
+  const endAt = new Date(now).toISOString();
+  const startAt = new Date(now - 8 * 60_000).toISOString();
+  return {
+    id: nextId('feed'),
+    babyId: baby.id,
+    caregiverId: caregivers[0].id,
+    type: 'feed',
+    startAt,
+    endAt,
+    meta: { side: 'L' },
+    createdAt: endAt,
+  };
+}
+
+/** A running sleep (no endAt) → "Sleep running", shows "Now". */
+export function createSleepEvent(now: number = Date.now()): LogEvent {
+  const startAt = new Date(now).toISOString();
+  return {
+    id: nextId('sleep'),
+    babyId: baby.id,
+    caregiverId: caregivers[0].id,
+    type: 'sleep',
+    startAt,
+    endAt: null,
+    meta: {},
+    createdAt: startAt,
+  };
+}
+
+/** An instant wet diaper → "Diaper · wet". */
+export function createDiaperEvent(now: number = Date.now()): LogEvent {
+  const startAt = new Date(now).toISOString();
+  return {
+    id: nextId('diaper'),
+    babyId: baby.id,
+    caregiverId: caregivers[0].id,
+    type: 'diaper',
+    startAt,
+    endAt: null,
+    meta: { kind: 'wet' },
+    createdAt: startAt,
+  };
+}
+
+/**
+ * Finalize the running sleep ("Wake baby"). Sets endAt so the row stops reading
+ * "Sleep running" and shows a clean "Sleep · 1h 12m". Returns a new list (no
+ * mutation); a no-op if nothing is running.
+ */
+export function endRunningSleep(list: LogEvent[]): LogEvent[] {
+  let ended = false;
+  return list.map((e) => {
+    if (!ended && e.type === 'sleep' && e.endAt === null) {
+      ended = true;
+      return {
+        ...e,
+        endAt: new Date(new Date(e.startAt).getTime() + SLEEP_FINALIZE_MIN * 60_000).toISOString(),
+      };
+    }
+    return e;
+  });
 }

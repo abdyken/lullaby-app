@@ -58,6 +58,25 @@ export function getPreviewBabyState(state: PreviewState): CurrentBabyState {
   return PREVIEW_STATES[state];
 }
 
+/** What the orb is currently showing. "calm" = nothing active (post-action). */
+export type OrbView = PreviewState | 'calm';
+
+const CALM_STATE: CurrentBabyState = {
+  state: 'sleep', // lavender accent — the calmest tone
+  skyTone: 'dusk',
+  eyebrow: 'All quiet',
+  timerText: 'Calm',
+  title: 'All caught up',
+  description: 'Tap a tile to log the next feed, sleep, or change.',
+  actionLabel: 'Start sleep',
+  progress: 0,
+};
+
+/** Canned orb snapshot for the current view (drives OrbHero + active tile). */
+export function getOrbView(view: OrbView): CurrentBabyState {
+  return view === 'calm' ? CALM_STATE : PREVIEW_STATES[view];
+}
+
 const DEMO_NOW = new Date('2026-06-16T05:24:00.000Z');
 
 function byNewestStart(a: LogEvent, b: LogEvent) {
