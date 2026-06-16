@@ -21,6 +21,7 @@ import {
 } from '../src/data/localInteractions';
 import { events as seedEvents } from '../src/data/mock';
 import type { LogEventType } from '../src/data/models';
+import { parsePersistedState, serializeState } from '../src/data/persistedState';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
 const NOW = Date.parse('2026-06-17T00:00:00.000Z');
@@ -113,6 +114,29 @@ check('F. Tonight timeline renders at most 4 rows', () => {
   s = handleDiaperTap(s, NOW + 60_000); // +1 (spaced beyond dedup window)
   assert.ok(s.events.length >= 5, 'state should retain all events');
   assert.equal(cappedTimeline(s, NOW + 60_000).length, 4);
+});
+
+// G. Persistence (de)serialization + validation (pure, no AsyncStorage/RN)
+check('G1. serialize → parse round-trips events + orbView', () => {
+  let s = initTonightState(seedEvents);
+  s = handleFeedTap(s, NOW);
+  const restored = parsePersistedState(serializeState(s));
+  assert.ok(restored, 'round-trip should produce a valid state');
+  assert.equal(restored.orbView, s.orbView);
+  assert.equal(restored.events.length, s.events.length);
+});
+
+check('G2. invalid stored data falls back to null (no crash)', () => {
+  assert.equal(parsePersistedState(null), null); // nothing saved
+  assert.equal(parsePersistedState('not json {'), null); // unparseable
+  assert.equal(parsePersistedState('42'), null); // not an object
+  assert.equal(parsePersistedState('{"events":"nope","orbView":"calm"}'), null); // events not array
+  assert.equal(parsePersistedState('{"events":[],"orbView":"banana"}'), null); // unknown orbView
+});
+
+check('G3. an empty event list with a known orbView is valid', () => {
+  const restored = parsePersistedState('{"events":[],"orbView":"calm"}');
+  assert.ok(restored && restored.events.length === 0 && restored.orbView === 'calm');
 });
 
 console.log(`\nAll ${passed} checks passed ✅`);
