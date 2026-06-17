@@ -17,11 +17,13 @@ type Props = {
 // time(34) + gap(12) + dot center(14) → connector sits under the dot column
 const CONNECTOR_LEFT = 34 + 12 + 13;
 
+// note reuses the calm sleep tones (no new colors); not surfaced in the UI yet.
 const KIND_TINT: Record<TimelineEntry['kind'], string> = {
   feed: colors.feedTint,
   sleep: colors.sleepTint,
   diaper: colors.diaperTint,
   pump: colors.sleepTint,
+  note: colors.sleepTint,
 };
 
 const KIND_COLOR: Record<TimelineEntry['kind'], string> = {
@@ -29,6 +31,7 @@ const KIND_COLOR: Record<TimelineEntry['kind'], string> = {
   sleep: colors.sleep,
   diaper: colors.diaper,
   pump: colors.sleep,
+  note: colors.sleep,
 };
 
 function DotIcon({ kind, color }: { kind: TimelineEntry['kind']; color: string }) {

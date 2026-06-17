@@ -11,14 +11,17 @@
 import assert from 'node:assert/strict';
 
 import {
+  addNote,
   cappedTimeline,
   handleDiaperTap,
   handleFeedTap,
   handlePrimaryAction,
   handleSleepTap,
   initTonightState,
+  undoLastEvent,
   type TonightState,
 } from '../src/data/localInteractions';
+import { calmDescription, deriveNightStatus, getOrbView } from '../src/data/currentState';
 import { events as seedEvents } from '../src/data/mock';
 import type { LogEventType } from '../src/data/models';
 import { parsePersistedState, serializeState } from '../src/data/persistedState';
@@ -137,6 +140,114 @@ check('G2. invalid stored data falls back to null (no crash)', () => {
 check('G3. an empty event list with a known orbView is valid', () => {
   const restored = parsePersistedState('{"events":[],"orbView":"calm"}');
   assert.ok(restored && restored.events.length === 0 && restored.orbView === 'calm');
+});
+
+// H. Note events
+check('H1. addNote appends one note and leaves the orb view unchanged', () => {
+  let s = initTonightState(seedEvents);
+  const before = countKind(s, 'note');
+  s = addNote(s, { label: 'Fussy' }, NOW);
+  assert.equal(countKind(s, 'note'), before + 1);
+  assert.equal(s.orbView, 'sleep'); // seed has a running sleep → orb stays put
+  const note = s.events.find((e) => e.type === 'note');
+  assert.ok(note && note.meta.label === 'Fussy' && note.endAt === null);
+});
+
+check('H2. notes are not deduped (two explicit notes both land)', () => {
+  let s = initTonightState(seedEvents);
+  s = addNote(s, { note: 'cried briefly' }, NOW);
+  s = addNote(s, { note: 'settled again' }, NOW + 1_000);
+  assert.equal(countKind(s, 'note'), 2);
+});
+
+// I. Undo last event
+check('I1. undo removes the most recently created event (the running sleep)', () => {
+  let s = initTonightState(seedEvents);
+  assert.equal(countRunningSleep(s), 1);
+  s = undoLastEvent(s); // newest createdAt in the seed is the running sleep
+  assert.equal(countRunningSleep(s), 0);
+  assert.equal(s.orbView, 'calm'); // reconciled: no sleep running → calm
+});
+
+check('I2. undo removes a just-added note and restores the prior orb view', () => {
+  let s = initTonightState(seedEvents);
+  const noteCount = countKind(s, 'note');
+  s = addNote(s, { label: 'Settled' }, NOW);
+  s = undoLastEvent(s);
+  assert.equal(countKind(s, 'note'), noteCount);
+  assert.equal(s.orbView, 'sleep'); // sleep still running → back to sleep
+});
+
+check('I3. undo on an empty event list is a no-op', () => {
+  const empty = initTonightState([]);
+  const after = undoLastEvent(empty);
+  assert.equal(after.events.length, 0);
+  assert.equal(after.orbView, 'calm');
+});
+
+// J. Persistence round-trip including a note event
+check('J1. serialize → parse round-trips a note event', () => {
+  let s = initTonightState(seedEvents);
+  s = addNote(s, { label: 'Fussy', note: 'hard to settle' }, NOW);
+  const restored = parsePersistedState(serializeState(s));
+  assert.ok(restored, 'round-trip should produce a valid state');
+  const note = restored.events.find((e) => e.type === 'note');
+  assert.ok(note && note.meta.label === 'Fussy' && note.meta.note === 'hard to settle');
+});
+
+check('J2. a stored note event passes validation', () => {
+  const raw = JSON.stringify({
+    events: [
+      {
+        id: 'n1',
+        babyId: 'baby-mia',
+        caregiverId: 'cg-mom',
+        type: 'note',
+        startAt: '2026-06-17T00:00:00.000Z',
+        endAt: null,
+        meta: { label: 'Cried' },
+        createdAt: '2026-06-17T00:00:00.000Z',
+      },
+    ],
+    orbView: 'calm',
+  });
+  const restored = parsePersistedState(raw);
+  assert.ok(restored && restored.events.length === 1 && restored.events[0].type === 'note');
+});
+
+// K. Derived current-night status from live events
+check('K1. derived status reports sleeping with last feed/diaper from the seed', () => {
+  const status = deriveNightStatus(seedEvents, NOW);
+  assert.equal(status.babyStatus, 'sleeping');
+  assert.ok(typeof status.sleepingForMin === 'number' && status.sleepingForMin > 0);
+  assert.ok(typeof status.lastFeedAgoMin === 'number');
+  assert.ok(typeof status.lastDiaperAgoMin === 'number');
+});
+
+check('K2. after Wake baby the derived status reports awake', () => {
+  let s = initTonightState(seedEvents);
+  s = handlePrimaryAction(s, NOW); // Wake baby ends the running sleep
+  const status = deriveNightStatus(s.events, NOW);
+  assert.equal(status.babyStatus, 'awake');
+  assert.equal(status.sleepingForMin, undefined);
+});
+
+check('K3. the calm orb uses real "last feed/diaper" copy when events exist', () => {
+  const desc = getOrbView('calm', seedEvents, NOW).description;
+  assert.ok(desc.includes('Last feed') && desc.includes('Last diaper'));
+});
+
+check('K4. the sleep orb shows the running sleep’s real duration (not a canned value)', () => {
+  const orb = getOrbView('sleep', seedEvents, NOW);
+  assert.notEqual(orb.timerText, '1h 12m'); // canned preview value
+  assert.match(orb.timerText, /\d+h \d{2}m|\d+m/);
+  assert.ok(orb.description.startsWith('Started '));
+});
+
+check('K5. with no events the calm orb keeps its canned copy', () => {
+  assert.equal(calmDescription(deriveNightStatus([], NOW)), null);
+  const desc = getOrbView('calm', [], NOW).description;
+  assert.ok(!desc.includes('Last feed'));
 });
 
 console.log(`\nAll ${passed} checks passed ✅`);

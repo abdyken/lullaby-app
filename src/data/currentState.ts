@@ -72,9 +72,44 @@ const CALM_STATE: CurrentBabyState = {
   progress: 0,
 };
 
-/** Canned orb snapshot for the current view (drives OrbHero + active tile). */
-export function getOrbView(view: OrbView): CurrentBabyState {
-  return view === 'calm' ? CALM_STATE : PREVIEW_STATES[view];
+/**
+ * Orb snapshot for the current view (drives OrbHero + active tile).
+ *
+ * Structure/visuals are unchanged from the canned states; when live `events` are
+ * supplied we fill the EXISTING fields with real values so the orb tells the
+ * truth instead of fixed numbers:
+ *  - sleep: the running sleep's real duration / start time / progress
+ *  - calm:  a derived "Last feed … · Last diaper …" line (when anything is logged)
+ * feed/diaper stay as momentary confirmation previews.
+ */
+export function getOrbView(
+  view: OrbView,
+  eventList: LogEvent[] = [],
+  now: number = Date.now(),
+): CurrentBabyState {
+  if (view === 'calm') {
+    const description = calmDescription(deriveNightStatus(eventList, now));
+    return description ? { ...CALM_STATE, description } : CALM_STATE;
+  }
+
+  const base = PREVIEW_STATES[view];
+
+  if (view === 'sleep') {
+    const reference = new Date(now);
+    const runningSleep = eventList
+      .filter((event) => event.type === 'sleep' && event.endAt === null)
+      .sort(byNewestStart)[0];
+    if (runningSleep) {
+      return {
+        ...base,
+        timerText: durationLabel(runningSleep.startAt, reference),
+        description: `Started ${timeLabel(runningSleep.startAt)} · we'll keep the night quiet`,
+        progress: elapsedProgress(runningSleep.startAt, reference, 200),
+      };
+    }
+  }
+
+  return base;
 }
 
 const DEMO_NOW = new Date('2026-06-16T05:24:00.000Z');
@@ -105,8 +140,11 @@ function elapsedProgress(startAt: string, reference: Date, fullScaleMinutes: num
   return Math.min(1, elapsedMinutes / fullScaleMinutes);
 }
 
-export function getCurrentBabyState(reference: Date = DEMO_NOW): CurrentBabyState {
-  const activeSleep = events
+export function getCurrentBabyState(
+  eventList: LogEvent[] = events,
+  reference: Date = DEMO_NOW,
+): CurrentBabyState {
+  const activeSleep = eventList
     .filter((event) => event.type === 'sleep' && event.endAt === null)
     .sort(byNewestStart)[0];
 
@@ -123,7 +161,7 @@ export function getCurrentBabyState(reference: Date = DEMO_NOW): CurrentBabyStat
     };
   }
 
-  const activeFeed = events
+  const activeFeed = eventList
     .filter((event) => event.type === 'feed' && event.endAt === null)
     .sort(byNewestStart)[0];
 
@@ -140,7 +178,7 @@ export function getCurrentBabyState(reference: Date = DEMO_NOW): CurrentBabyStat
     };
   }
 
-  const latestDiaper = events.filter((event) => event.type === 'diaper').sort(byNewestStart)[0];
+  const latestDiaper = eventList.filter((event) => event.type === 'diaper').sort(byNewestStart)[0];
   const latestDiaperAgeMinutes = latestDiaper
     ? (reference.getTime() - new Date(latestDiaper.startAt).getTime()) / 60000
     : Infinity;
@@ -169,4 +207,75 @@ export function getCurrentBabyState(reference: Date = DEMO_NOW): CurrentBabyStat
     actionLabel: 'Start sleep',
     progress: 0.08,
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * Derived current-night status (Phase 1).
+ *
+ * A pure, structured summary computed from the LIVE event list — no canned
+ * values, no React, no side effects. Tonight uses this to fill the orb's
+ * existing fields with real numbers; later phases can render it directly.
+ * ------------------------------------------------------------------ */
+
+export type NightStatus = {
+  /** sleeping while a sleep interval is running, otherwise awake */
+  babyStatus: 'awake' | 'sleeping';
+  /** minutes the current running sleep has lasted (only when sleeping) */
+  sleepingForMin?: number;
+  /** ISO start of the current running sleep (only when sleeping) */
+  sleepStartedAt?: string;
+  /** minutes since the most recent feed was logged, if any */
+  lastFeedAgoMin?: number;
+  /** minutes since the most recent diaper was logged, if any */
+  lastDiaperAgoMin?: number;
+};
+
+function minutesSince(iso: string, now: number): number {
+  return Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60000));
+}
+
+function newestByCreatedAt(eventList: LogEvent[], type: LogEvent['type']): LogEvent | undefined {
+  return eventList
+    .filter((event) => event.type === type)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+}
+
+/** Real current-night status derived from live events (Phase 1). */
+export function deriveNightStatus(eventList: LogEvent[], now: number = Date.now()): NightStatus {
+  const runningSleep = eventList
+    .filter((event) => event.type === 'sleep' && event.endAt === null)
+    .sort(byNewestStart)[0];
+
+  const lastFeed = newestByCreatedAt(eventList, 'feed');
+  const lastDiaper = newestByCreatedAt(eventList, 'diaper');
+
+  return {
+    babyStatus: runningSleep ? 'sleeping' : 'awake',
+    sleepingForMin: runningSleep ? minutesSince(runningSleep.startAt, now) : undefined,
+    sleepStartedAt: runningSleep?.startAt,
+    lastFeedAgoMin: lastFeed ? minutesSince(lastFeed.createdAt, now) : undefined,
+    lastDiaperAgoMin: lastDiaper ? minutesSince(lastDiaper.createdAt, now) : undefined,
+  };
+}
+
+/** "h:mm ago" / "m ago" for an elapsed minute count. */
+function agoLabel(mins: number): string {
+  if (mins >= 60) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return `${h}h ${m.toString().padStart(2, '0')}m ago`;
+  }
+  return `${mins}m ago`;
+}
+
+/**
+ * A calm one-line status for the orb's calm state, e.g.
+ * "Last feed 2h 45m ago · Last diaper 1h 10m ago". Returns null when nothing is
+ * logged yet so the caller keeps the canned "Tap a tile…" copy.
+ */
+export function calmDescription(status: NightStatus): string | null {
+  const parts: string[] = [];
+  if (status.lastFeedAgoMin != null) parts.push(`Last feed ${agoLabel(status.lastFeedAgoMin)}`);
+  if (status.lastDiaperAgoMin != null) parts.push(`Last diaper ${agoLabel(status.lastDiaperAgoMin)}`);
+  return parts.length > 0 ? parts.join(' · ') : null;
 }

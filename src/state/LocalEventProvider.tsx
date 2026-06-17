@@ -97,7 +97,10 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
     () => ({
       events: state.events,
       orbView: state.orbView,
-      orb: getOrbView(state.orbView),
+      // Fill the orb's existing fields with real values from the live events
+      // (running-sleep duration / start, calm "last feed · last diaper" line).
+      // `now` defaults inside getOrbView (same pattern as cappedTimeline below).
+      orb: getOrbView(state.orbView, state.events),
       activeTile: selectActiveTile(state),
       tonightTimeline: cappedTimeline(state),
       fullTimeline: getTonightTimeline(state.events),
