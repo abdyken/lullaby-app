@@ -45,10 +45,32 @@ export function serializeState(state: TonightState): string {
   return JSON.stringify({ events: state.events, orbView: state.orbView });
 }
 
+function repairDuplicateEventIds(events: LogEvent[]): LogEvent[] {
+  const seen = new Set<string>();
+  return events.map((event, index) => {
+    if (!seen.has(event.id)) {
+      seen.add(event.id);
+      return event;
+    }
+
+    let repairedId = `${event.id}-dup-${index}`;
+    let suffix = index;
+    while (seen.has(repairedId)) {
+      suffix += 1;
+      repairedId = `${event.id}-dup-${suffix}`;
+    }
+
+    seen.add(repairedId);
+    return { ...event, id: repairedId };
+  });
+}
+
 /**
  * Parse + validate a stored string into a TonightState. Returns null for
  * anything we don't fully trust (not JSON, not an object, bad events array, or
  * an unknown orbView) so the caller can fall back to the seed without crashing.
+ * Duplicate event ids from older local-counter builds are repaired on load so
+ * React list keys stay unique after app reloads.
  */
 export function parsePersistedState(raw: string | null | undefined): TonightState | null {
   if (!raw) return null;
@@ -66,5 +88,5 @@ export function parsePersistedState(raw: string | null | undefined): TonightStat
   if (!Array.isArray(obj.events) || !obj.events.every(isLogEvent)) return null;
   if (!isOrbView(obj.orbView)) return null;
 
-  return { events: obj.events as LogEvent[], orbView: obj.orbView };
+  return { events: repairDuplicateEventIds(obj.events as LogEvent[]), orbView: obj.orbView };
 }

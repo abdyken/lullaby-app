@@ -2,9 +2,15 @@
  * Reassure — the calm "is this normal?" surface (§4, §8).
  *
  * P0 is five static safe cards: bundled local content only. No AI, no
- * diagnosis, no symptom checking, no logged-data coupling, no backend. Cards are
- * visually pressable (a no-op for now) so the detail view can slot in later
- * without a redesign. A quiet, persistent disclaimer sits at the bottom.
+ * diagnosis, no symptom checking, no backend. Cards are visually pressable (a
+ * no-op for now) so the detail view can slot in later without a redesign. A
+ * quiet, persistent disclaimer sits at the bottom.
+ *
+ * Above the cards sits a quiet morning recap (Phase 6) built from the SAME
+ * local events as Tonight/Log (via useLocalEvents). It only counts what the
+ * parent logged — no diagnosis, no prediction, no "normal/abnormal", no health
+ * claims — and carries its own calm safety line. The five static cards and the
+ * top safety note / bottom disclaimer are unchanged.
  *
  * Tone per §8: warm, honest, short. Never alarmist, never clinical-cold.
  * Clinical sign-off is still required before any public launch.
@@ -13,6 +19,8 @@ import { Pressable, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { Screen } from '@/components/Screen';
+import { buildNightRecap, recapSummaryLine } from '@/data/currentState';
+import { useLocalEvents } from '@/state/LocalEventProvider';
 import { colors, fonts, radii, shadows } from '@/theme';
 
 /** Calm pastel tones for the chips. Lavender stays the section tone; Safety
@@ -151,6 +159,67 @@ function ReassureRow({ card }: { card: ReassureCard }) {
   );
 }
 
+/**
+ * A quiet morning recap built from the local events. Not a dashboard: one calm
+ * line of counts (or a calm empty state) plus a non-medical safety line. Reads
+ * the live store so it always reflects what the parent actually logged.
+ */
+function NightRecapCard() {
+  const { events } = useLocalEvents();
+  const recap = buildNightRecap(events);
+  const summary = recapSummaryLine(recap);
+
+  return (
+    <View
+      style={{
+        backgroundColor: colors.surface,
+        borderRadius: radii.medium,
+        paddingVertical: 16,
+        paddingHorizontal: 16,
+        marginTop: 16,
+        ...shadows.card,
+      }}>
+      <Text
+        style={{
+          fontFamily: fonts.bodyBold,
+          fontSize: 9.5,
+          letterSpacing: 0.8,
+          textTransform: 'uppercase',
+          color: colors.inkFaint,
+        }}>
+        Based on saved logs
+      </Text>
+      <Text style={{ fontFamily: fonts.display, fontSize: 17, color: colors.ink, marginTop: 4 }}>
+        Here’s what you logged
+      </Text>
+
+      <Text
+        style={{
+          fontFamily: fonts.body,
+          fontSize: 13.5,
+          lineHeight: 20,
+          color: summary ? colors.inkSoft : colors.inkFaint,
+          marginTop: 8,
+        }}>
+        {summary ??
+          'No logs yet tonight. Your recap will appear here after you save a feed, diaper, sleep, or note.'}
+      </Text>
+
+      <Text
+        style={{
+          fontFamily: fonts.body,
+          fontSize: 12,
+          lineHeight: 18,
+          color: colors.inkFaint,
+          marginTop: 10,
+        }}>
+        Newborn nights can vary. If something feels unusual, urgent, or worrying, contact your
+        pediatrician or local emergency care.
+      </Text>
+    </View>
+  );
+}
+
 export default function ReassureScreen() {
   return (
     <Screen>
@@ -178,6 +247,10 @@ export default function ReassureScreen() {
           local emergency number.
         </Text>
       </View>
+
+      {/* Quiet morning recap from the local events (Phase 6) — sits above the
+          static cards, never replaces them. */}
+      <NightRecapCard />
 
       <View style={{ gap: 11, marginTop: 16 }}>
         {CARDS.map((card) => (

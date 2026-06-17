@@ -318,3 +318,93 @@ export function calmDescription(status: NightStatus): string | null {
   if (status.lastDiaperAgoMin != null) parts.push(`Last diaper ${agoLabel(status.lastDiaperAgoMin)}`);
   return parts.length > 0 ? parts.join(' · ') : null;
 }
+
+/* ------------------------------------------------------------------ *
+ * Night recap (Phase 6) — a calm, NON-medical summary of what was logged,
+ * read by the Reassure morning recap. Pure: events → counts + longest
+ * COMPLETED sleep stretch. Deliberately not a dashboard and not a judgement:
+ * no scoring, no prediction, no "normal/abnormal", no health claims. It only
+ * counts what the parent already chose to log.
+ * ------------------------------------------------------------------ */
+
+export type NightRecap = {
+  feedCount: number;
+  diaperCount: number;
+  noteCount: number;
+  /** minutes of the longest COMPLETED sleep stretch, if any has finished */
+  longestSleepMin?: number;
+  /** a sleep interval is currently running (started, not yet ended) */
+  sleepRunning: boolean;
+  /** true when nothing at all has been logged */
+  isEmpty: boolean;
+};
+
+/** Tally the local events into a calm recap. UI-free and side-effect-free. */
+export function buildNightRecap(eventList: LogEvent[]): NightRecap {
+  let feedCount = 0;
+  let diaperCount = 0;
+  let noteCount = 0;
+  let longestSleepMin: number | undefined;
+  let sleepRunning = false;
+
+  for (const event of eventList) {
+    switch (event.type) {
+      case 'feed':
+        feedCount += 1;
+        break;
+      case 'diaper':
+        diaperCount += 1;
+        break;
+      case 'note':
+        noteCount += 1;
+        break;
+      case 'sleep':
+        if (event.endAt === null) {
+          sleepRunning = true;
+        } else {
+          const mins = Math.max(
+            0,
+            Math.round((new Date(event.endAt).getTime() - new Date(event.startAt).getTime()) / 60000),
+          );
+          if (longestSleepMin == null || mins > longestSleepMin) longestSleepMin = mins;
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  return { feedCount, diaperCount, noteCount, longestSleepMin, sleepRunning, isEmpty: eventList.length === 0 };
+}
+
+/** "1h 12m" / "45m" for a minute count — the recap's compact duration form. */
+function durationWords(mins: number): string {
+  if (mins >= 60) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return `${h}h ${m.toString().padStart(2, '0')}m`;
+  }
+  return `${mins}m`;
+}
+
+/**
+ * The single calm recap line, e.g. "3 feeds · 2 diaper changes · longest sleep
+ * 1h 12m". Counts are omitted when zero; the longest COMPLETED sleep is shown
+ * when one exists, otherwise a running sleep reads "sleep currently running".
+ * Returns null when nothing countable was logged so the caller can show its
+ * calm empty copy. Non-medical by construction — counts only, no judgement.
+ */
+export function recapSummaryLine(recap: NightRecap): string | null {
+  const parts: string[] = [];
+  if (recap.feedCount > 0) parts.push(`${recap.feedCount} feed${recap.feedCount === 1 ? '' : 's'}`);
+  if (recap.diaperCount > 0) {
+    parts.push(`${recap.diaperCount} diaper change${recap.diaperCount === 1 ? '' : 's'}`);
+  }
+  if (recap.noteCount > 0) parts.push(`${recap.noteCount} note${recap.noteCount === 1 ? '' : 's'}`);
+  if (recap.longestSleepMin != null) {
+    parts.push(`longest sleep ${durationWords(recap.longestSleepMin)}`);
+  } else if (recap.sleepRunning) {
+    parts.push('sleep currently running');
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
