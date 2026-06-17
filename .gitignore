@@ -52,3 +52,4 @@ example
 .env
 .env.*
 !.env.example
+.gstack/
