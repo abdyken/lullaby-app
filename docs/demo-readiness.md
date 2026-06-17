@@ -105,3 +105,17 @@ confirms the module graph (including AsyncStorage) resolves.
 - **Clinical sign-off is required before any public launch** — every Reassure
   card must be reviewed by a qualified provider first (hard ship-blocker).
 - The baby (Mia) and caregivers are seeded sample data.
+
+---
+
+## G. Resetting between runs (dev/demo only)
+
+A low-emphasis **Reset demo night** control sits at the bottom of the **Log**
+tab. Tapping it calls `resetLocalEvents()` — it clears the persisted local
+events from AsyncStorage, restores the seeded night, and dismisses any active
+toast, so Tonight / Log / the Reassure recap all return to the clean seeded
+state (and stay seeded after a reload).
+
+- **Prototype-only.** It is gated behind React Native's `__DEV__` flag, so it is
+  stripped from production/release bundles and never shown to real users.
+- Use it to get a clean slate right before a manual QA pass or a live demo.

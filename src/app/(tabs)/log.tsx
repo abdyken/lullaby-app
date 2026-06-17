@@ -162,7 +162,7 @@ function EmptyState({ filter }: { filter: Filter }) {
 }
 
 export default function LogScreen() {
-  const { events, fullTimeline } = useLocalEvents();
+  const { events, fullTimeline, resetLocalEvents } = useLocalEvents();
   const [filter, setFilter] = useState<Filter>('all');
   // Stamp "now" once (for Today/Yesterday headings) so render stays pure.
   const [now] = useState(() => Date.now());
@@ -225,6 +225,36 @@ export default function LogScreen() {
         <View style={{ marginTop: 22 }}>
           <EmptyState filter={filter} />
         </View>
+      )}
+
+      {/* Dev/demo-only: quietly return the local store to its seeded state before
+          QA or a demo. Gated by __DEV__ so it is stripped from production bundles.
+          resetLocalEvents() clears AsyncStorage, restores the seed, and dismisses
+          any active toast. Prototype-only — see docs/demo-readiness.md. */}
+      {__DEV__ && (
+        <Pressable
+          onPress={resetLocalEvents}
+          accessibilityRole="button"
+          accessibilityLabel="Reset demo night"
+          hitSlop={8}
+          style={({ pressed }) => ({
+            marginTop: 28,
+            alignSelf: 'center',
+            paddingVertical: 8,
+            paddingHorizontal: 14,
+            borderRadius: radii.pill,
+            opacity: pressed ? 0.45 : 1,
+          })}>
+          <Text
+            style={{
+              fontFamily: fonts.body,
+              fontSize: 12,
+              letterSpacing: 0.3,
+              color: colors.inkFaint,
+            }}>
+            Reset demo night
+          </Text>
+        </Pressable>
       )}
     </Screen>
   );
