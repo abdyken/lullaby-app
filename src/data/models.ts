@@ -9,8 +9,8 @@
 
 export type CaregiverRole = 'mom' | 'dad' | 'other';
 
-/** type: feed | sleep are intervals (startAt + endAt); diaper is instant. */
-export type LogEventType = 'feed' | 'sleep' | 'diaper' | 'pump';
+/** type: feed | sleep are intervals (startAt + endAt); diaper and note are instant. */
+export type LogEventType = 'feed' | 'sleep' | 'diaper' | 'pump' | 'note';
 
 export interface Baby {
   id: string;
@@ -37,11 +37,17 @@ export interface BabyCaregiver {
   role: CaregiverRole;
 }
 
-/** Per-type extra detail. feed: side; diaper: kind; pump: amount. */
+/** Per-type extra detail. feed: side/duration/amount; diaper: kind; pump: amount; note: label/note. */
 export interface LogEventMeta {
   side?: 'L' | 'R';
   kind?: 'wet' | 'dirty' | 'both';
   amountMl?: number;
+  /** nursing duration in minutes (optional, from the feed detail flow) */
+  durationMin?: number;
+  /** preset note chip, e.g. "Fussy" | "Cried" | "Settled" */
+  label?: string;
+  /** free-text note */
+  note?: string;
 }
 
 export interface LogEvent {

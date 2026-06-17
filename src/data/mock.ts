@@ -126,6 +126,10 @@ function entryLabel(event: LogEvent): string {
       return `Diaper · ${event.meta.kind ?? 'change'}`;
     case 'pump':
       return event.meta.amountMl ? `Pump · ${event.meta.amountMl} ml` : 'Pump';
+    case 'note': {
+      const text = event.meta.label ?? event.meta.note;
+      return text ? `Note · ${text}` : 'Note';
+    }
     default:
       return 'Logged';
   }
@@ -204,10 +208,23 @@ export function wasLoggedRecently(
   return list.some((e) => e.type === kind && now - new Date(e.createdAt).getTime() < DUPLICATE_WINDOW_MS);
 }
 
-/** A just-finished 8-minute left-side feed → "Feed · left, 8m". */
-export function createFeedEvent(now: number = Date.now()): LogEvent {
+/** Optional detail for a feed (from a later detail/sheet flow). */
+export type FeedDetails = { side?: 'L' | 'R'; durationMin?: number; amountMl?: number };
+
+/**
+ * A just-finished feed. With no details it defaults to an 8-minute left-side
+ * feed → "Feed · left, 8m" (preserves the zero-arg quick-log behavior). When
+ * details are supplied, only the provided fields are recorded.
+ */
+export function createFeedEvent(now: number = Date.now(), details?: FeedDetails): LogEvent {
+  const d = details ?? { side: 'L' };
+  const durationMin = d.durationMin ?? 8;
   const endAt = new Date(now).toISOString();
-  const startAt = new Date(now - 8 * 60_000).toISOString();
+  const startAt = new Date(now - durationMin * 60_000).toISOString();
+  const meta: LogEvent['meta'] = {};
+  if (d.side) meta.side = d.side;
+  if (d.durationMin != null) meta.durationMin = d.durationMin;
+  if (d.amountMl != null) meta.amountMl = d.amountMl;
   return {
     id: nextId('feed'),
     babyId: baby.id,
@@ -215,7 +232,7 @@ export function createFeedEvent(now: number = Date.now()): LogEvent {
     type: 'feed',
     startAt,
     endAt,
-    meta: { side: 'L' },
+    meta,
     createdAt: endAt,
   };
 }
@@ -235,9 +252,14 @@ export function createSleepEvent(now: number = Date.now()): LogEvent {
   };
 }
 
-/** An instant wet diaper → "Diaper · wet". */
-export function createDiaperEvent(now: number = Date.now()): LogEvent {
+/** Optional detail for a diaper (from a later detail/sheet flow). */
+export type DiaperDetails = { kind?: 'wet' | 'dirty' | 'both'; note?: string };
+
+/** An instant diaper → "Diaper · wet" by default; kind/note overridable. */
+export function createDiaperEvent(now: number = Date.now(), details?: DiaperDetails): LogEvent {
   const startAt = new Date(now).toISOString();
+  const meta: LogEvent['meta'] = { kind: details?.kind ?? 'wet' };
+  if (details?.note) meta.note = details.note;
   return {
     id: nextId('diaper'),
     babyId: baby.id,
@@ -245,7 +267,28 @@ export function createDiaperEvent(now: number = Date.now()): LogEvent {
     type: 'diaper',
     startAt,
     endAt: null,
-    meta: { kind: 'wet' },
+    meta,
+    createdAt: startAt,
+  };
+}
+
+/** Optional detail for a note. */
+export type NoteDetails = { label?: string; note?: string };
+
+/** An instant note → "Note · Fussy" / "Note · <text>" / "Note". */
+export function createNoteEvent(now: number = Date.now(), details?: NoteDetails): LogEvent {
+  const startAt = new Date(now).toISOString();
+  const meta: LogEvent['meta'] = {};
+  if (details?.label) meta.label = details.label;
+  if (details?.note) meta.note = details.note;
+  return {
+    id: nextId('note'),
+    babyId: baby.id,
+    caregiverId: caregivers[0].id,
+    type: 'note',
+    startAt,
+    endAt: null,
+    meta,
     createdAt: startAt,
   };
 }

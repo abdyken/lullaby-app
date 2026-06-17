@@ -16,7 +16,7 @@ import type { LogEvent, LogEventType } from './models';
 export const STORAGE_KEY = 'lullaby/local-events/v1';
 
 const ORB_VIEWS: readonly OrbView[] = ['calm', 'feed', 'sleep', 'diaper'];
-const EVENT_TYPES: readonly LogEventType[] = ['feed', 'sleep', 'diaper', 'pump'];
+const EVENT_TYPES: readonly LogEventType[] = ['feed', 'sleep', 'diaper', 'pump', 'note'];
 
 function isOrbView(value: unknown): value is OrbView {
   return typeof value === 'string' && (ORB_VIEWS as readonly string[]).includes(value);

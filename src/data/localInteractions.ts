@@ -12,11 +12,13 @@
 import {
   createDiaperEvent,
   createFeedEvent,
+  createNoteEvent,
   createSleepEvent,
   endRunningSleep,
   getTonightTimeline,
   hasRunningSleep,
   wasLoggedRecently,
+  type NoteDetails,
   type TimelineEntry,
 } from './mock';
 import type { OrbView, PreviewState } from './currentState';
@@ -96,6 +98,42 @@ export function handlePrimaryAction(state: TonightState, now: number = Date.now(
         orbView: 'sleep',
       };
   }
+}
+
+/**
+ * Append a note event. Notes are an instant side-log: they never change the
+ * orb/active tile, and (unlike feed/diaper) there is no dedup window because a
+ * note is always an explicit, intentional entry.
+ */
+export function addNote(
+  state: TonightState,
+  details?: NoteDetails,
+  now: number = Date.now(),
+): TonightState {
+  return { events: [createNoteEvent(now, details), ...state.events], orbView: state.orbView };
+}
+
+/**
+ * Remove the most recently created event (by createdAt — robust to the mixed
+ * ordering of the seed vs. prepended quick-logs). After removing, the orb view
+ * is reconciled: still sleeping if a sleep is running, otherwise calm. A no-op
+ * on an empty list.
+ */
+export function undoLastEvent(state: TonightState): TonightState {
+  if (state.events.length === 0) return state;
+
+  let newestIndex = 0;
+  for (let i = 1; i < state.events.length; i += 1) {
+    if (
+      new Date(state.events[i].createdAt).getTime() >
+      new Date(state.events[newestIndex].createdAt).getTime()
+    ) {
+      newestIndex = i;
+    }
+  }
+
+  const events = state.events.filter((_, index) => index !== newestIndex);
+  return { events, orbView: hasRunningSleep(events) ? 'sleep' : 'calm' };
 }
 
 /** Which quick-log tile is active (null in the calm state). */
