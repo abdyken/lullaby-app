@@ -214,9 +214,9 @@ const DUPLICATE_WINDOW_MS = 45_000;
 const SLEEP_FINALIZE_MIN = 72;
 
 let localCounter = 0;
-function nextId(type: LogEventType): string {
+function nextId(type: LogEventType, now: number): string {
   localCounter += 1;
-  return `local-${type}-${localCounter}`;
+  return `local-${type}-${now}-${localCounter}`;
 }
 
 /** Is a sleep currently running (started, not yet ended)? */
@@ -254,7 +254,7 @@ export function createFeedEvent(now: number = Date.now(), details?: FeedDetails)
   if (d.durationMin != null) meta.durationMin = d.durationMin;
   if (d.amountMl != null) meta.amountMl = d.amountMl;
   return {
-    id: nextId('feed'),
+    id: nextId('feed', now),
     babyId: baby.id,
     caregiverId: caregivers[0].id,
     type: 'feed',
@@ -269,7 +269,7 @@ export function createFeedEvent(now: number = Date.now(), details?: FeedDetails)
 export function createSleepEvent(now: number = Date.now()): LogEvent {
   const startAt = new Date(now).toISOString();
   return {
-    id: nextId('sleep'),
+    id: nextId('sleep', now),
     babyId: baby.id,
     caregiverId: caregivers[0].id,
     type: 'sleep',
@@ -289,7 +289,7 @@ export function createDiaperEvent(now: number = Date.now(), details?: DiaperDeta
   const meta: LogEvent['meta'] = { kind: details?.kind ?? 'wet' };
   if (details?.note) meta.note = details.note;
   return {
-    id: nextId('diaper'),
+    id: nextId('diaper', now),
     babyId: baby.id,
     caregiverId: caregivers[0].id,
     type: 'diaper',
@@ -310,7 +310,7 @@ export function createNoteEvent(now: number = Date.now(), details?: NoteDetails)
   if (details?.label) meta.label = details.label;
   if (details?.note) meta.note = details.note;
   return {
-    id: nextId('note'),
+    id: nextId('note', now),
     babyId: baby.id,
     caregiverId: caregivers[0].id,
     type: 'note',

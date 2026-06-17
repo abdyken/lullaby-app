@@ -23,7 +23,13 @@ import {
   undoLastEvent,
   type TonightState,
 } from '../src/data/localInteractions';
-import { calmDescription, deriveNightStatus, getOrbView } from '../src/data/currentState';
+import {
+  buildNightRecap,
+  calmDescription,
+  deriveNightStatus,
+  getOrbView,
+  recapSummaryLine,
+} from '../src/data/currentState';
 import { buildSeedEvents, getTonightTimeline } from '../src/data/mock';
 import type { LogEventType } from '../src/data/models';
 import { parsePersistedState, serializeState } from '../src/data/persistedState';
@@ -221,6 +227,47 @@ check('J2. a stored note event passes validation', () => {
   assert.ok(restored && restored.events.length === 1 && restored.events[0].type === 'note');
 });
 
+check('J3. duplicate stored event ids are repaired on load', () => {
+  const raw = JSON.stringify({
+    events: [
+      {
+        id: 'local-feed-7',
+        babyId: 'baby-mia',
+        caregiverId: 'cg-mom',
+        type: 'feed',
+        startAt: '2026-06-17T00:00:00.000Z',
+        endAt: '2026-06-17T00:08:00.000Z',
+        meta: { side: 'L' },
+        createdAt: '2026-06-17T00:08:00.000Z',
+      },
+      {
+        id: 'local-feed-7',
+        babyId: 'baby-mia',
+        caregiverId: 'cg-mom',
+        type: 'feed',
+        startAt: '2026-06-17T01:00:00.000Z',
+        endAt: '2026-06-17T01:08:00.000Z',
+        meta: { side: 'R' },
+        createdAt: '2026-06-17T01:08:00.000Z',
+      },
+    ],
+    orbView: 'calm',
+  });
+  const restored = parsePersistedState(raw);
+  assert.ok(restored && restored.events.length === 2);
+  assert.notEqual(restored.events[0].id, restored.events[1].id);
+  assert.equal(restored.events[0].id, 'local-feed-7');
+  assert.match(restored.events[1].id, /^local-feed-7-dup-/);
+});
+
+check('J4. locally-created ids include the event timestamp to avoid reload counter collisions', () => {
+  const first = addFeed(initTonightState([]), { side: 'L' }, NOW);
+  const second = addFeed(initTonightState([]), { side: 'L' }, NOW + 60_000);
+  assert.notEqual(first.events[0].id, second.events[0].id);
+  assert.ok(first.events[0].id.includes(String(NOW)));
+  assert.ok(second.events[0].id.includes(String(NOW + 60_000)));
+});
+
 // K. Derived current-night status from live events
 check('K1. derived status reports sleeping with last feed/diaper from the seed', () => {
   const status = deriveNightStatus(seedEvents, NOW);
@@ -321,6 +368,41 @@ check('M4. feed timeline with no side (Bottle) reads "bottle"', () => {
   const s = addFeed(initTonightState([]), {}, NOW);
   const row = getTonightTimeline(s.events, NOW)[0];
   assert.match(row.label, /Feed · bottle/);
+});
+
+// N. Night recap (Phase 6) — calm, non-medical summary from local events
+check('N1. recap counts feeds/diapers and flags the seed’s running sleep', () => {
+  const recap = buildNightRecap(seedEvents);
+  assert.equal(recap.feedCount, 1);
+  assert.equal(recap.diaperCount, 1);
+  assert.equal(recap.noteCount, 0);
+  assert.equal(recap.sleepRunning, true);
+  assert.equal(recap.longestSleepMin, undefined); // nothing completed yet
+  assert.equal(recap.isEmpty, false);
+});
+
+check('N2. after Wake baby the recap reports the longest completed sleep', () => {
+  let s = initTonightState(seedEvents);
+  s = handlePrimaryAction(s, NOW); // ends the running sleep (72m finalize)
+  const recap = buildNightRecap(s.events);
+  assert.equal(recap.sleepRunning, false);
+  assert.equal(recap.longestSleepMin, 72);
+  assert.match(recapSummaryLine(recap) ?? '', /longest sleep 1h 12m/);
+});
+
+check('N3. an empty event list yields an empty recap and a null summary line', () => {
+  const recap = buildNightRecap([]);
+  assert.equal(recap.isEmpty, true);
+  assert.equal(recapSummaryLine(recap), null);
+});
+
+check('N4. the summary line pluralizes and joins with " · "', () => {
+  let s = initTonightState([]);
+  s = addFeed(s, { side: 'L' }, NOW);
+  s = addFeed(s, { side: 'R' }, NOW + 60_000);
+  s = addDiaper(s, { kind: 'wet' }, NOW + 120_000);
+  const line = recapSummaryLine(buildNightRecap(s.events));
+  assert.equal(line, '2 feeds · 1 diaper change');
 });
 
 console.log(`\nAll ${passed} checks passed ✅`);
