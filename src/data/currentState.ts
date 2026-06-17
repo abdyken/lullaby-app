@@ -408,3 +408,42 @@ export function recapSummaryLine(recap: NightRecap): string | null {
   }
   return parts.length > 0 ? parts.join(' · ') : null;
 }
+
+/* ------------------------------------------------------------------ *
+ * Partner handoff (P0) — "are both parents in the loop, and who handled the
+ * last thing?" Pure: events → the caregiver who logged the newest event + a
+ * calm word for what it was. Local-only; implies nothing about realtime/cloud
+ * sync. The card resolves the caregiver's name/color from this id.
+ * ------------------------------------------------------------------ */
+
+export type HandoffSummary = {
+  /** caregiver id who logged the newest event (null when nothing is logged) */
+  caregiverId: string | null;
+  /** calm event word: 'feed' | 'diaper' | 'sleep start' | 'sleep' | 'note' */
+  eventLabel: string | null;
+};
+
+/** Calm, non-technical word for the handoff line, by event type. */
+function handoffLabelFor(event: LogEvent): string {
+  switch (event.type) {
+    case 'feed':
+      return 'feed';
+    case 'diaper':
+      return 'diaper';
+    case 'sleep':
+      return event.endAt === null ? 'sleep start' : 'sleep';
+    case 'note':
+      return 'note';
+    default:
+      return 'log';
+  }
+}
+
+/** Who handled the newest event (by createdAt) and what it was. UI-free. */
+export function deriveHandoff(eventList: LogEvent[]): HandoffSummary {
+  if (eventList.length === 0) return { caregiverId: null, eventLabel: null };
+  const latest = [...eventList].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  )[0];
+  return { caregiverId: latest.caregiverId, eventLabel: handoffLabelFor(latest) };
+}

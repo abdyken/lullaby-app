@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { View } from 'react-native';
 
 import { BabyHeader } from '@/components/BabyHeader';
+import { HandoffCard } from '@/components/HandoffCard';
 import { LogSheet, type SheetOption } from '@/components/LogSheet';
 import { OrbHero } from '@/components/OrbHero';
 import { QuickLogRow } from '@/components/QuickLogRow';
@@ -79,6 +80,7 @@ const SHEETS: Record<SheetKind, SheetConfig> = {
 export default function TonightScreen() {
   const ageWeeks = babyAgeInWeeks(new Date('2026-06-16'));
   const {
+    events,
     orb,
     activeTile,
     tonightTimeline,
@@ -131,6 +133,12 @@ export default function TonightScreen() {
 
         <View style={{ marginTop: 13 }}>
           <TimelineCard entries={tonightTimeline} />
+        </View>
+
+        {/* P0 partner/handoff card — local-only, below the timeline so it never
+            pushes the orb / quick-log row down on small screens. */}
+        <View style={{ marginTop: 13 }}>
+          <HandoffCard events={events} caregivers={caregivers} babyName={baby.name} />
         </View>
       </Screen>
 

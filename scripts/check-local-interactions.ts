@@ -26,6 +26,7 @@ import {
 import {
   buildNightRecap,
   calmDescription,
+  deriveHandoff,
   deriveNightStatus,
   getOrbView,
   recapSummaryLine,
@@ -403,6 +404,36 @@ check('N4. the summary line pluralizes and joins with " · "', () => {
   s = addDiaper(s, { kind: 'wet' }, NOW + 120_000);
   const line = recapSummaryLine(buildNightRecap(s.events));
   assert.equal(line, '2 feeds · 1 diaper change');
+});
+
+// O. Partner handoff (P0) — newest event drives "who handled the last …"
+check('O1. empty events yield a "both ready" handoff (no caregiver, no label)', () => {
+  const h = deriveHandoff([]);
+  assert.equal(h.caregiverId, null);
+  assert.equal(h.eventLabel, null);
+});
+
+check('O2. the seed handoff points at the running sleep (newest by createdAt)', () => {
+  // Seed order by createdAt: sleep (newest) > diaper > feed. Sleep is running.
+  const h = deriveHandoff(seedEvents);
+  assert.equal(h.eventLabel, 'sleep start');
+  assert.ok(typeof h.caregiverId === 'string');
+});
+
+check('O3. a just-saved feed becomes the latest handoff event', () => {
+  let s = initTonightState(seedEvents);
+  s = addFeed(s, { side: 'R' }, NOW + 10 * 60_000); // after the seed timestamps
+  const h = deriveHandoff(s.events);
+  assert.equal(h.eventLabel, 'feed');
+});
+
+check('O4. completed sleep reads "sleep", running sleep reads "sleep start"', () => {
+  const running = deriveHandoff(buildSeedEvents(NOW));
+  assert.equal(running.eventLabel, 'sleep start');
+
+  let s = initTonightState(buildSeedEvents(NOW));
+  s = handlePrimaryAction(s, NOW); // Wake baby → completes the sleep
+  assert.equal(deriveHandoff(s.events).eventLabel, 'sleep');
 });
 
 console.log(`\nAll ${passed} checks passed ✅`);
