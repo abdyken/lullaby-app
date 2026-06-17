@@ -336,12 +336,13 @@ export function OrbHero({
                 <Text
                   numberOfLines={1}
                   adjustsFontSizeToFit
-                  minimumFontScale={0.82}
+                  minimumFontScale={0.6}
                   style={{
                     fontFamily: fonts.display,
                     fontSize: 38,
                     lineHeight: 42,
                     color: colors.ink,
+                    textAlign: 'center',
                   }}>
                   {timerText}
                 </Text>

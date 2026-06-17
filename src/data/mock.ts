@@ -35,41 +35,69 @@ export const babyCaregivers: BabyCaregiver[] = [
 ];
 
 /**
- * Sample events from "tonight" — fixed ISO timestamps (no Date.now so the seed
- * is stable and reproducible). Real timers come with the Tonight screen.
+ * Sample events from "tonight", built RELATIVE to "now" (minutes ago) rather
+ * than at fixed calendar timestamps. A fixed running sleep would, by demo day,
+ * read as an absurd stale duration (e.g. "36h" — clipped inside the orb). By
+ * anchoring the seed to the launch moment, a fresh launch always feels like a
+ * live newborn night: a recent running sleep with a small, readable orb timer,
+ * preceded by a feed and a diaper a little earlier in the night.
+ *
+ * Offsets are minutes-before-now. The running sleep starts ~1h ago so the orb
+ * timer stays compact; the sleep duration is deliberately not the canned "1h
+ * 12m" preview value so the orb shows a real elapsed time.
  */
-export const events: LogEvent[] = [
-  {
-    id: 'evt-feed-1',
-    babyId: BABY_ID,
-    caregiverId: MOM_ID,
-    type: 'feed',
-    startAt: '2026-06-16T03:10:00.000Z',
-    endAt: '2026-06-16T03:21:00.000Z',
-    meta: { side: 'L' },
-    createdAt: '2026-06-16T03:21:00.000Z',
-  },
-  {
-    id: 'evt-diaper-1',
-    babyId: BABY_ID,
-    caregiverId: DAD_ID,
-    type: 'diaper',
-    startAt: '2026-06-16T03:48:00.000Z',
-    endAt: null,
-    meta: { kind: 'wet' },
-    createdAt: '2026-06-16T03:48:00.000Z',
-  },
-  {
-    id: 'evt-sleep-1',
-    babyId: BABY_ID,
-    caregiverId: MOM_ID,
-    type: 'sleep',
-    startAt: '2026-06-16T04:12:00.000Z',
-    endAt: null,
-    meta: {},
-    createdAt: '2026-06-16T04:12:00.000Z',
-  },
-];
+const SEED_OFFSETS_MIN = {
+  feedStart: 134,
+  feedEnd: 123,
+  diaper: 96,
+  sleepStart: 68,
+} as const;
+
+function isoMinutesAgo(now: number, minutes: number): string {
+  return new Date(now - minutes * 60_000).toISOString();
+}
+
+/**
+ * Build the seed events relative to `now` (defaults to the real launch moment).
+ * Kept as a builder so tests can pin `now` for deterministic results while the
+ * app gets a fresh, live-feeling seed on every cold start.
+ */
+export function buildSeedEvents(now: number = Date.now()): LogEvent[] {
+  return [
+    {
+      id: 'evt-feed-1',
+      babyId: BABY_ID,
+      caregiverId: MOM_ID,
+      type: 'feed',
+      startAt: isoMinutesAgo(now, SEED_OFFSETS_MIN.feedStart),
+      endAt: isoMinutesAgo(now, SEED_OFFSETS_MIN.feedEnd),
+      meta: { side: 'L' },
+      createdAt: isoMinutesAgo(now, SEED_OFFSETS_MIN.feedEnd),
+    },
+    {
+      id: 'evt-diaper-1',
+      babyId: BABY_ID,
+      caregiverId: DAD_ID,
+      type: 'diaper',
+      startAt: isoMinutesAgo(now, SEED_OFFSETS_MIN.diaper),
+      endAt: null,
+      meta: { kind: 'wet' },
+      createdAt: isoMinutesAgo(now, SEED_OFFSETS_MIN.diaper),
+    },
+    {
+      id: 'evt-sleep-1',
+      babyId: BABY_ID,
+      caregiverId: MOM_ID,
+      type: 'sleep',
+      startAt: isoMinutesAgo(now, SEED_OFFSETS_MIN.sleepStart),
+      endAt: null,
+      meta: {},
+      createdAt: isoMinutesAgo(now, SEED_OFFSETS_MIN.sleepStart),
+    },
+  ];
+}
+
+export const events: LogEvent[] = buildSeedEvents();
 
 /** Convenience lookups used by the placeholder screens. */
 export function getCaregiver(id: string): Caregiver | undefined {

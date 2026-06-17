@@ -22,12 +22,16 @@ import {
   type TonightState,
 } from '../src/data/localInteractions';
 import { calmDescription, deriveNightStatus, getOrbView } from '../src/data/currentState';
-import { events as seedEvents } from '../src/data/mock';
+import { buildSeedEvents } from '../src/data/mock';
 import type { LogEventType } from '../src/data/models';
 import { parsePersistedState, serializeState } from '../src/data/persistedState';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
 const NOW = Date.parse('2026-06-17T00:00:00.000Z');
+
+// The seed is now built relative to "now"; pin it to NOW so the timestamps the
+// assertions below depend on (sleep duration, last feed/diaper ago) are stable.
+const seedEvents = buildSeedEvents(NOW);
 
 const countKind = (s: TonightState, kind: LogEventType) =>
   s.events.filter((e) => e.type === kind).length;

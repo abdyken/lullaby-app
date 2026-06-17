@@ -1,3 +1,23 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Web only: give the React Native Web flex chain a bounded full-viewport height.
+ * Without this, the root collapses to content height, so the Screen ScrollView
+ * (flex: 1) has no height to scroll within — it grows past the viewport and the
+ * tail (e.g. Reassure's last card + disclaimer) is clipped behind the floating
+ * tab bar with no way to scroll to it. Anchoring html/body/#root to 100% lets
+ * each screen's ScrollView scroll internally. No effect on native (CSS is
+ * web-only), so the Expo Go demo is untouched.
+ */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+}
