@@ -11,6 +11,8 @@
 import assert from 'node:assert/strict';
 
 import {
+  addDiaper,
+  addFeed,
   addNote,
   cappedTimeline,
   handleDiaperTap,
@@ -22,7 +24,7 @@ import {
   type TonightState,
 } from '../src/data/localInteractions';
 import { calmDescription, deriveNightStatus, getOrbView } from '../src/data/currentState';
-import { buildSeedEvents } from '../src/data/mock';
+import { buildSeedEvents, getTonightTimeline } from '../src/data/mock';
 import type { LogEventType } from '../src/data/models';
 import { parsePersistedState, serializeState } from '../src/data/persistedState';
 
@@ -252,6 +254,73 @@ check('K5. with no events the calm orb keeps its canned copy', () => {
   assert.equal(calmDescription(deriveNightStatus([], NOW)), null);
   const desc = getOrbView('calm', [], NOW).description;
   assert.ok(!desc.includes('Last feed'));
+});
+
+// L. Detail-aware logging from the bottom sheets
+check('L1. addFeed maps Left/Right to side metadata and selects the feed orb', () => {
+  let s = initTonightState([]);
+  s = addFeed(s, { side: 'R' }, NOW);
+  assert.equal(s.events[0].type, 'feed');
+  assert.equal(s.events[0].meta.side, 'R');
+  assert.equal(s.orbView, 'feed');
+});
+
+check('L2. addFeed for Bottle records a feed with no side', () => {
+  const s = addFeed(initTonightState([]), {}, NOW); // Bottle → {}
+  assert.equal(s.events[0].type, 'feed');
+  assert.equal(s.events[0].meta.side, undefined);
+});
+
+check('L3. addDiaper maps Wet/Dirty/Mixed to wet/dirty/both', () => {
+  assert.equal(addDiaper(initTonightState([]), { kind: 'wet' }, NOW).events[0].meta.kind, 'wet');
+  assert.equal(addDiaper(initTonightState([]), { kind: 'dirty' }, NOW).events[0].meta.kind, 'dirty');
+  assert.equal(addDiaper(initTonightState([]), { kind: 'both' }, NOW).events[0].meta.kind, 'both');
+});
+
+check('L4. addNote stores the selected label', () => {
+  const s = addNote(initTonightState([]), { label: 'Cried' }, NOW);
+  assert.equal(s.events[0].type, 'note');
+  assert.equal(s.events[0].meta.label, 'Cried');
+});
+
+check('L5. a rapid second feed/diaper save is swallowed (no duplicate)', () => {
+  let s = initTonightState([]);
+  s = addFeed(s, { side: 'L' }, NOW);
+  s = addFeed(s, { side: 'R' }, NOW + 1_000); // within dedup window
+  assert.equal(s.events.filter((e) => e.type === 'feed').length, 1);
+
+  let d = initTonightState([]);
+  d = addDiaper(d, { kind: 'wet' }, NOW);
+  d = addDiaper(d, { kind: 'dirty' }, NOW + 1_000);
+  assert.equal(d.events.filter((e) => e.type === 'diaper').length, 1);
+});
+
+// M. Hero confirmation copy derives from the saved event (not canned preview text)
+check('M1. feed hero reflects the saved side (Right), not the canned "Left side · 4 min in"', () => {
+  const s = addFeed(initTonightState([]), { side: 'R' }, NOW);
+  const orb = getOrbView('feed', s.events, NOW);
+  assert.equal(orb.title, 'Feed logged');
+  assert.match(orb.description, /Right side/);
+  assert.ok(!orb.description.includes('4 min in'));
+});
+
+check('M2. diaper hero reflects Mixed (both), not the canned "Wet"', () => {
+  const s = addDiaper(initTonightState([]), { kind: 'both' }, NOW);
+  const orb = getOrbView('diaper', s.events, NOW);
+  assert.equal(orb.title, 'Diaper logged');
+  assert.match(orb.description, /Mixed/);
+});
+
+check('M3. feed hero with no side (Bottle) reads "Bottle"', () => {
+  const s = addFeed(initTonightState([]), {}, NOW);
+  const orb = getOrbView('feed', s.events, NOW);
+  assert.match(orb.description, /Bottle/);
+});
+
+check('M4. feed timeline with no side (Bottle) reads "bottle"', () => {
+  const s = addFeed(initTonightState([]), {}, NOW);
+  const row = getTonightTimeline(s.events, NOW)[0];
+  assert.match(row.label, /Feed · bottle/);
 });
 
 console.log(`\nAll ${passed} checks passed ✅`);

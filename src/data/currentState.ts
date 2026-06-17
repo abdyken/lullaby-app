@@ -109,7 +109,46 @@ export function getOrbView(
     }
   }
 
+  // Feed / diaper: keep the canned confirmation visuals but make the copy tell
+  // the truth about the event the user just saved (side / kind), instead of the
+  // fixed preview text. Only title + description change; the orb visuals stay.
+  if (view === 'feed') {
+    const latestFeed = newestByCreatedAt(eventList, 'feed');
+    if (latestFeed) {
+      return {
+        ...base,
+        title: 'Feed logged',
+        description: `${feedDetailLabel(latestFeed.meta.side)} · added to tonight`,
+      };
+    }
+  }
+
+  if (view === 'diaper') {
+    const latestDiaper = newestByCreatedAt(eventList, 'diaper');
+    if (latestDiaper) {
+      return {
+        ...base,
+        title: 'Diaper logged',
+        description: `${diaperDetailLabel(latestDiaper.meta.kind)} · added to tonight`,
+      };
+    }
+  }
+
   return base;
+}
+
+/** Hero detail for a feed: side L/R, or "Bottle" when no side was recorded. */
+function feedDetailLabel(side: 'L' | 'R' | undefined): string {
+  if (side === 'L') return 'Left side';
+  if (side === 'R') return 'Right side';
+  return 'Bottle';
+}
+
+/** Hero detail for a diaper: Wet / Dirty / Mixed (mixed = 'both' in the model). */
+function diaperDetailLabel(kind: 'wet' | 'dirty' | 'both' | undefined): string {
+  if (kind === 'dirty') return 'Dirty';
+  if (kind === 'both') return 'Mixed';
+  return 'Wet';
 }
 
 const DEMO_NOW = new Date('2026-06-16T05:24:00.000Z');

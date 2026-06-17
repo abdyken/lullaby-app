@@ -10,7 +10,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 
 import { colors, fonts, getAccentForState, radii, shadows } from '@/theme';
 
-export type QuickLogKind = 'feed' | 'sleep' | 'diaper' | 'more';
+export type QuickLogKind = 'feed' | 'sleep' | 'diaper' | 'note' | 'more';
 
 type Props = {
   kind: QuickLogKind;
@@ -26,6 +26,8 @@ const TILE_GRADIENT: Record<QuickLogKind, [string, string]> = {
   feed: ['#FFE0CC', '#FFD0B6'],
   sleep: ['#E5E8FB', '#D6DBF7'],
   diaper: ['#DAF4EE', '#C9EFE6'],
+  // note + more share the calm neutral cream tile (no new color introduced)
+  note: ['#F2ECE6', '#ECE4DC'],
   more: ['#F2ECE6', '#ECE4DC'],
 };
 
@@ -69,6 +71,20 @@ function TileIcon({ kind, color }: { kind: QuickLogKind; color: string }) {
       </Svg>
     );
   }
+  if (kind === 'note') {
+    // a calm stroke-based pencil, same 1.9 stroke style as the other tiles
+    return (
+      <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+        <Path
+          d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"
+          stroke={color}
+          strokeWidth={sw}
+          strokeLinejoin="round"
+        />
+        <Path d="M15 5l4 4" stroke={color} strokeWidth={sw} strokeLinecap="round" />
+      </Svg>
+    );
+  }
   // more — a calm horizontal ellipsis (the P1 overflow: pump / bottle / medicine)
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
@@ -80,8 +96,14 @@ function TileIcon({ kind, color }: { kind: QuickLogKind; color: string }) {
 }
 
 export function QuickLogButton({ kind, label, active = false, muted = false, onPress }: Props) {
-  const accent = kind === 'more' ? null : getAccentForState(kind);
-  const iconColor = muted ? colors.inkFaint : (accent?.color ?? colors.inkFaint);
+  // note + more are neutral (no per-state accent); the rest map to their state accent
+  const neutral = kind === 'more' || kind === 'note';
+  const accent = neutral ? null : getAccentForState(kind);
+  const iconColor = muted
+    ? colors.inkFaint
+    : kind === 'note'
+      ? colors.inkSoft
+      : (accent?.color ?? colors.inkFaint);
   const labelColor = active ? accent?.color ?? colors.inkSoft : muted ? colors.inkFaint : colors.inkSoft;
 
   return (

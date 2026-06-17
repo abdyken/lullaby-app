@@ -141,10 +141,10 @@ function intervalMinutes(startAt: string, endAt: string): number {
 function entryLabel(event: LogEvent): string {
   switch (event.type) {
     case 'feed': {
-      const side = event.meta.side === 'L' ? 'left' : event.meta.side === 'R' ? 'right' : null;
+      const side = event.meta.side === 'L' ? 'left' : event.meta.side === 'R' ? 'right' : 'bottle';
       if (event.endAt) {
         const mins = minutesToLabel(intervalMinutes(event.startAt, event.endAt));
-        return side ? `Feed · ${side}, ${mins}` : `Feed · ${mins}`;
+        return `Feed · ${side}, ${mins}`;
       }
       return 'Feed in progress';
     }
