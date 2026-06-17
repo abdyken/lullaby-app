@@ -18,6 +18,8 @@ import {
   getTonightTimeline,
   hasRunningSleep,
   wasLoggedRecently,
+  type DiaperDetails,
+  type FeedDetails,
   type NoteDetails,
   type TimelineEntry,
 } from './mock';
@@ -98,6 +100,39 @@ export function handlePrimaryAction(state: TonightState, now: number = Date.now(
         orbView: 'sleep',
       };
   }
+}
+
+/**
+ * Append a feed event with optional details (side / amount / duration), e.g.
+ * from the Feed sheet. Mirrors handleQuickLog's anti-spam guard: a rapid second
+ * save within the dedup window is swallowed (no duplicate) but still selects the
+ * feed tile/orb. Bottle = no side (pass {}); Left/Right = { side: 'L' | 'R' }.
+ */
+export function addFeed(
+  state: TonightState,
+  details?: FeedDetails,
+  now: number = Date.now(),
+): TonightState {
+  if (wasLoggedRecently(state.events, 'feed', now)) {
+    return { events: state.events, orbView: 'feed' };
+  }
+  return { events: [createFeedEvent(now, details), ...state.events], orbView: 'feed' };
+}
+
+/**
+ * Append a diaper event with optional details (kind / note), e.g. from the
+ * Diaper sheet. Same anti-spam guard as addFeed. Wet/Dirty/Mixed map to
+ * { kind: 'wet' | 'dirty' | 'both' }.
+ */
+export function addDiaper(
+  state: TonightState,
+  details?: DiaperDetails,
+  now: number = Date.now(),
+): TonightState {
+  if (wasLoggedRecently(state.events, 'diaper', now)) {
+    return { events: state.events, orbView: 'diaper' };
+  }
+  return { events: [createDiaperEvent(now, details), ...state.events], orbView: 'diaper' };
 }
 
 /**

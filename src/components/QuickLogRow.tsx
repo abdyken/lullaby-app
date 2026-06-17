@@ -1,9 +1,9 @@
 /**
  * QuickLogRow — the compact row of four quick-log tiles (`.lb-quick`).
  *
- * P0: Feed / Sleep / Diaper are live preview actions; the active one shows an
- * accent ring and agrees with the orb above. "More" is a muted P1 placeholder
- * (pump / bottle / medicine) and is a visual no-op for now.
+ * Feed / Sleep / Diaper are live preview actions; the active one shows an accent
+ * ring and agrees with the orb above. "Note" is a one-tap instant log (a preset
+ * note) — it never owns an orb state, so it never reads as "active".
  */
 import { View } from 'react-native';
 
@@ -14,9 +14,11 @@ type Props = {
   /** the currently active state, so the matching tile reads as active (null = none) */
   selected: PreviewState | null;
   onSelect: (state: PreviewState) => void;
+  /** one-tap preset note (instant, no orb state) */
+  onNote: () => void;
 };
 
-export function QuickLogRow({ selected, onSelect }: Props) {
+export function QuickLogRow({ selected, onSelect, onNote }: Props) {
   return (
     <View style={{ flexDirection: 'row', gap: 9 }}>
       <QuickLogButton
@@ -37,8 +39,7 @@ export function QuickLogRow({ selected, onSelect }: Props) {
         active={selected === 'diaper'}
         onPress={() => onSelect('diaper')}
       />
-      {/* P1 overflow — muted, no-op for now */}
-      <QuickLogButton kind="more" label="More" muted />
+      <QuickLogButton kind="note" label="Note" onPress={onNote} />
     </View>
   );
 }
