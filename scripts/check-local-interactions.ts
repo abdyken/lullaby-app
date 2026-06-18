@@ -25,6 +25,7 @@ import {
 } from '../src/data/localInteractions';
 import {
   buildNightRecap,
+  buildTonightStatus,
   calmDescription,
   deriveHandoff,
   deriveNightStatus,
@@ -33,6 +34,7 @@ import {
 } from '../src/data/currentState';
 import { buildSeedEvents, getTonightTimeline } from '../src/data/mock';
 import type { LogEventType } from '../src/data/models';
+import { resolveSurfaceMode } from '../src/theme';
 import { parsePersistedState, serializeState } from '../src/data/persistedState';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
@@ -434,6 +436,46 @@ check('O4. completed sleep reads "sleep", running sleep reads "sleep start"', ()
   let s = initTonightState(buildSeedEvents(NOW));
   s = handlePrimaryAction(s, NOW); // Wake baby → completes the sleep
   assert.equal(deriveHandoff(s.events).eventLabel, 'sleep');
+});
+
+// P. Surface mode resolution (P0.5 night mode)
+check('P1. auto resolves to night at late/early hours (20:00–06:59)', () => {
+  assert.equal(resolveSurfaceMode('auto', 20), 'night'); // boundary: night starts
+  assert.equal(resolveSurfaceMode('auto', 23), 'night');
+  assert.equal(resolveSurfaceMode('auto', 0), 'night');
+  assert.equal(resolveSurfaceMode('auto', 6), 'night');
+});
+
+check('P2. auto resolves to day during daytime hours (07:00–19:59)', () => {
+  assert.equal(resolveSurfaceMode('auto', 7), 'day'); // boundary: day starts
+  assert.equal(resolveSurfaceMode('auto', 12), 'day');
+  assert.equal(resolveSurfaceMode('auto', 19), 'day');
+});
+
+check('P3. forced day/night overrides ignore the clock', () => {
+  assert.equal(resolveSurfaceMode('day', 3), 'day'); // 3am but forced day
+  assert.equal(resolveSurfaceMode('night', 12), 'night'); // noon but forced night
+});
+
+// Q. Tonight status copy (P0.5 "time since last…")
+check('Q1. status copy reflects seed feed/diaper ages and the running sleep', () => {
+  const items = buildTonightStatus(seedEvents, NOW);
+  const byKey = Object.fromEntries(items.map((i) => [i.key, i]));
+  // seed: feed 123m ago, diaper 96m ago, sleep running 68m
+  assert.equal(byKey.feed.label, 'Last feed');
+  assert.equal(byKey.feed.value, '2h 03m ago');
+  assert.equal(byKey.diaper.value, '1h 36m ago');
+  assert.equal(byKey.sleep.label, 'Sleeping');
+  assert.equal(byKey.sleep.value, '1h 08m');
+});
+
+check('Q2. status copy handles empty events (descriptive, no judgement)', () => {
+  const items = buildTonightStatus([], NOW);
+  const byKey = Object.fromEntries(items.map((i) => [i.key, i]));
+  assert.equal(byKey.feed.value, 'None yet');
+  assert.equal(byKey.diaper.value, 'None yet');
+  assert.equal(byKey.sleep.label, 'Awake');
+  assert.equal(byKey.sleep.value, 'now');
 });
 
 console.log(`\nAll ${passed} checks passed ✅`);

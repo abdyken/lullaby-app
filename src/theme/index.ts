@@ -153,14 +153,85 @@ export function getAccentForState(state: AccentState): Accent {
   return ACCENTS[state] ?? ACCENTS.sleep;
 }
 
+/* ------------------------------------------------------------------ *
+ * Surface mode (P0.5) — automatic low-glare night surface for Tonight.
+ *
+ * Day keeps the sacred cream/white surfaces verbatim (the rest of the app is
+ * unaffected). Night is a calm deep-navy surface — low-glare and premium, never
+ * pure black, never a purple-blue gradient. It echoes the mockup's navy night
+ * sky (#3B3A74…) but darker, so a 3am screen doesn't blind a tired parent.
+ * ------------------------------------------------------------------ */
+
+/** What the user picked. 'auto' resolves against the local clock. */
+export type SurfacePreference = 'auto' | 'day' | 'night';
+/** The resolved surface actually rendered. */
+export type SurfaceMode = 'day' | 'night';
+
+export type SurfacePalette = {
+  /** screen background */
+  bg: string;
+  /** card / raised surface */
+  card: string;
+  /** subtle card border/divider (transparent in day — separation via shadow) */
+  border: string;
+  /** primary text */
+  ink: string;
+  /** secondary text */
+  inkSoft: string;
+  /** tertiary text / timestamps */
+  inkFaint: string;
+  /** hairline / timeline connector */
+  line: string;
+};
+
+/** Day mirrors the existing tokens exactly; night is the low-glare navy set. */
+export const surfaces: Record<SurfaceMode, SurfacePalette> = {
+  day: {
+    bg: colors.cream,
+    card: colors.surface,
+    border: 'transparent',
+    ink: colors.ink,
+    inkSoft: colors.inkSoft,
+    inkFaint: colors.inkFaint,
+    line: colors.line,
+  },
+  night: {
+    bg: '#191826',
+    card: '#23223A',
+    border: 'rgba(255,255,255,0.07)',
+    ink: '#F0ECFB',
+    inkSoft: '#ADA8C7',
+    inkFaint: '#736E90',
+    line: 'rgba(255,255,255,0.09)',
+  },
+};
+
+/** Local hour (0–23) at/after which `auto` switches to night. */
+export const NIGHT_START_HOUR = 20;
+/** Local hour (0–23) at which `auto` switches back to day. */
+export const DAY_START_HOUR = 7;
+
+/**
+ * Resolve a surface preference + the local hour to the surface to render.
+ * Pure: no Date access inside, so it's deterministic and unit-testable. `auto`
+ * is night from NIGHT_START_HOUR (incl.) to DAY_START_HOUR (excl.).
+ */
+export function resolveSurfaceMode(preference: SurfacePreference, hour: number): SurfaceMode {
+  if (preference === 'day') return 'day';
+  if (preference === 'night') return 'night';
+  return hour >= NIGHT_START_HOUR || hour < DAY_START_HOUR ? 'night' : 'day';
+}
+
 export const theme = {
   colors,
   sky,
+  surfaces,
   radii,
   shadows,
   fonts,
   tabbar,
   getAccentForState,
+  resolveSurfaceMode,
 } as const;
 
 export default theme;

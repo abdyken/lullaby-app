@@ -9,20 +9,25 @@ import { Text, View } from 'react-native';
 
 import { TimelineItem } from '@/components/TimelineItem';
 import type { TimelineEntry } from '@/data/mock';
-import { colors, fonts, radii, shadows } from '@/theme';
+import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
 type Props = {
   entries: TimelineEntry[];
   /** accent for the "See all" affordance — calm sleep accent by default */
   accentColor?: string;
+  /** surface palette — 'day' (default) or 'night' */
+  surfaceMode?: SurfaceMode;
 };
 
-export function TimelineCard({ entries, accentColor = colors.sleep }: Props) {
+export function TimelineCard({ entries, accentColor = colors.sleep, surfaceMode = 'day' }: Props) {
+  const palette = surfaces[surfaceMode];
   return (
     <View
       style={{
-        backgroundColor: colors.surface,
+        backgroundColor: palette.card,
         borderRadius: radii.medium,
+        borderWidth: surfaceMode === 'night' ? 1 : 0,
+        borderColor: palette.border,
         paddingTop: 15,
         paddingHorizontal: 16,
         paddingBottom: 7,
@@ -35,7 +40,7 @@ export function TimelineCard({ entries, accentColor = colors.sleep }: Props) {
           justifyContent: 'space-between',
           marginBottom: 8,
         }}>
-        <Text style={{ fontFamily: fonts.displayMedium, fontSize: 14.5, color: colors.ink }}>
+        <Text style={{ fontFamily: fonts.displayMedium, fontSize: 14.5, color: palette.ink }}>
           Tonight
         </Text>
         {/* visual-only for now — Log routing comes later */}
@@ -44,11 +49,16 @@ export function TimelineCard({ entries, accentColor = colors.sleep }: Props) {
 
       {entries.length > 0 ? (
         entries.map((entry, index) => (
-          <TimelineItem key={entry.id} entry={entry} isLast={index === entries.length - 1} />
+          <TimelineItem
+            key={entry.id}
+            entry={entry}
+            isLast={index === entries.length - 1}
+            surfaceMode={surfaceMode}
+          />
         ))
       ) : (
         <View style={{ paddingVertical: 14 }}>
-          <Text style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: 18, color: colors.inkSoft }}>
+          <Text style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: 18, color: palette.inkSoft }}>
             Nothing logged yet tonight. Tap a quick-log tile above to start the night.
           </Text>
         </View>

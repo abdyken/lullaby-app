@@ -4,8 +4,8 @@ import { Animated, Text, View } from 'react-native';
 import Svg, { Circle, Defs, Path, RadialGradient, Stop } from 'react-native-svg';
 
 import { PrimaryActionButton } from '@/components/PrimaryActionButton';
-import type { AccentState } from '@/theme';
-import { colors, fonts, getAccentForState, radii, shadows, sky } from '@/theme';
+import type { AccentState, SurfaceMode } from '@/theme';
+import { colors, fonts, getAccentForState, radii, shadows, sky, surfaces } from '@/theme';
 
 export type OrbSky = 'day' | 'night' | 'dusk';
 export type OrbCoreKind = 'timer' | 'check';
@@ -21,6 +21,8 @@ export type OrbHeroProps = {
   progress: number;
   coreKind?: OrbCoreKind;
   onActionPress?: () => void;
+  /** surface palette for the caption below the orb (the orb itself is unchanged) */
+  surfaceMode?: SurfaceMode;
 };
 
 const ORB_SIZE = 178;
@@ -198,8 +200,10 @@ export function OrbHero({
   progress,
   coreKind = 'timer',
   onActionPress,
+  surfaceMode = 'day',
 }: OrbHeroProps) {
   const accent = getAccentForState(state);
+  const caption = surfaces[surfaceMode];
   const [breathe] = useState(() => new Animated.Value(0));
   const progressValue = clampProgress(progress);
   const strokeDashoffset = useMemo(
@@ -355,10 +359,10 @@ export function OrbHero({
       </LinearGradient>
 
       <View style={{ paddingHorizontal: 4 }}>
-        <Text style={{ fontFamily: fonts.display, fontSize: 17, lineHeight: 20, color: colors.ink }}>
+        <Text style={{ fontFamily: fonts.display, fontSize: 17, lineHeight: 20, color: caption.ink }}>
           {title}
         </Text>
-        <Text style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: 17, color: colors.inkSoft, marginTop: 2 }}>
+        <Text style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: 17, color: caption.inkSoft, marginTop: 2 }}>
           {description}
         </Text>
       </View>
