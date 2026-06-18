@@ -32,6 +32,7 @@ import {
   addDiaper,
   addFeed,
   addNote,
+  addPump,
   cappedTimeline,
   handlePrimaryAction,
   handleQuickLog,
@@ -47,6 +48,7 @@ import {
   type DiaperDetails,
   type FeedDetails,
   type NoteDetails,
+  type PumpDetails,
   type TimelineEntry,
 } from '@/data/mock';
 import { clearHandoffCursor, LOCAL_CURSOR_CONTEXT } from '@/data/handoffCursor';
@@ -73,6 +75,7 @@ const TOAST_COPY = {
   sleepStart: 'Sleep started · Undo',
   sleepEnd: 'Sleep logged · Undo',
   note: 'Note saved · Undo',
+  pump: 'Pump logged · Undo',
 } as const;
 
 /** How long a toast stays before it quietly fades on its own. */
@@ -108,6 +111,8 @@ type LocalEventContextValue = {
   saveDiaper: (details?: DiaperDetails) => void;
   /** Save a note from the Note sheet (selected label → meta.label). */
   saveNote: (details?: NoteDetails) => void;
+  /** Save a pump from the Pump sheet (Left/Right/Both → meta.side when L/R). */
+  savePump: (details?: PumpDetails) => void;
   handlePrimaryAction: () => void;
   /** remove the most recently saved event and dismiss the toast */
   undoLastEvent: () => void;
@@ -300,6 +305,13 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
     setState((prev) => addNote(prev, details ?? { label: NOTE_PRESET_LABEL }));
   }, [showToast]);
 
+  const savePump = useCallback((details?: PumpDetails) => {
+    // Pumps are explicit side-logs (no dedup, no orb state) → always added, always toast.
+    hapticSave();
+    showToast(TOAST_COPY.pump);
+    setState((prev) => addPump(prev, details));
+  }, [showToast]);
+
   const onPrimaryAction = useCallback(() => {
     const prev = stateRef.current;
     const next = handlePrimaryAction(prev);
@@ -363,6 +375,7 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
       saveFeed,
       saveDiaper,
       saveNote,
+      savePump,
       handlePrimaryAction: onPrimaryAction,
       undoLastEvent,
       dismissToast,
@@ -379,6 +392,7 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
       saveFeed,
       saveDiaper,
       saveNote,
+      savePump,
       onPrimaryAction,
       undoLastEvent,
       dismissToast,

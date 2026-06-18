@@ -35,6 +35,9 @@ export const colors = {
   sleepTint: '#E9EBFB',
   diaper: '#23B79E',
   diaperTint: '#DDF5EF',
+  // pump — warm sunny yellow (the mockup's `--growth`); used by the Pump quick action
+  pump: '#FFB12E',
+  pumpTint: '#FFF1D6',
 
   // caregivers (mom/dad palette from the mockup)
   mom: '#FF9E5E',

@@ -20,7 +20,7 @@ import { Screen } from '@/components/Screen';
 import { SurfaceToggle } from '@/components/SurfaceToggle';
 import { TimelineCard } from '@/components/TimelineCard';
 import { TonightStatus } from '@/components/TonightStatus';
-import type { PreviewState } from '@/data/currentState';
+import { buildQuickLogMeta, type PreviewState } from '@/data/currentState';
 import { LOCAL_CURSOR_CONTEXT } from '@/data/handoffCursor';
 import type { Baby } from '@/data/models';
 import {
@@ -46,7 +46,7 @@ function ageInWeeks(birthDate: string): number {
 const FALLBACK_BABY: Baby = { ...seedBaby, name: 'Your baby' };
 
 /** Which detail sheet is open (null = none). Sleep never uses a sheet. */
-type SheetKind = 'feed' | 'diaper' | 'note';
+type SheetKind = 'feed' | 'diaper' | 'note' | 'pump';
 
 type SheetConfig = {
   title: string;
@@ -98,6 +98,19 @@ const SHEETS: Record<SheetKind, SheetConfig> = {
     accentColor: colors.sleep,
     accentTint: colors.sleepTint,
   },
+  pump: {
+    title: 'Log a pump',
+    subtitle: 'Just now',
+    options: [
+      { key: 'L', label: 'Left' },
+      { key: 'R', label: 'Right' },
+      { key: 'both', label: 'Both' },
+    ],
+    defaultKey: 'both',
+    saveLabel: 'Save pump',
+    accentColor: colors.pump,
+    accentTint: colors.pumpTint,
+  },
 };
 
 export default function TonightScreen() {
@@ -112,6 +125,7 @@ export default function TonightScreen() {
     saveFeed,
     saveDiaper,
     saveNote,
+    savePump,
     handlePrimaryAction,
     resetNonce,
   } = useLocalEvents();
@@ -165,8 +179,12 @@ export default function TonightScreen() {
     if (sheet === 'feed') saveFeed(key === 'bottle' ? {} : { side: key as 'L' | 'R' });
     else if (sheet === 'diaper') saveDiaper({ kind: key as 'wet' | 'dirty' | 'both' });
     else if (sheet === 'note') saveNote({ label: key });
+    else if (sheet === 'pump') savePump({ side: key as 'L' | 'R' | 'both' });
     setSheet(null);
   };
+
+  // Descriptive secondary lines for the quick-log cards, derived from live events.
+  const quickLogMeta = buildQuickLogMeta(events);
 
   return (
     <>
@@ -209,7 +227,8 @@ export default function TonightScreen() {
           <QuickLogRow
             selected={activeTile}
             onSelect={handleSelect}
-            onNote={() => setSheet('note')}
+            onPump={() => setSheet('pump')}
+            meta={quickLogMeta}
             surfaceMode={surfaceMode}
           />
         </View>

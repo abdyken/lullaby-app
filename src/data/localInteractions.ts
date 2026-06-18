@@ -13,6 +13,7 @@ import {
   createDiaperEvent,
   createFeedEvent,
   createNoteEvent,
+  createPumpEvent,
   createSleepEvent,
   endRunningSleep,
   getTonightTimeline,
@@ -21,6 +22,7 @@ import {
   type DiaperDetails,
   type FeedDetails,
   type NoteDetails,
+  type PumpDetails,
   type TimelineEntry,
 } from './mock';
 import type { OrbView, PreviewState } from './currentState';
@@ -146,6 +148,20 @@ export function addNote(
   now: number = Date.now(),
 ): TonightState {
   return { events: [createNoteEvent(now, details), ...state.events], orbView: state.orbView };
+}
+
+/**
+ * Append a pump event from the Pump sheet. Like a note, a pump is an instant
+ * side-log: it adds to the night's history but never owns an orb state or active
+ * quick-log tile (the orb keeps showing the baby's real feed/sleep/diaper
+ * context). No dedup window — a pump is always an explicit, intentional entry.
+ */
+export function addPump(
+  state: TonightState,
+  details?: PumpDetails,
+  now: number = Date.now(),
+): TonightState {
+  return { events: [createPumpEvent(now, details), ...state.events], orbView: state.orbView };
 }
 
 /**

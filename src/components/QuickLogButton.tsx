@@ -1,43 +1,57 @@
 /**
- * QuickLogButton — one tinted quick-log tile, translated from `.lb-q` in the
- * mockup: a soft white card with a rounded tinted icon square, a small bold
- * label, and a warm shadow. Active tiles get an accent ring (no layout shift)
- * and accent-colored label; "More" is muted because it's a P1 overflow.
+ * QuickLogButton — one large quick-log card, in the spirit of the Hush
+ * reference's `.qbtn`: a soft white card with a rounded tinted icon block on the
+ * LEFT and a two-line text column on the right (a label plus a smaller secondary
+ * line). Active cards get an accent ring (no layout shift) and an accent label;
+ * Pump never reads as active (it owns no orb state).
+ *
+ * The card surface lives on an inner View — not the Pressable — because on real
+ * Android the Pressable's own background doesn't paint reliably (see the project
+ * memory note). The Pressable only carries the press scale + opacity.
  */
 import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, Text, View } from 'react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 
-import { fonts, getAccentForState, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
+import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
-export type QuickLogKind = 'feed' | 'sleep' | 'diaper' | 'note' | 'more';
+export type QuickLogKind = 'feed' | 'sleep' | 'diaper' | 'pump';
 
 type Props = {
   kind: QuickLogKind;
   label: string;
+  /** smaller second line, e.g. "Left · 2h 45m ago" / "Sleep running" / "Log pump" */
+  secondary: string;
   active?: boolean;
-  /** muted, non-committal look (used by More) */
-  muted?: boolean;
+  /** Native-safe measured width supplied by QuickLogRow. */
+  cardWidth?: number;
   /** surface palette — 'day' (default) or 'night' */
   surfaceMode?: SurfaceMode;
   onPress?: () => void;
 };
 
-// Tinted icon-square gradients, verbatim from the mockup's `.lb-q .lb-qi`.
+// Solid accent per quick-log kind (Pump = warm yellow, the others their event
+// colors). Quick-log isn't an orb AccentState, so it keeps its own small map.
+const ACCENT: Record<QuickLogKind, string> = {
+  feed: colors.feed,
+  sleep: colors.sleep,
+  diaper: colors.diaper,
+  pump: colors.pump,
+};
+
+// Tinted icon-block gradients, verbatim from the reference's `.qbtn .qicon`.
 const TILE_GRADIENT: Record<QuickLogKind, [string, string]> = {
   feed: ['#FFE0CC', '#FFD0B6'],
   sleep: ['#E5E8FB', '#D6DBF7'],
   diaper: ['#DAF4EE', '#C9EFE6'],
-  // note + more share the calm neutral cream tile (no new color introduced)
-  note: ['#F2ECE6', '#ECE4DC'],
-  more: ['#F2ECE6', '#ECE4DC'],
+  pump: ['#FFF0D2', '#FCE6B6'],
 };
 
 function TileIcon({ kind, color }: { kind: QuickLogKind; color: string }) {
   const sw = 1.9;
   if (kind === 'feed') {
     return (
-      <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
         <Path
           d="M9 2h6M10 2v3.5a4 4 0 0 0-1.2 2.8L8 19a3 3 0 0 0 3 3h2a3 3 0 0 0 3-3l-.8-10.7A4 4 0 0 0 14 5.5V2"
           stroke={color}
@@ -50,7 +64,7 @@ function TileIcon({ kind, color }: { kind: QuickLogKind; color: string }) {
   }
   if (kind === 'sleep') {
     return (
-      <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
         <Path
           d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"
           stroke={color}
@@ -62,7 +76,7 @@ function TileIcon({ kind, color }: { kind: QuickLogKind; color: string }) {
   }
   if (kind === 'diaper') {
     return (
-      <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
         <Path
           d="M3 7h18l-1.5 4.5A8 8 0 0 1 12 17a8 8 0 0 1-7.5-5.5L3 7Z"
           stroke={color}
@@ -73,26 +87,15 @@ function TileIcon({ kind, color }: { kind: QuickLogKind; color: string }) {
       </Svg>
     );
   }
-  if (kind === 'note') {
-    // a calm stroke-based pencil, same 1.9 stroke style as the other tiles
-    return (
-      <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-        <Path
-          d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"
-          stroke={color}
-          strokeWidth={sw}
-          strokeLinejoin="round"
-        />
-        <Path d="M15 5l4 4" stroke={color} strokeWidth={sw} strokeLinecap="round" />
-      </Svg>
-    );
-  }
-  // more — a calm horizontal ellipsis (the P1 overflow: pump / bottle / medicine)
+  // pump — the reference's bottle/pump glyph
   return (
-    <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-      <Circle cx={5} cy={12} r={1.8} fill={color} />
-      <Circle cx={12} cy={12} r={1.8} fill={color} />
-      <Circle cx={19} cy={12} r={1.8} fill={color} />
+    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M7 21h10M8 21V11h8v10M6 11h12M9 11V7a3 3 0 0 1 6 0v4"
+        stroke={color}
+        strokeWidth={sw}
+        strokeLinejoin="round"
+      />
     </Svg>
   );
 }
@@ -100,56 +103,54 @@ function TileIcon({ kind, color }: { kind: QuickLogKind; color: string }) {
 export function QuickLogButton({
   kind,
   label,
+  secondary,
   active = false,
-  muted = false,
+  cardWidth,
   surfaceMode = 'day',
   onPress,
 }: Props) {
   const palette = surfaces[surfaceMode];
-  // note + more are neutral (no per-state accent); the rest map to their state accent
-  const neutral = kind === 'more' || kind === 'note';
-  const accent = neutral ? null : getAccentForState(kind);
-  const iconColor = muted
-    ? palette.inkFaint
-    : kind === 'note'
-      ? palette.inkSoft
-      : (accent?.color ?? palette.inkFaint);
-  const labelColor = active ? accent?.color ?? palette.inkSoft : muted ? palette.inkFaint : palette.inkSoft;
-  // Visible inactive boundary so the tile reads as a card on Android, where the
-  // warm iOS box-shadow is ignored (only `elevation` renders, and it's far too
-  // faint on cream). Day uses a soft warm rim (matching the warm shadow palette)
-  // — stronger than the near-white `line` hairline, which barely read on-device
-  // — and night uses a white hairline well above the shared 0.07 palette border.
+  const accent = ACCENT[kind];
+  const iconColor = accent;
+  const labelColor = active ? accent : palette.ink;
+  // Visible inactive boundary so the card reads as raised on Android, where the
+  // warm iOS box-shadow is ignored (only `elevation` renders, faint on cream).
+  // Day uses a soft warm rim; night a white hairline above the palette border.
   const inactiveBorder = surfaceMode === 'night' ? 'rgba(255,255,255,0.22)' : 'rgba(60,40,30,0.14)';
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ selected: active, disabled: muted }}
-      accessibilityLabel={label}
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={`${label}. ${secondary}`}
       onPress={onPress}
       style={({ pressed }) => ({
-        flex: 1,
-        opacity: muted ? 0.6 : 1,
-        transform: [{ scale: pressed ? 0.96 : 1 }],
+        // Native ScrollView measurement can collapse flex-only children. A
+        // measured width from QuickLogRow keeps all four cards equal on device.
+        width: cardWidth,
+        maxWidth: cardWidth,
+        flexGrow: 0,
+        flexShrink: 0,
+        minWidth: 0,
+        transform: [{ scale: pressed ? 0.97 : 1 }],
       })}>
       <View
         style={{
+          // Fill the Pressable's measured half-row width, and pin a stable
+          // height so all four cards match regardless of secondary-line length.
+          width: cardWidth ?? '100%',
+          height: 82,
+          flexDirection: 'row',
           alignItems: 'center',
-          gap: 6,
+          gap: 12,
           backgroundColor: palette.card,
-          borderRadius: radii.small,
-          paddingTop: 11,
-          paddingBottom: 9,
-          paddingHorizontal: 6,
-          // 2px ring at all times so selection never changes the tile's size:
-          // accent when active, otherwise a visible hairline (never transparent,
-          // which is what made the tile vanish on Android).
+          borderRadius: radii.medium,
+          paddingVertical: 14,
+          paddingHorizontal: 14,
+          // 2px ring at all times so selection never changes the card's size.
           borderWidth: 2,
-          borderColor: active ? accent?.color ?? inactiveBorder : inactiveBorder,
+          borderColor: active ? accent : inactiveBorder,
           ...shadows.card,
-          // Lift the tile a little more on Android so it reads as a raised card,
-          // closer to the elevated web look (web keeps the warm shadow above).
           elevation: 9,
         }}>
         <LinearGradient
@@ -157,16 +158,28 @@ export function QuickLogButton({
           start={{ x: 0.15, y: 0 }}
           end={{ x: 0.85, y: 1 }}
           style={{
-            width: 38,
-            height: 38,
-            borderRadius: 13,
+            width: 46,
+            height: 46,
+            borderRadius: 16,
             alignItems: 'center',
             justifyContent: 'center',
             transform: [{ scale: active ? 1.05 : 1 }],
           }}>
           <TileIcon kind={kind} color={iconColor} />
         </LinearGradient>
-        <Text style={{ fontFamily: fonts.bodyBold, fontSize: 11, color: labelColor }}>{label}</Text>
+
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text
+            numberOfLines={1}
+            style={{ fontFamily: fonts.displayMedium, fontSize: 15.5, color: labelColor }}>
+            {label}
+          </Text>
+          <Text
+            numberOfLines={1}
+            style={{ fontFamily: fonts.bodyBold, fontSize: 11, color: palette.inkFaint, marginTop: 2 }}>
+            {secondary}
+          </Text>
+        </View>
       </View>
     </Pressable>
   );

@@ -63,7 +63,7 @@ export type OrbView = PreviewState | 'calm';
 
 const CALM_STATE: CurrentBabyState = {
   state: 'sleep', // lavender accent — the calmest tone
-  skyTone: 'dusk',
+  skyTone: 'day',
   eyebrow: 'All quiet',
   timerText: 'Calm',
   title: 'All caught up',
@@ -238,7 +238,7 @@ export function getCurrentBabyState(
 
   return {
     state: 'sleep',
-    skyTone: 'night',
+    skyTone: 'day',
     eyebrow: 'All quiet',
     timerText: 'Quiet',
     title: 'All quiet',
@@ -648,4 +648,49 @@ export function buildTonightStatus(
     },
     { key: 'sleep', label: sleep.label, value: sleep.value },
   ];
+}
+
+/* ------------------------------------------------------------------ *
+ * Quick-log card secondary copy.
+ *
+ * A short, descriptive second line for each large quick-action card (Feed /
+ * Sleep / Diaper / Pump). Pure: derived from the live events, no canned numbers,
+ * no targets or judgement — just "what was the last one, and when". Kept concise
+ * so it never wraps on a half-width card.
+ * ------------------------------------------------------------------ */
+
+export type QuickLogMeta = { feed: string; sleep: string; diaper: string; pump: string };
+
+/** Short feed side for a card line: "Left" / "Right" / "Bottle". */
+function feedSideShort(side: 'L' | 'R' | undefined): string {
+  if (side === 'L') return 'Left';
+  if (side === 'R') return 'Right';
+  return 'Bottle';
+}
+
+export function buildQuickLogMeta(eventList: LogEvent[], now: number = Date.now()): QuickLogMeta {
+  const lastFeed = newestByCreatedAt(eventList, 'feed');
+  const runningSleep = eventList
+    .filter((event) => event.type === 'sleep' && event.endAt === null)
+    .sort(byNewestStart)[0];
+  const lastSleep = eventList
+    .filter((event) => event.type === 'sleep' && event.endAt !== null)
+    .sort(byNewestStart)[0];
+  const lastDiaper = newestByCreatedAt(eventList, 'diaper');
+  const lastPump = newestByCreatedAt(eventList, 'pump');
+
+  return {
+    feed: lastFeed
+      ? `${feedSideShort(lastFeed.meta.side)} · ${agoLabel(minutesSince(lastFeed.createdAt, now))}`
+      : 'Tap to log',
+    sleep: runningSleep
+      ? 'Sleep running'
+      : lastSleep && lastSleep.endAt
+        ? `Last nap ${durationLabel(lastSleep.startAt, new Date(lastSleep.endAt))}`
+        : 'Tap to start',
+    diaper: lastDiaper
+      ? `${diaperDetailLabel(lastDiaper.meta.kind)} · ${agoLabel(minutesSince(lastDiaper.createdAt, now))}`
+      : 'Tap to log',
+    pump: lastPump ? agoLabel(minutesSince(lastPump.createdAt, now)) : 'Log pump',
+  };
 }
