@@ -19,6 +19,7 @@ import { AuthGate } from '@/components/auth/AuthGate';
 import { LullabyTabBar } from '@/components/LullabyTabBar';
 import { AuthProvider } from '@/state/AuthProvider';
 import { LocalEventProvider } from '@/state/LocalEventProvider';
+import { colors } from '@/theme';
 
 export default function TabsLayout() {
   return (
@@ -29,10 +30,21 @@ export default function TabsLayout() {
         <LocalEventProvider>
           {/* flex:1 wrapper so AppToast can float as an app-level overlay above
               the floating tab bar, on whichever tab the save happened. */}
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1, backgroundColor: colors.cream }}>
             <Tabs
               tabBar={(props) => <LullabyTabBar {...props} />}
-              screenOptions={{ headerShown: false }}>
+              detachInactiveScreens={false}
+              screenOptions={{
+                headerShown: false,
+                lazy: false,
+                animation: 'fade',
+                transitionSpec: {
+                  animation: 'timing',
+                  config: { duration: 180 },
+                },
+                sceneStyle: { backgroundColor: colors.cream },
+                tabBarStyle: { backgroundColor: colors.cream },
+              }}>
               <Tabs.Screen name="index" options={{ title: 'Tonight' }} />
               <Tabs.Screen name="log" options={{ title: 'Log' }} />
               <Tabs.Screen name="reassure" options={{ title: 'Reassure' }} />

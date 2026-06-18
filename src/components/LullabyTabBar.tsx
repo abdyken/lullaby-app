@@ -12,8 +12,9 @@
  */
 import { Tabs } from 'expo-router';
 import type { ComponentProps } from 'react';
-import { Pressable, Text, useWindowDimensions, View } from 'react-native';
+import { Animated, Pressable, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEffect, useState } from 'react';
 
 import { TabIcon, type TabName } from '@/components/TabIcon';
 import { fonts, getAccentForState, tabbar } from '@/theme';
@@ -38,6 +39,104 @@ const ICONS: Record<string, TabName> = {
 // The tab bar keeps a calm sleep accent for the shell. The Tonight screen owns
 // real live state later; the bar can read from it then.
 const accent = getAccentForState('sleep');
+
+function AnimatedTabItem({
+  focused,
+  label,
+  iconName,
+  onPress,
+}: {
+  focused: boolean;
+  label: string;
+  iconName: TabName;
+  onPress: () => void;
+}) {
+  const [progress] = useState(() => new Animated.Value(focused ? 1 : 0));
+
+  useEffect(() => {
+    Animated.timing(progress, {
+      toValue: focused ? 1 : 0,
+      duration: 190,
+      useNativeDriver: false,
+    }).start();
+  }, [focused, progress]);
+
+  const tint = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [tabbar.inactiveColor, accent.color],
+  });
+  const chipBackground = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['rgba(233,235,251,0)', accent.tint],
+  });
+  const chipScale = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.94, 1],
+  });
+  const inactiveIconOpacity = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0],
+  });
+  const activeIconOpacity = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
+  });
+
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={focused ? { selected: true } : {}}
+        accessibilityLabel={label}
+        onPress={onPress}
+        style={({ pressed }) => ({
+          width: '100%',
+          height: tabbar.tabHeight,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: tabbar.tabRadius,
+          transform: [{ scale: pressed ? 0.97 : 1 }],
+        })}>
+        <Animated.View
+          style={{
+            minWidth: tabbar.chipMinWidth,
+            height: tabbar.chipHeight,
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: tabbar.chipGap,
+            borderRadius: tabbar.chipRadius,
+            backgroundColor: chipBackground,
+            transform: [{ scale: chipScale }],
+          }}>
+          <Animated.View
+            style={{
+              width: tabbar.iconSize,
+              height: tabbar.iconSize,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+            <Animated.View style={{ opacity: inactiveIconOpacity }}>
+              <TabIcon name={iconName} color={tabbar.inactiveColor} size={tabbar.iconSize} />
+            </Animated.View>
+            <Animated.View style={{ position: 'absolute', opacity: activeIconOpacity }}>
+              <TabIcon name={iconName} color={accent.color} size={tabbar.iconSize} />
+            </Animated.View>
+          </Animated.View>
+          <Animated.Text
+            numberOfLines={1}
+            style={{
+              fontFamily: fonts.bodyBold,
+              fontSize: tabbar.labelSize,
+              letterSpacing: 0.1,
+              color: tint,
+            }}>
+            {label}
+          </Animated.Text>
+        </Animated.View>
+      </Pressable>
+    </View>
+  );
+}
 
 export function LullabyTabBar({ state, navigation }: LullabyTabBarProps) {
   const insets = useSafeAreaInsets();
@@ -87,7 +186,6 @@ export function LullabyTabBar({ state, navigation }: LullabyTabBarProps) {
           const focused = state.index === index;
           const label = LABELS[route.name] ?? route.name;
           const iconName = ICONS[route.name] ?? 'tonight';
-          const tint = focused ? accent.color : tabbar.inactiveColor;
 
           const onPress = () => {
             const event = navigation.emit({
@@ -101,48 +199,13 @@ export function LullabyTabBar({ state, navigation }: LullabyTabBarProps) {
           };
 
           return (
-            // Equal wrapper → each tab owns exactly one third of the pill.
-            <View key={route.key} style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-              {/* Pressable fills the third (full tap target), stays transparent. */}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={focused ? { selected: true } : {}}
-                accessibilityLabel={label}
-                onPress={onPress}
-                style={({ pressed }) => ({
-                  width: '100%',
-                  height: tabbar.tabHeight,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderRadius: tabbar.tabRadius,
-                  transform: [{ scale: pressed ? 0.97 : 1 }],
-                })}>
-                {/* Small centered content group — THIS carries the active tint,
-                    so the chip hugs the icon+label instead of filling the tab. */}
-                <View
-                  style={{
-                    minWidth: tabbar.chipMinWidth,
-                    height: tabbar.chipHeight,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: tabbar.chipGap,
-                    borderRadius: tabbar.chipRadius,
-                    backgroundColor: focused ? accent.tint : 'transparent',
-                  }}>
-                  <TabIcon name={iconName} color={tint} size={tabbar.iconSize} />
-                  <Text
-                    numberOfLines={1}
-                    style={{
-                      fontFamily: fonts.bodyBold,
-                      fontSize: tabbar.labelSize,
-                      letterSpacing: 0.1,
-                      color: tint,
-                    }}>
-                    {label}
-                  </Text>
-                </View>
-              </Pressable>
-            </View>
+            <AnimatedTabItem
+              key={route.key}
+              focused={focused}
+              label={label}
+              iconName={iconName}
+              onPress={onPress}
+            />
           );
         })}
       </View>
