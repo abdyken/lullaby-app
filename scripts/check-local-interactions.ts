@@ -24,6 +24,7 @@ import {
   type TonightState,
 } from '../src/data/localInteractions';
 import {
+  buildHandoffSummary,
   buildNightRecap,
   buildTonightStatus,
   calmDescription,
@@ -33,7 +34,7 @@ import {
   recapSummaryLine,
 } from '../src/data/currentState';
 import { buildSeedEvents, getTonightTimeline } from '../src/data/mock';
-import type { LogEventType } from '../src/data/models';
+import type { Caregiver, LogEvent, LogEventType } from '../src/data/models';
 import { resolveSurfaceMode } from '../src/theme';
 import { parsePersistedState, serializeState } from '../src/data/persistedState';
 
@@ -476,6 +477,95 @@ check('Q2. status copy handles empty events (descriptive, no judgement)', () => 
   assert.equal(byKey.diaper.value, 'None yet');
   assert.equal(byKey.sleep.label, 'Awake');
   assert.equal(byKey.sleep.value, 'now');
+});
+
+// R. Handoff summary (the wedge) — "what happened since you last checked?"
+const MOM = 'cg-mom';
+const DAD = 'cg-dad';
+const SUMMARY_CAREGIVERS: Caregiver[] = [
+  { id: MOM, displayName: 'Mom', colorHex: '#FF9E5E', role: 'mom' },
+  { id: DAD, displayName: 'Dad', colorHex: '#5560C6', role: 'dad' },
+];
+// Minimal event factory: createdAt drives the cursor comparison.
+const ev = (over: Partial<LogEvent> & Pick<LogEvent, 'type' | 'caregiverId' | 'createdAt'>): LogEvent => ({
+  id: `${over.type}-${over.createdAt}`,
+  babyId: 'baby-mia',
+  startAt: over.createdAt,
+  endAt: null,
+  meta: {},
+  ...over,
+});
+
+check('R1. nothing new since the cursor reads "Nothing new…"', () => {
+  const events = [ev({ type: 'feed', caregiverId: DAD, createdAt: '2026-06-16T22:00:00.000Z' })];
+  const s = buildHandoffSummary(events, SUMMARY_CAREGIVERS, MOM, Date.parse('2026-06-16T23:00:00.000Z'));
+  assert.equal(s.hasNew, false);
+  assert.equal(s.text, 'Nothing new since you last checked.');
+});
+
+check('R2. one feed by the partner is attributed by name', () => {
+  const events = [ev({ type: 'feed', caregiverId: DAD, createdAt: '2026-06-16T23:30:00.000Z' })];
+  const s = buildHandoffSummary(events, SUMMARY_CAREGIVERS, MOM, Date.parse('2026-06-16T23:00:00.000Z'));
+  assert.equal(s.hasNew, true);
+  assert.equal(s.text, 'Dad logged 1 feed.');
+});
+
+check('R3. multiple event types join naturally', () => {
+  const events = [
+    ev({ type: 'feed', caregiverId: DAD, createdAt: '2026-06-16T23:10:00.000Z' }),
+    ev({ type: 'diaper', caregiverId: DAD, createdAt: '2026-06-16T23:20:00.000Z' }),
+    ev({ type: 'note', caregiverId: DAD, createdAt: '2026-06-16T23:30:00.000Z', meta: { label: 'Fussy' } }),
+  ];
+  const s = buildHandoffSummary(events, SUMMARY_CAREGIVERS, MOM, Date.parse('2026-06-16T23:00:00.000Z'));
+  assert.equal(s.text, 'Dad logged 1 feed, 1 diaper and 1 note.');
+});
+
+check('R4. a running sleep is reported as currently running', () => {
+  const events = [
+    ev({ type: 'feed', caregiverId: DAD, createdAt: '2026-06-16T23:10:00.000Z' }),
+    ev({ type: 'sleep', caregiverId: DAD, createdAt: '2026-06-16T23:20:00.000Z', endAt: null }),
+  ];
+  const s = buildHandoffSummary(events, SUMMARY_CAREGIVERS, MOM, Date.parse('2026-06-16T23:00:00.000Z'));
+  assert.equal(s.sleepRunning, true);
+  assert.equal(s.text, 'Dad logged 1 feed. Sleep is running.');
+});
+
+check('R5. only a fresh sleep start reads "… started sleep Nm ago"', () => {
+  const now = Date.parse('2026-06-17T00:00:00.000Z');
+  const events = [
+    ev({ type: 'sleep', caregiverId: DAD, createdAt: '2026-06-16T23:18:00.000Z', startAt: '2026-06-16T23:18:00.000Z', endAt: null }),
+  ];
+  const s = buildHandoffSummary(events, SUMMARY_CAREGIVERS, MOM, Date.parse('2026-06-16T23:00:00.000Z'), now);
+  assert.equal(s.text, 'Dad started sleep 42m ago.');
+});
+
+check('R6. my own events read "You logged …" (current caregiver wording)', () => {
+  const events = [ev({ type: 'feed', caregiverId: MOM, createdAt: '2026-06-16T23:30:00.000Z' })];
+  const s = buildHandoffSummary(events, SUMMARY_CAREGIVERS, MOM, Date.parse('2026-06-16T23:00:00.000Z'));
+  assert.equal(s.text, 'You logged 1 feed.');
+});
+
+check('R7. no caregivers loaded → neutral "While you were away" fallback (no throw)', () => {
+  const events = [ev({ type: 'feed', caregiverId: DAD, createdAt: '2026-06-16T23:30:00.000Z' })];
+  const s = buildHandoffSummary(events, [], MOM, Date.parse('2026-06-16T23:00:00.000Z'));
+  assert.equal(s.hasNew, true);
+  assert.equal(s.text, 'While you were away: 1 feed.');
+});
+
+check('R8. mixed caregivers use the neutral framing', () => {
+  const events = [
+    ev({ type: 'feed', caregiverId: MOM, createdAt: '2026-06-16T23:10:00.000Z' }),
+    ev({ type: 'diaper', caregiverId: DAD, createdAt: '2026-06-16T23:20:00.000Z' }),
+  ];
+  const s = buildHandoffSummary(events, SUMMARY_CAREGIVERS, MOM, Date.parse('2026-06-16T23:00:00.000Z'));
+  assert.equal(s.text, 'While you were away: 1 feed and 1 diaper.');
+});
+
+check('R9. a null cursor (never checked) counts everything as new', () => {
+  const events = [ev({ type: 'feed', caregiverId: DAD, createdAt: '2026-06-16T20:00:00.000Z' })];
+  const s = buildHandoffSummary(events, SUMMARY_CAREGIVERS, MOM, null);
+  assert.equal(s.hasNew, true);
+  assert.equal(s.text, 'Dad logged 1 feed.');
 });
 
 console.log(`\nAll ${passed} checks passed ✅`);

@@ -134,13 +134,17 @@ match…").
 5. **Both connected:** both devices show Mia and both caregiver chips in the
    header / handoff card. Log a Feed/Diaper/Note/Sleep on one → it appears on the
    other within ~1s, attributed to the real caregiver. Undo removes it on both.
-6. **Re-use guard:** entering the same (now-used) code again shows
+6. **Handoff summary:** on the device that did NOT log, the handoff card shows a
+   factual catch-up line (e.g. "Dad logged 1 feed. Sleep is running.") that
+   refreshes live. Tap **Mark caught up** → it becomes "Nothing new since you
+   last checked." (the cursor is device-local; the other device is unaffected).
+7. **Re-use guard:** entering the same (now-used) code again shows
    "…already been used."
 
 > Shortcut: signing into the **same account** on two devices also shares the baby
 > (no invite needed) and is the quickest realtime smoke test.
 
-## Known limitations (before handoff summary)
+## Known limitations (after handoff summary)
 
 - **One baby per caregiver** — `resolveRepository` / setup use the first linked
   baby; multi-baby switching isn't built.
@@ -154,7 +158,8 @@ match…").
 - **`orbView` is local** — if a partner ends a sleep while your orb shows the
   sleep view, your orb keeps its view until your next interaction (timeline /
   status reflect the shared truth immediately).
+- **Handoff cursor is device-local** — marking caught up on one phone does not
+  mark another phone caught up, because "have I seen this?" is personal reading
+  state rather than shared baby data.
 - **Supabase mode is not offline-persistent** — unsynced changes live in memory
   until reconnect (local-only mode still caches to AsyncStorage).
-- **No handoff summary yet** — "what happened since you last checked" is the next
-  slice; this one delivers the shared live night + real caregivers.

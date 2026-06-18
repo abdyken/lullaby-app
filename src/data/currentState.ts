@@ -1,6 +1,6 @@
 import type { OrbCoreKind, OrbSky } from '@/components/OrbHero';
 import { events } from '@/data/mock';
-import type { LogEvent } from '@/data/models';
+import type { Caregiver, LogEvent } from '@/data/models';
 import type { AccentState } from '@/theme';
 
 export type CurrentBabyState = {
@@ -446,6 +446,161 @@ export function deriveHandoff(eventList: LogEvent[]): HandoffSummary {
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   )[0];
   return { caregiverId: latest.caregiverId, eventLabel: handoffLabelFor(latest) };
+}
+
+/* ------------------------------------------------------------------ *
+ * Handoff summary (the wedge) — "what happened since you last checked?"
+ *
+ * Pure: (events, caregivers, currentCaregiverId, since-cursor) → one calm,
+ * FACTUAL line. Strictly descriptive: counts of what was logged + whether a
+ * sleep is running + who logged it. No medical advice, no predictions, no
+ * "normal/abnormal", no AI. The cursor (`since`, epoch ms or null) is owned by
+ * the caller (device-local); this function never reads storage or the clock
+ * except for the optional `now` used to phrase a fresh sleep-start.
+ * ------------------------------------------------------------------ */
+
+export type HandoffSummaryResult = {
+  /** true when there is at least one event newer than the cursor */
+  hasNew: boolean;
+  /** the calm, ready-to-render summary line */
+  text: string;
+  feedCount: number;
+  diaperCount: number;
+  noteCount: number;
+  /** completed sleep stretches in the new window */
+  completedSleepCount: number;
+  /** a sleep interval is currently running (from the full event list) */
+  sleepRunning: boolean;
+};
+
+function caregiverDisplayName(caregivers: Caregiver[], id: string): string | null {
+  const match = caregivers.find((c) => c.id === id);
+  return match ? match.displayName : null;
+}
+
+/** "1 feed" / "2 feeds". */
+function countWord(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
+
+/** Natural-language join: ["a","b","c"] → "a, b and c". */
+function joinClause(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? '';
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
+/**
+ * Build the calm handoff summary for the current caregiver. Events with
+ * `createdAt` strictly after `since` are "new"; a null cursor treats everything
+ * as new (a first, un-acknowledged view). Attribution is phrased carefully:
+ *  - all new events are mine        → "You logged …"
+ *  - all by one other, name known   → "Dad logged …"
+ *  - mixed, or name unknown         → "While you were away: …"
+ * A running sleep is appended as "Sleep is running."; if the ONLY new thing is a
+ * fresh sleep start, it reads "Dad started sleep 42m ago."
+ */
+export function buildHandoffSummary(
+  eventList: LogEvent[],
+  caregivers: Caregiver[],
+  currentCaregiverId: string | null,
+  since: number | null,
+  now: number = Date.now(),
+): HandoffSummaryResult {
+  const isNew = (e: LogEvent): boolean =>
+    since == null ? true : new Date(e.createdAt).getTime() > since;
+  const newEvents = eventList.filter(isNew);
+
+  let feedCount = 0;
+  let diaperCount = 0;
+  let noteCount = 0;
+  let completedSleepCount = 0;
+  for (const event of newEvents) {
+    switch (event.type) {
+      case 'feed':
+        feedCount += 1;
+        break;
+      case 'diaper':
+        diaperCount += 1;
+        break;
+      case 'note':
+        noteCount += 1;
+        break;
+      case 'sleep':
+        if (event.endAt !== null) completedSleepCount += 1;
+        break;
+      default:
+        break;
+    }
+  }
+
+  // Running sleep is a current-state fact (from the full list), useful even if it
+  // started before the cursor.
+  const runningSleep = eventList
+    .filter((e) => e.type === 'sleep' && e.endAt === null)
+    .sort(byNewestStart)[0];
+  const sleepRunning = runningSleep != null;
+
+  if (newEvents.length === 0) {
+    return {
+      hasNew: false,
+      text: since == null ? 'No activity to catch up on yet.' : 'Nothing new since you last checked.',
+      feedCount: 0,
+      diaperCount: 0,
+      noteCount: 0,
+      completedSleepCount: 0,
+      sleepRunning,
+    };
+  }
+
+  // Attribution across the new events.
+  const ids = Array.from(new Set(newEvents.map((e) => e.caregiverId)));
+  const allMine = currentCaregiverId != null && ids.length === 1 && ids[0] === currentCaregiverId;
+  const singleOtherId = ids.length === 1 && ids[0] !== currentCaregiverId ? ids[0] : null;
+  const singleOtherName = singleOtherId ? caregiverDisplayName(caregivers, singleOtherId) : null;
+  const newRunningSleep = runningSleep && isNew(runningSleep) ? runningSleep : undefined;
+
+  const parts: string[] = [];
+  if (feedCount > 0) parts.push(countWord(feedCount, 'feed'));
+  if (diaperCount > 0) parts.push(countWord(diaperCount, 'diaper'));
+  if (noteCount > 0) parts.push(countWord(noteCount, 'note'));
+  if (completedSleepCount > 0) parts.push(countWord(completedSleepCount, 'sleep'));
+
+  // Only a fresh sleep start, nothing else counted → phrase it on its own.
+  if (parts.length === 0 && newRunningSleep) {
+    const who = allMine ? 'You' : (singleOtherName ?? 'A caregiver');
+    return {
+      hasNew: true,
+      text: `${who} started sleep ${agoLabel(minutesSince(newRunningSleep.startAt, now))}.`,
+      feedCount,
+      diaperCount,
+      noteCount,
+      completedSleepCount,
+      sleepRunning: true,
+    };
+  }
+
+  // Defensive: new events but nothing we count or a running start (shouldn't
+  // normally happen) → a calm generic line.
+  if (parts.length === 0) {
+    return {
+      hasNew: true,
+      text: "There's new activity since you last checked.",
+      feedCount,
+      diaperCount,
+      noteCount,
+      completedSleepCount,
+      sleepRunning,
+    };
+  }
+
+  const body = joinClause(parts);
+  const prefix = allMine ? 'You logged ' : singleOtherName ? `${singleOtherName} logged ` : 'While you were away: ';
+  let text = `${prefix}${body}`;
+  if (sleepRunning) text += '. Sleep is running';
+  text += '.';
+
+  return { hasNew: true, text, feedCount, diaperCount, noteCount, completedSleepCount, sleepRunning };
 }
 
 /* ------------------------------------------------------------------ *
