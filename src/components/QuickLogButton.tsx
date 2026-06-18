@@ -8,7 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, Text, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
-import { colors, fonts, getAccentForState, radii, shadows } from '@/theme';
+import { fonts, getAccentForState, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
 export type QuickLogKind = 'feed' | 'sleep' | 'diaper' | 'note' | 'more';
 
@@ -18,6 +18,8 @@ type Props = {
   active?: boolean;
   /** muted, non-committal look (used by More) */
   muted?: boolean;
+  /** surface palette — 'day' (default) or 'night' */
+  surfaceMode?: SurfaceMode;
   onPress?: () => void;
 };
 
@@ -95,16 +97,30 @@ function TileIcon({ kind, color }: { kind: QuickLogKind; color: string }) {
   );
 }
 
-export function QuickLogButton({ kind, label, active = false, muted = false, onPress }: Props) {
+export function QuickLogButton({
+  kind,
+  label,
+  active = false,
+  muted = false,
+  surfaceMode = 'day',
+  onPress,
+}: Props) {
+  const palette = surfaces[surfaceMode];
   // note + more are neutral (no per-state accent); the rest map to their state accent
   const neutral = kind === 'more' || kind === 'note';
   const accent = neutral ? null : getAccentForState(kind);
   const iconColor = muted
-    ? colors.inkFaint
+    ? palette.inkFaint
     : kind === 'note'
-      ? colors.inkSoft
-      : (accent?.color ?? colors.inkFaint);
-  const labelColor = active ? accent?.color ?? colors.inkSoft : muted ? colors.inkFaint : colors.inkSoft;
+      ? palette.inkSoft
+      : (accent?.color ?? palette.inkFaint);
+  const labelColor = active ? accent?.color ?? palette.inkSoft : muted ? palette.inkFaint : palette.inkSoft;
+  // Visible inactive boundary so the tile reads as a card on Android, where the
+  // warm iOS box-shadow is ignored (only `elevation` renders, and it's far too
+  // faint on cream). Day uses a soft warm rim (matching the warm shadow palette)
+  // — stronger than the near-white `line` hairline, which barely read on-device
+  // — and night uses a white hairline well above the shared 0.07 palette border.
+  const inactiveBorder = surfaceMode === 'night' ? 'rgba(255,255,255,0.22)' : 'rgba(60,40,30,0.14)';
 
   return (
     <Pressable
@@ -121,16 +137,20 @@ export function QuickLogButton({ kind, label, active = false, muted = false, onP
         style={{
           alignItems: 'center',
           gap: 6,
-          backgroundColor: colors.surface,
+          backgroundColor: palette.card,
           borderRadius: radii.small,
           paddingTop: 11,
           paddingBottom: 9,
           paddingHorizontal: 6,
-          // 2px ring at all times (transparent when inactive) so selection
-          // never changes the tile's size
+          // 2px ring at all times so selection never changes the tile's size:
+          // accent when active, otherwise a visible hairline (never transparent,
+          // which is what made the tile vanish on Android).
           borderWidth: 2,
-          borderColor: active ? accent?.color ?? 'transparent' : 'transparent',
+          borderColor: active ? accent?.color ?? inactiveBorder : inactiveBorder,
           ...shadows.card,
+          // Lift the tile a little more on Android so it reads as a raised card,
+          // closer to the elevated web look (web keeps the warm shadow above).
+          elevation: 9,
         }}>
         <LinearGradient
           colors={TILE_GRADIENT[kind]}

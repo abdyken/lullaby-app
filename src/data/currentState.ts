@@ -447,3 +447,50 @@ export function deriveHandoff(eventList: LogEvent[]): HandoffSummary {
   )[0];
   return { caregiverId: latest.caregiverId, eventLabel: handoffLabelFor(latest) };
 }
+
+/* ------------------------------------------------------------------ *
+ * Tonight status strip (P0.5) — the #1 night question, answered at a glance:
+ * "when did she last eat / change / how long asleep?". Pure: events → three
+ * descriptive items. Reuses deriveNightStatus. Strictly descriptive — no goals,
+ * targets, predictions, or judgement (no "normal/soon/healthy").
+ * ------------------------------------------------------------------ */
+
+export type TonightStatusItem = {
+  key: 'feed' | 'diaper' | 'sleep';
+  /** short top label, e.g. "Last feed" / "Sleeping" / "Awake" */
+  label: string;
+  /** the value below, e.g. "1h 12m ago" / "38m" / "now" / "None yet" */
+  value: string;
+};
+
+/**
+ * Three calm status items for the Tonight strip:
+ *  - Last feed   → "1h 12m ago" (or "None yet")
+ *  - Last diaper → "42m ago"    (or "None yet")
+ *  - Sleep       → "Sleeping 38m" / "Awake now" (label + value split)
+ */
+export function buildTonightStatus(
+  eventList: LogEvent[],
+  now: number = Date.now(),
+): TonightStatusItem[] {
+  const status = deriveNightStatus(eventList, now);
+
+  const sleep =
+    status.babyStatus === 'sleeping'
+      ? { label: 'Sleeping', value: durationWords(status.sleepingForMin ?? 0) }
+      : { label: 'Awake', value: 'now' };
+
+  return [
+    {
+      key: 'feed',
+      label: 'Last feed',
+      value: status.lastFeedAgoMin != null ? agoLabel(status.lastFeedAgoMin) : 'None yet',
+    },
+    {
+      key: 'diaper',
+      label: 'Last diaper',
+      value: status.lastDiaperAgoMin != null ? agoLabel(status.lastDiaperAgoMin) : 'None yet',
+    },
+    { key: 'sleep', label: sleep.label, value: sleep.value },
+  ];
+}

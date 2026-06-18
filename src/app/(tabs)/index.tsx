@@ -16,11 +16,13 @@ import { LogSheet, type SheetOption } from '@/components/LogSheet';
 import { OrbHero } from '@/components/OrbHero';
 import { QuickLogRow } from '@/components/QuickLogRow';
 import { Screen } from '@/components/Screen';
+import { SurfaceToggle } from '@/components/SurfaceToggle';
 import { TimelineCard } from '@/components/TimelineCard';
+import { TonightStatus } from '@/components/TonightStatus';
 import type { PreviewState } from '@/data/currentState';
 import { baby, babyAgeInWeeks, caregivers } from '@/data/mock';
 import { useLocalEvents } from '@/state/LocalEventProvider';
-import { colors } from '@/theme';
+import { colors, resolveSurfaceMode, type SurfacePreference } from '@/theme';
 
 /** Which detail sheet is open (null = none). Sleep never uses a sheet. */
 type SheetKind = 'feed' | 'diaper' | 'note';
@@ -92,6 +94,10 @@ export default function TonightScreen() {
   } = useLocalEvents();
 
   const [sheet, setSheet] = useState<SheetKind | null>(null);
+  // Surface preference is local to Tonight (no persistence needed for the demo).
+  // 'auto' resolves against the device clock: low-glare night ~20:00–07:00.
+  const [surfacePref, setSurfacePref] = useState<SurfacePreference>('auto');
+  const surfaceMode = resolveSurfaceMode(surfacePref, new Date().getHours());
 
   // Feed / Diaper open a sheet (logging happens on Save); Sleep stays immediate.
   const handleSelect = (kind: PreviewState) => {
@@ -109,8 +115,18 @@ export default function TonightScreen() {
 
   return (
     <>
-      <Screen>
-        <BabyHeader baby={baby} ageWeeks={ageWeeks} caregivers={caregivers} />
+      <Screen surfaceMode={surfaceMode}>
+        <BabyHeader
+          baby={baby}
+          ageWeeks={ageWeeks}
+          caregivers={caregivers}
+          surfaceMode={surfaceMode}
+        />
+
+        {/* Low-emphasis Auto / Night / Day control (P0.5). Default Auto. */}
+        <View style={{ marginTop: 10 }}>
+          <SurfaceToggle value={surfacePref} onChange={setSurfacePref} surfaceMode={surfaceMode} />
+        </View>
 
         <View style={{ marginTop: 13 }}>
           <OrbHero
@@ -124,21 +140,37 @@ export default function TonightScreen() {
             progress={orb.progress}
             coreKind={orb.coreKind}
             onActionPress={handlePrimaryAction}
+            surfaceMode={surfaceMode}
+          />
+        </View>
+
+        {/* "Time since last feed / diaper / current sleep" at a glance (P0.5). */}
+        <View style={{ marginTop: 13 }}>
+          <TonightStatus events={events} surfaceMode={surfaceMode} />
+        </View>
+
+        <View style={{ marginTop: 13 }}>
+          <QuickLogRow
+            selected={activeTile}
+            onSelect={handleSelect}
+            onNote={() => setSheet('note')}
+            surfaceMode={surfaceMode}
           />
         </View>
 
         <View style={{ marginTop: 13 }}>
-          <QuickLogRow selected={activeTile} onSelect={handleSelect} onNote={() => setSheet('note')} />
-        </View>
-
-        <View style={{ marginTop: 13 }}>
-          <TimelineCard entries={tonightTimeline} />
+          <TimelineCard entries={tonightTimeline} surfaceMode={surfaceMode} />
         </View>
 
         {/* P0 partner/handoff card — local-only, below the timeline so it never
             pushes the orb / quick-log row down on small screens. */}
         <View style={{ marginTop: 13 }}>
-          <HandoffCard events={events} caregivers={caregivers} babyName={baby.name} />
+          <HandoffCard
+            events={events}
+            caregivers={caregivers}
+            babyName={baby.name}
+            surfaceMode={surfaceMode}
+          />
         </View>
       </Screen>
 

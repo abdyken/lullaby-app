@@ -16,15 +16,21 @@ import { Text, View } from 'react-native';
 
 import { deriveHandoff } from '@/data/currentState';
 import type { Caregiver, LogEvent } from '@/data/models';
-import { colors, fonts, radii, shadows } from '@/theme';
+import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
 type Props = {
   events: LogEvent[];
   caregivers: Caregiver[];
   babyName: string;
+  /** surface palette — 'day' (default) or 'night' */
+  surfaceMode?: SurfaceMode;
 };
 
-const CARD_GRADIENT: [string, string] = [colors.feedTint, colors.diaperTint];
+/** Day: the warm lb-sync gradient. Night: a calm dark navy (low-glare). */
+const CARD_GRADIENT: Record<SurfaceMode, [string, string]> = {
+  day: [colors.feedTint, colors.diaperTint],
+  night: ['#2B2A46', '#23303F'],
+};
 
 /** Calm, non-technical sentence for who handled the last event. */
 function handoffSentence(name: string, label: string): string {
@@ -49,7 +55,15 @@ function initialFor(caregiver: Caregiver): string {
 }
 
 /** Small color chip per caregiver; the latest logger stays solid, others dim. */
-function CaregiverChip({ caregiver, emphasized }: { caregiver: Caregiver; emphasized: boolean }) {
+function CaregiverChip({
+  caregiver,
+  emphasized,
+  borderColor,
+}: {
+  caregiver: Caregiver;
+  emphasized: boolean;
+  borderColor: string;
+}) {
   return (
     <View
       style={{
@@ -57,7 +71,7 @@ function CaregiverChip({ caregiver, emphasized }: { caregiver: Caregiver; emphas
         height: 30,
         borderRadius: 15,
         borderWidth: 2.5,
-        borderColor: colors.surface,
+        borderColor,
         marginLeft: -8,
         alignItems: 'center',
         justifyContent: 'center',
@@ -71,10 +85,16 @@ function CaregiverChip({ caregiver, emphasized }: { caregiver: Caregiver; emphas
   );
 }
 
-export function HandoffCard({ events, caregivers, babyName }: Props) {
+export function HandoffCard({ events, caregivers, babyName, surfaceMode = 'day' }: Props) {
   const { caregiverId, eventLabel } = deriveHandoff(events);
   const lastCaregiver = caregiverId ? caregivers.find((c) => c.id === caregiverId) : undefined;
   const hasLog = eventLabel != null && lastCaregiver != null;
+  // In day the bright gradient pairs with a white chip ring; in night use the
+  // card's own dark tone so the chips sit cleanly on the navy surface.
+  const chipBorder = surfaceMode === 'night' ? CARD_GRADIENT.night[0] : colors.surface;
+  const titleColor = surfaceMode === 'night' ? surfaces.night.ink : colors.ink;
+  const eyebrowColor = surfaceMode === 'night' ? surfaces.night.inkSoft : colors.inkSoft;
+  const sublineColor = surfaceMode === 'night' ? surfaces.night.inkSoft : colors.inkSoft;
 
   const title = hasLog
     ? handoffSentence(lastCaregiver.displayName, eventLabel)
@@ -85,10 +105,16 @@ export function HandoffCard({ events, caregivers, babyName }: Props) {
 
   return (
     <LinearGradient
-      colors={CARD_GRADIENT}
+      colors={CARD_GRADIENT[surfaceMode]}
       start={{ x: 0.1, y: 0 }}
       end={{ x: 0.9, y: 1 }}
-      style={{ borderRadius: radii.medium, padding: 16, ...shadows.card }}>
+      style={{
+        borderRadius: radii.medium,
+        borderWidth: surfaceMode === 'night' ? 1 : 0,
+        borderColor: surfaces.night.border,
+        padding: 16,
+        ...shadows.card,
+      }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         <View style={{ flex: 1 }}>
           <Text
@@ -97,12 +123,12 @@ export function HandoffCard({ events, caregivers, babyName }: Props) {
               fontSize: 10,
               letterSpacing: 1.2,
               textTransform: 'uppercase',
-              color: colors.inkSoft,
+              color: eyebrowColor,
             }}>
             Handoff
           </Text>
           <Text
-            style={{ fontFamily: fonts.display, fontSize: 15.5, color: colors.ink, marginTop: 5 }}>
+            style={{ fontFamily: fonts.display, fontSize: 15.5, color: titleColor, marginTop: 5 }}>
             {title}
           </Text>
           <Text
@@ -110,7 +136,7 @@ export function HandoffCard({ events, caregivers, babyName }: Props) {
               fontFamily: fonts.body,
               fontSize: 12,
               lineHeight: 17,
-              color: colors.inkSoft,
+              color: sublineColor,
               marginTop: 3,
             }}>
             {subline}
@@ -124,6 +150,7 @@ export function HandoffCard({ events, caregivers, babyName }: Props) {
               key={caregiver.id}
               caregiver={caregiver}
               emphasized={!hasLog || caregiver.id === caregiverId}
+              borderColor={chipBorder}
             />
           ))}
         </View>

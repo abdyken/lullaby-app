@@ -2,13 +2,15 @@ import { Pressable, Text, View } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg';
 
 import type { Baby, Caregiver } from '@/data/models';
-import { colors, fonts } from '@/theme';
+import { colors, fonts, surfaces, type SurfaceMode } from '@/theme';
 
 type Props = {
   baby: Baby;
   ageWeeks: number;
   caregivers: Caregiver[];
   onPress?: () => void;
+  /** surface palette — 'day' (default) or 'night' for low-glare text */
+  surfaceMode?: SurfaceMode;
 };
 
 function BabyAvatar() {
@@ -35,8 +37,9 @@ function initialFor(caregiver: Caregiver) {
   return caregiver.displayName.trim().charAt(0).toUpperCase() || '+';
 }
 
-export function BabyHeader({ baby, ageWeeks, caregivers, onPress }: Props) {
+export function BabyHeader({ baby, ageWeeks, caregivers, onPress, surfaceMode = 'day' }: Props) {
   const stackItems = [...caregivers.slice(0, 2), undefined];
+  const palette = surfaces[surfaceMode];
 
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 2, paddingTop: 6 }}>
@@ -54,10 +57,10 @@ export function BabyHeader({ baby, ageWeeks, caregivers, onPress }: Props) {
         })}>
         <BabyAvatar />
         <View style={{ flex: 1 }}>
-          <Text style={{ fontFamily: fonts.display, fontSize: 18, lineHeight: 20, color: colors.ink }}>
+          <Text style={{ fontFamily: fonts.display, fontSize: 18, lineHeight: 20, color: palette.ink }}>
             {baby.name}
           </Text>
-          <Text style={{ fontFamily: fonts.body, fontSize: 12, color: colors.inkSoft, marginTop: 1 }}>
+          <Text style={{ fontFamily: fonts.body, fontSize: 12, color: palette.inkSoft, marginTop: 1 }}>
             {ageWeeks} weeks old
           </Text>
         </View>
@@ -87,7 +90,7 @@ export function BabyHeader({ baby, ageWeeks, caregivers, onPress }: Props) {
               height: 29,
               borderRadius: 15,
               borderWidth: 2.5,
-              borderColor: colors.cream,
+              borderColor: palette.bg,
               alignItems: 'center',
               justifyContent: 'center',
               backgroundColor: caregiver?.colorHex ?? colors.diaper,

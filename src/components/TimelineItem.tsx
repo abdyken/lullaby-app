@@ -7,11 +7,13 @@ import { Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import type { TimelineEntry } from '@/data/mock';
-import { colors, fonts } from '@/theme';
+import { colors, fonts, surfaces, type SurfaceMode } from '@/theme';
 
 type Props = {
   entry: TimelineEntry;
   isLast: boolean;
+  /** surface palette — 'day' (default) or 'night' */
+  surfaceMode?: SurfaceMode;
 };
 
 // time(34) + gap(12) + dot center(14) → connector sits under the dot column
@@ -62,8 +64,9 @@ function DotIcon({ kind, color }: { kind: TimelineEntry['kind']; color: string }
   );
 }
 
-export function TimelineItem({ entry, isLast }: Props) {
+export function TimelineItem({ entry, isLast, surfaceMode = 'day' }: Props) {
   const initial = entry.caregiverName?.trim().charAt(0).toUpperCase() ?? '';
+  const palette = surfaces[surfaceMode];
 
   return (
     <View style={{ position: 'relative' }}>
@@ -75,7 +78,7 @@ export function TimelineItem({ entry, isLast }: Props) {
             top: 34,
             bottom: -8,
             width: 2,
-            backgroundColor: colors.line,
+            backgroundColor: palette.line,
           }}
         />
       ) : null}
@@ -87,7 +90,7 @@ export function TimelineItem({ entry, isLast }: Props) {
             paddingTop: 6,
             fontFamily: fonts.bodyBold,
             fontSize: 11.5,
-            color: colors.inkFaint,
+            color: palette.inkFaint,
           }}>
           {entry.time}
         </Text>
@@ -106,7 +109,7 @@ export function TimelineItem({ entry, isLast }: Props) {
         </View>
 
         <View style={{ flex: 1, paddingTop: 1 }}>
-          <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, color: colors.ink }}>
+          <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, color: palette.ink }}>
             {entry.label}
           </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
@@ -125,12 +128,12 @@ export function TimelineItem({ entry, isLast }: Props) {
                     {initial}
                   </Text>
                 </View>
-                <Text style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.inkSoft }}>
+                <Text style={{ fontFamily: fonts.body, fontSize: 11.5, color: palette.inkSoft }}>
                   {entry.caregiverName}
                 </Text>
               </>
             ) : (
-              <Text style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.inkSoft }}>
+              <Text style={{ fontFamily: fonts.body, fontSize: 11.5, color: palette.inkSoft }}>
                 On the clock
               </Text>
             )}

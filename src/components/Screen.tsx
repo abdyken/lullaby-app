@@ -7,16 +7,19 @@ import type { ReactNode } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, tabbar } from '@/theme';
+import { surfaces, tabbar, type SurfaceMode } from '@/theme';
 
 type Props = {
   children: ReactNode;
   /** when true the content scrolls; otherwise it fills the screen */
   scroll?: boolean;
+  /** surface palette — 'day' (cream, default) or 'night' (low-glare navy) */
+  surfaceMode?: SurfaceMode;
 };
 
-export function Screen({ children, scroll = true }: Props) {
+export function Screen({ children, scroll = true, surfaceMode = 'day' }: Props) {
   const insets = useSafeAreaInsets();
+  const background = surfaces[surfaceMode].bg;
   // Reserve space for the floating tab bar. Mirror its real footprint exactly:
   // the bar floats at paddingBottom = max(insets.bottom + 8, marginBottom) and
   // is `height` tall (see LullabyTabBar). Add a comfortable clearance so the
@@ -33,7 +36,7 @@ export function Screen({ children, scroll = true }: Props) {
   if (scroll) {
     return (
       <ScrollView
-        style={{ flex: 1, backgroundColor: colors.cream }}
+        style={{ flex: 1, backgroundColor: background }}
         contentContainerStyle={padding}
         showsVerticalScrollIndicator={false}>
         {children}
@@ -41,7 +44,7 @@ export function Screen({ children, scroll = true }: Props) {
     );
   }
 
-  return <View style={[{ flex: 1, backgroundColor: colors.cream }, padding]}>{children}</View>;
+  return <View style={[{ flex: 1, backgroundColor: background }, padding]}>{children}</View>;
 }
 
 export default Screen;
