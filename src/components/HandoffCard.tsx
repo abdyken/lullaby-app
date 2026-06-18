@@ -16,7 +16,7 @@ import { Text, View } from 'react-native';
 
 import { deriveHandoff } from '@/data/currentState';
 import type { Caregiver, LogEvent } from '@/data/models';
-import type { SyncMode } from '@/sync';
+import type { SyncMode, SyncStatus } from '@/sync';
 import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
 type Props = {
@@ -32,7 +32,24 @@ type Props = {
    * card say the log is shared with caregivers.
    */
   syncMode?: SyncMode;
+  /** sync status for the quiet status line (Supabase mode only) */
+  syncStatus?: SyncStatus;
 };
+
+/** Quiet one-liner for the live sync state. Null hides the line entirely. */
+function syncStatusLine(status: SyncStatus | undefined): string | null {
+  if (!status) return null;
+  switch (status.kind) {
+    case 'syncing':
+      return 'Syncing…';
+    case 'offline':
+      return 'Offline · saved on this device';
+    case 'synced':
+      return 'Synced just now';
+    default:
+      return null;
+  }
+}
 
 /** Day: the warm lb-sync gradient. Night: a calm dark navy (low-glare). */
 const CARD_GRADIENT: Record<SurfaceMode, [string, string]> = {
@@ -99,12 +116,15 @@ export function HandoffCard({
   babyName,
   surfaceMode = 'day',
   syncMode = 'local-only',
+  syncStatus,
 }: Props) {
   const { caregiverId, eventLabel } = deriveHandoff(events);
   const lastCaregiver = caregiverId ? caregivers.find((c) => c.id === caregiverId) : undefined;
   const hasLog = eventLabel != null && lastCaregiver != null;
   // Only claim sharing when real sync is active; otherwise stay "on this device".
   const isShared = syncMode === 'supabase';
+  // Quiet status line, only in shared mode (never in the local demo).
+  const statusLine = isShared ? syncStatusLine(syncStatus) : null;
   // In day the bright gradient pairs with a white chip ring; in night use the
   // card's own dark tone so the chips sit cleanly on the navy surface.
   const chipBorder = surfaceMode === 'night' ? CARD_GRADIENT.night[0] : colors.surface;
@@ -161,6 +181,18 @@ export function HandoffCard({
             }}>
             {subline}
           </Text>
+          {statusLine != null && (
+            <Text
+              style={{
+                fontFamily: fonts.bodyBold,
+                fontSize: 10,
+                letterSpacing: 0.4,
+                color: surfaceMode === 'night' ? surfaces.night.inkFaint : colors.inkFaint,
+                marginTop: 6,
+              }}>
+              {statusLine}
+            </Text>
+          )}
         </View>
 
         {/* Caregiver chips: paddingLeft offsets the first chip's negative margin */}

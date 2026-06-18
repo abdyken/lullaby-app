@@ -24,10 +24,12 @@ import {
   type ReactNode,
 } from 'react';
 
-import type { Caregiver, CaregiverRole } from '@/data/models';
+import type { Baby, Caregiver, CaregiverRole } from '@/data/models';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
   ensureCaregiverSetup,
+  getBaby,
+  getBabyCaregivers,
   getCaregiverProfile,
   getLinkedBabyId,
   getSupabaseSession,
@@ -52,6 +54,10 @@ type AuthContextValue = {
   session: Session | null;
   /** the signed-in caregiver's profile, once it exists */
   caregiver: Caregiver | null;
+  /** the linked baby (Supabase mode, status 'ready'); null otherwise */
+  baby: Baby | null;
+  /** every caregiver linked to the baby (includes self); [] until 'ready' */
+  caregivers: Caregiver[];
   /** a calm note after sign-up when email confirmation is required (no session yet) */
   pendingMessage: string | null;
   /** true while an auth/setup request is in flight (drives button spinners) */
@@ -81,6 +87,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>(configured ? 'loading' : 'local-only');
   const [session, setSession] = useState<Session | null>(null);
   const [caregiver, setCaregiver] = useState<Caregiver | null>(null);
+  const [baby, setBaby] = useState<Baby | null>(null);
+  const [caregivers, setCaregivers] = useState<Caregiver[]>([]);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -99,6 +107,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!next) {
       if (mounted.current) {
         setCaregiver(null);
+        setBaby(null);
+        setCaregivers([]);
         setStatus('signed-out');
       }
       return;
@@ -109,7 +119,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ]);
     if (!mounted.current) return;
     setCaregiver(profile);
-    setStatus(babyId ? 'ready' : 'needs-setup');
+    if (!babyId) {
+      setBaby(null);
+      setCaregivers([]);
+      setStatus('needs-setup');
+      return;
+    }
+    // Ready: load the real baby + linked caregivers for the UI. Soft — a missing
+    // read just leaves a calm fallback; it never blocks entering the app.
+    const [babyRow, linked] = await Promise.all([getBaby(babyId), getBabyCaregivers(babyId)]);
+    if (!mounted.current) return;
+    setBaby(babyRow);
+    setCaregivers(linked);
+    setStatus('ready');
   }, []);
 
   useEffect(() => {
@@ -222,6 +244,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       status,
       session,
       caregiver,
+      baby,
+      caregivers,
       pendingMessage,
       busy,
       errorMessage,
@@ -235,6 +259,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       status,
       session,
       caregiver,
+      baby,
+      caregivers,
       pendingMessage,
       busy,
       errorMessage,

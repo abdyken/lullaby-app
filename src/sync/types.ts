@@ -7,9 +7,21 @@
  * doesn't need it. The concrete repositories (local / supabase) implement this.
  */
 import type { TonightState } from '@/data/localInteractions';
+import type { LogEvent } from '@/data/models';
 
 /** Where the current night's events are being read from / written to. */
 export type SyncMode = 'local-only' | 'supabase';
+
+/**
+ * A minimal, idempotent diff of the event list for granular remote writes.
+ * `upserts` covers both new events and edits (e.g. a sleep gaining its endAt);
+ * `removedIds` covers deletions (e.g. Undo). Upserting by id is idempotent, so
+ * re-applying a change after a flaky network never duplicates a row.
+ */
+export type EventChanges = {
+  upserts: LogEvent[];
+  removedIds: string[];
+};
 
 /**
  * Calm, future-facing status for an eventual sync indicator. For this slice the
@@ -45,9 +57,18 @@ export interface EventRepository {
   /** Drop the persisted state (debug reset / sign-out). */
   clear(): Promise<void>;
   /**
-   * Subscribe to remote changes. Optional: the local repository has no remote,
-   * so it omits this. The Supabase repository will implement it in the realtime
-   * task. Returns an unsubscribe function.
+   * Apply a granular diff (per-event upserts + deletes). Optional: the local
+   * repository persists whole state via save(), so it omits this. The Supabase
+   * repository implements it so a single tap writes one row and Undo deletes one
+   * row — no whole-night upsert (which can't express deletions). Rejects on
+   * failure so the caller can surface an offline status.
+   */
+  applyChanges?(changes: EventChanges): Promise<void>;
+  /**
+   * Subscribe to remote changes for this backend's scope. Optional: the local
+   * repository has no remote, so it omits this. The Supabase repository pushes a
+   * fresh TonightState whenever the shared events change. Returns an unsubscribe
+   * function — call it on unmount / sign-out.
    */
   subscribe?(onRemoteChange: (state: TonightState) => void): () => void;
 }
