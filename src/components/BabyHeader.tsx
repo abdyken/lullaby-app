@@ -3,12 +3,15 @@ import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg'
 
 import type { Baby, Caregiver } from '@/data/models';
 import { colors, fonts, surfaces, type SurfaceMode } from '@/theme';
+import { ThemeIconButton } from './ThemeIconButton';
 
 type Props = {
   baby: Baby;
   ageWeeks: number;
   caregivers: Caregiver[];
   onPress?: () => void;
+  onThemeToggle?: () => void;
+  themeToggleDisabled?: boolean;
   /** surface palette — 'day' (default) or 'night' for low-glare text */
   surfaceMode?: SurfaceMode;
 };
@@ -37,12 +40,31 @@ function initialFor(caregiver: Caregiver) {
   return caregiver.displayName.trim().charAt(0).toUpperCase() || '+';
 }
 
-export function BabyHeader({ baby, ageWeeks, caregivers, onPress, surfaceMode = 'day' }: Props) {
+export function BabyHeader({
+  baby,
+  ageWeeks,
+  caregivers,
+  onPress,
+  onThemeToggle,
+  themeToggleDisabled = false,
+  surfaceMode = 'day',
+}: Props) {
   const stackItems = [...caregivers.slice(0, 2), undefined];
   const palette = surfaces[surfaceMode];
 
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 2, paddingTop: 6 }}>
+    <View
+      style={{
+        width: '100%',
+        minHeight: 56,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        paddingHorizontal: 2,
+        paddingTop: 6,
+        paddingRight: onThemeToggle ? 54 : 2,
+        position: 'relative',
+      }}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${baby.name} profile`}
@@ -101,6 +123,12 @@ export function BabyHeader({ baby, ageWeeks, caregivers, onPress, surfaceMode = 
           </View>
         ))}
       </Pressable>
+
+      {onThemeToggle ? (
+        <View style={{ position: 'absolute', top: 6, right: 2 }}>
+          <ThemeIconButton surfaceMode={surfaceMode} onPress={onThemeToggle} disabled={themeToggleDisabled} />
+        </View>
+      ) : null}
     </View>
   );
 }
