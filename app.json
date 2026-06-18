@@ -8,9 +8,12 @@
     "scheme": "lullaby",
     "userInterfaceStyle": "light",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.lullaby.app",
+      "supportsTablet": false
     },
     "android": {
+      "package": "com.lullaby.app",
       "adaptiveIcon": {
         "backgroundColor": "#FBF4EF",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
