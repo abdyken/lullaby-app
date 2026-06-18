@@ -203,6 +203,7 @@ export function OrbHero({
   surfaceMode = 'day',
 }: OrbHeroProps) {
   const accent = getAccentForState(state);
+  const actionColor = actionLabel === 'Start sleep' ? colors.feed : accent.color;
   const caption = surfaces[surfaceMode];
   const [breathe] = useState(() => new Animated.Value(0));
   const progressValue = clampProgress(progress);
@@ -354,7 +355,7 @@ export function OrbHero({
             </View>
           </View>
 
-          <PrimaryActionButton label={actionLabel} accentColor={accent.color} onPress={onActionPress} />
+          <PrimaryActionButton label={actionLabel} accentColor={actionColor} onPress={onActionPress} />
         </View>
       </LinearGradient>
 

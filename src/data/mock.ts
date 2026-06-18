@@ -300,6 +300,31 @@ export function createDiaperEvent(now: number = Date.now(), details?: DiaperDeta
   };
 }
 
+/** Optional detail for a pump (from the Pump sheet). */
+export type PumpDetails = { side?: 'L' | 'R' | 'both'; amountMl?: number };
+
+/**
+ * An instant pump → "Pump · 90 ml" when an amount is supplied, otherwise "Pump".
+ * Side L/R is recorded in meta when given; "both" carries no side (the model's
+ * side is L | R only) and just reads as a plain pump in the timeline.
+ */
+export function createPumpEvent(now: number = Date.now(), details?: PumpDetails): LogEvent {
+  const startAt = new Date(now).toISOString();
+  const meta: LogEvent['meta'] = {};
+  if (details?.side === 'L' || details?.side === 'R') meta.side = details.side;
+  if (details?.amountMl != null) meta.amountMl = details.amountMl;
+  return {
+    id: nextId('pump', now),
+    babyId: baby.id,
+    caregiverId: caregivers[0].id,
+    type: 'pump',
+    startAt,
+    endAt: null,
+    meta,
+    createdAt: startAt,
+  };
+}
+
 /** Optional detail for a note. */
 export type NoteDetails = { label?: string; note?: string };
 
