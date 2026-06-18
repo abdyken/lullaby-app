@@ -64,9 +64,12 @@ create policy "baby_caregivers_delete"
 
 -- --- babies membership policies (depend on the helper above) ---------------
 
+-- The creator is included explicitly so a freshly-inserted baby is readable
+-- (e.g. insert().select()) BEFORE its baby_caregivers link row exists — the
+-- membership helper alone can't see it yet during first-run setup.
 create policy "babies_select_member"
   on public.babies for select
-  using (public.is_baby_caregiver(id));
+  using (created_by = auth.uid() or public.is_baby_caregiver(id));
 
 create policy "babies_update_member"
   on public.babies for update

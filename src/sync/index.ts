@@ -15,3 +15,9 @@ export { LOCAL_ONLY_STATUS } from './types';
 export { localRepository } from './localRepository';
 export { resolveRepository } from './resolveRepository';
 export { getSupabaseSession, onSupabaseAuthChange } from './session';
+export {
+  ensureCaregiverSetup,
+  getCaregiverProfile,
+  getLinkedBabyId,
+  type CaregiverSetupInput,
+} from './provisioning';

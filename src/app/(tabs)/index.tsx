@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import { View } from 'react-native';
 
+import { AccountSheet } from '@/components/auth/AccountSheet';
 import { BabyHeader } from '@/components/BabyHeader';
 import { HandoffCard } from '@/components/HandoffCard';
 import { LogSheet, type SheetOption } from '@/components/LogSheet';
@@ -95,6 +96,9 @@ export default function TonightScreen() {
   } = useLocalEvents();
 
   const [sheet, setSheet] = useState<SheetKind | null>(null);
+  // Account/sign-out lives behind the baby header (blueprint settings home), but
+  // only in real-sync mode — local demo keeps the header inert as before.
+  const [accountOpen, setAccountOpen] = useState(false);
   // Surface preference is local to Tonight (no persistence needed for the demo).
   // 'auto' resolves against the device clock: low-glare night ~20:00–07:00.
   const [surfacePref, setSurfacePref] = useState<SurfacePreference>('auto');
@@ -122,6 +126,7 @@ export default function TonightScreen() {
           ageWeeks={ageWeeks}
           caregivers={caregivers}
           surfaceMode={surfaceMode}
+          onPress={syncMode === 'supabase' ? () => setAccountOpen(true) : undefined}
         />
 
         {/* Low-emphasis Auto / Night / Day control (P0.5). Default Auto. */}
@@ -184,6 +189,8 @@ export default function TonightScreen() {
           onClose={() => setSheet(null)}
         />
       )}
+
+      {accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} />}
     </>
   );
 }

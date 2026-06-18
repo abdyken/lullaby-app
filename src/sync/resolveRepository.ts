@@ -13,26 +13,10 @@
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 
 import { localRepository } from './localRepository';
+import { getLinkedBabyId } from './provisioning';
 import { getSupabaseSession } from './session';
 import { createSupabaseRepository } from './supabaseRepository';
 import type { EventRepository } from './types';
-
-/** First baby the caregiver is linked to via baby_caregivers, or null. */
-async function resolveActiveBabyId(caregiverId: string): Promise<string | null> {
-  if (!supabase) return null;
-  try {
-    const { data, error } = await supabase
-      .from('baby_caregivers')
-      .select('baby_id')
-      .eq('caregiver_id', caregiverId)
-      .limit(1)
-      .maybeSingle();
-    if (error || !data) return null;
-    return (data as { baby_id: string }).baby_id;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Resolve the active EventRepository. Returns the local repository whenever real
@@ -45,7 +29,7 @@ export async function resolveRepository(): Promise<EventRepository> {
   const session = await getSupabaseSession();
   if (!session) return localRepository;
 
-  const babyId = await resolveActiveBabyId(session.user.id);
+  const babyId = await getLinkedBabyId(session.user.id);
   if (!babyId) return localRepository;
 
   return createSupabaseRepository(supabase, {
