@@ -38,6 +38,7 @@ import {
   initTonightState,
   selectActiveTile,
   undoLastEvent as undoLastEventPure,
+  undoLastOwnEvent,
   type TonightState,
 } from '@/data/localInteractions';
 import {
@@ -48,7 +49,9 @@ import {
   type NoteDetails,
   type TimelineEntry,
 } from '@/data/mock';
+import { clearHandoffCursor, LOCAL_CURSOR_CONTEXT } from '@/data/handoffCursor';
 import type { LogEvent } from '@/data/models';
+import { hapticSave, hapticUndo } from '@/lib/haptics';
 import {
   diffEvents,
   isEmptyChange,
@@ -112,6 +115,12 @@ type LocalEventContextValue = {
   dismissToast: () => void;
   /** debug: wipe persisted state and return to the seed */
   resetLocalEvents: () => void;
+  /**
+   * Bumped by a local demo reset so the handoff cursor hook re-reads the (now
+   * cleared) cursor and the seeded night shows its catch-up story again. Local
+   * demo only — never changes in Supabase mode.
+   */
+  resetNonce: number;
 };
 
 const LocalEventContext = createContext<LocalEventContextValue | null>(null);
@@ -122,6 +131,8 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
   // data before the initial load completes.
   const [isHydrated, setIsHydrated] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
+  // Incremented by a local demo reset (below) to re-gate the handoff cursor.
+  const [resetNonce, setResetNonce] = useState(0);
 
   // The backend the night state flows through. Defaults to local (identical to
   // the previous direct-AsyncStorage behavior); resolveRepository may swap in a
@@ -252,7 +263,10 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
   const handleSleepTap = useCallback(() => {
     const prev = stateRef.current;
     const next = handleQuickLog(prev, 'sleep');
-    if (next.events.length > prev.events.length) showToast(TOAST_COPY.sleepStart);
+    if (next.events.length > prev.events.length) {
+      hapticSave();
+      showToast(TOAST_COPY.sleepStart);
+    }
     setState(next);
   }, [showToast]);
 
@@ -262,19 +276,26 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
   const saveFeed = useCallback((details?: FeedDetails) => {
     const prev = stateRef.current;
     const next = addFeed(prev, details);
-    if (next.events.length > prev.events.length) showToast(TOAST_COPY.feed);
+    if (next.events.length > prev.events.length) {
+      hapticSave();
+      showToast(TOAST_COPY.feed);
+    }
     setState(next);
   }, [showToast]);
 
   const saveDiaper = useCallback((details?: DiaperDetails) => {
     const prev = stateRef.current;
     const next = addDiaper(prev, details);
-    if (next.events.length > prev.events.length) showToast(TOAST_COPY.diaper);
+    if (next.events.length > prev.events.length) {
+      hapticSave();
+      showToast(TOAST_COPY.diaper);
+    }
     setState(next);
   }, [showToast]);
 
   const saveNote = useCallback((details?: NoteDetails) => {
     // Notes are explicit (no dedup) → always added, always toast.
+    hapticSave();
     showToast(TOAST_COPY.note);
     setState((prev) => addNote(prev, details ?? { label: NOTE_PRESET_LABEL }));
   }, [showToast]);
@@ -285,15 +306,24 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
     // Toast only for the two sleep transitions; End feed / Done don't add or
     // change an event (their toast already showed on the original tap).
     if (prev.orbView === 'calm' && next.events.length > prev.events.length) {
+      hapticSave();
       showToast(TOAST_COPY.sleepStart);
     } else if (prev.orbView === 'sleep') {
+      hapticSave();
       showToast(TOAST_COPY.sleepEnd);
     }
     setState(next);
   }, [showToast]);
 
   const undoLastEvent = useCallback(() => {
-    setState((prev) => undoLastEventPure(prev));
+    hapticUndo();
+    // Supabase (shared night): only ever remove THIS caregiver's most recent
+    // event so Undo can't delete a partner's newer one. Local-only: newest
+    // overall (single-caregiver device — unchanged). If the caregiver id is
+    // somehow unknown in sync mode, fall back to the safe local behavior.
+    const repository = repositoryRef.current;
+    const ownerId = repository.mode === 'supabase' ? repository.caregiverId : undefined;
+    setState((prev) => (ownerId ? undoLastOwnEvent(prev, ownerId) : undoLastEventPure(prev)));
     dismissToast();
   }, [dismissToast]);
 
@@ -307,6 +337,10 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
     }
     void repositoryRef.current.clear();
     setState(initTonightState(seedEvents));
+    // Also forget the device-local "caught up" cursor so the reseeded night
+    // shows its catch-up story again (not "Nothing new"). Bump the nonce once
+    // the clear lands so the cursor hook re-reads it without a reload.
+    void clearHandoffCursor(LOCAL_CURSOR_CONTEXT).finally(() => setResetNonce((n) => n + 1));
     dismissToast();
   }, [dismissToast]);
 
@@ -333,6 +367,7 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
       undoLastEvent,
       dismissToast,
       resetLocalEvents,
+      resetNonce,
     }),
     [
       state,
@@ -348,6 +383,7 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
       undoLastEvent,
       dismissToast,
       resetLocalEvents,
+      resetNonce,
     ],
   );
 

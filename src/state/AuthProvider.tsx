@@ -25,6 +25,7 @@ import {
 } from 'react';
 
 import type { Baby, Caregiver, CaregiverRole } from '@/data/models';
+import { hapticSuccess } from '@/lib/haptics';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
   acceptInvite,
@@ -247,6 +248,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           role: fields.role,
           colorHex: fields.colorHex,
         });
+        hapticSuccess(); // affirm the join landed before the app swaps in
         await evaluate(session); // → ready (now linked to the shared baby)
       } catch (e) {
         if (mounted.current) {

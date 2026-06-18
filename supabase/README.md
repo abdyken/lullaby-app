@@ -76,12 +76,18 @@ chips, attribution) and the night log is **live**:
 - **Writes are per-event** (`src/sync/supabaseRepository.ts` `applyChanges`): a
   tap upserts one row (idempotent by `id`), Undo deletes one row. No whole-night
   upsert, so a deletion is never resurrected.
+- **Undo is caregiver-scoped in shared mode.** Undo removes only the signed-in
+  caregiver's own most recent event (`undoLastOwnEvent`), never a partner's — so
+  if your partner logs something newer over realtime, your Undo still takes back
+  *your* last entry, not theirs. (Local-only mode keeps removing the newest event
+  overall — correct on a single-caregiver device.)
 - **A realtime channel** (`events:<baby_id>`, filtered to this baby) re-reads the
   night on any INSERT/UPDATE/DELETE and hands a fresh state to the UI. The
   `LocalEventProvider` adopts the shared events but keeps the local `orbView`,
   and an echo guard stops a device's own write from looping back out.
 - **A quiet status line** on the handoff card shows `Syncing…` / `Synced just
-  now` / `Offline · saved on this device`.
+  now` / `Offline · will retry` (calm + honest — an unsynced change is held in
+  memory and re-pushed on the next change/reconnect, not durably saved to disk).
 
 ### Migrations this needs
 
@@ -122,24 +128,45 @@ only validity + the role hint. Expired / already-used / unknown codes return cal
 copy ("This invite has expired…", "…already been used", "That code doesn't
 match…").
 
-### Manual two-caregiver test
+### Two-phone demo script (end to end)
 
-1. **A creates baby:** device 1 signs up → setup → **New baby** (e.g. Mia).
-2. **A creates invite:** baby header → **Invite caregiver** → role `Dad` →
-   **Create invite code** → note/share the code.
-3. **B signs up:** device 2 signs up with a different email (and confirms it, if
+The full path, from a clean project to a live two-caregiver night. A = phone 1,
+B = phone 2 (different email).
+
+1. **Apply migrations** — `supabase link --project-ref <ref> && supabase db push`
+   (in filename order). Enable the **Email** auth provider; for the smoothest
+   demo turn **Confirm email = off**. Confirm **Realtime** is on (default).
+2. **Set env** — copy `.env.example` → `.env`, fill `EXPO_PUBLIC_SUPABASE_URL`
+   and `EXPO_PUBLIC_SUPABASE_ANON_KEY`, then restart the dev server (env is
+   inlined at build time).
+3. **A signs up** — open the app on phone A → email + password → **sign up**.
+4. **A sets up the baby** — **New baby** → A's name + role, baby name (e.g. Mia),
+   age in weeks → **Start tonight**. A lands in the app (a soft success haptic
+   fires).
+5. **A invites B** — tap the baby header → **Invite caregiver** → pick B's role
+   → **Create invite code** (success haptic) → **Share code** / read it aloud.
+6. **B signs up** — on phone B, sign up with a *different* email (confirm it if
    confirmation is on).
-4. **B joins:** on setup, **Join with code** → name + role + the code → **Join
-   baby**. B lands in the app on baby Mia.
-5. **Both connected:** both devices show Mia and both caregiver chips in the
-   header / handoff card. Log a Feed/Diaper/Note/Sleep on one → it appears on the
-   other within ~1s, attributed to the real caregiver. Undo removes it on both.
-6. **Handoff summary:** on the device that did NOT log, the handoff card shows a
-   factual catch-up line (e.g. "Dad logged 1 feed. Sleep is running.") that
-   refreshes live. Tap **Mark caught up** → it becomes "Nothing new since you
-   last checked." (the cursor is device-local; the other device is unaffected).
-7. **Re-use guard:** entering the same (now-used) code again shows
-   "…already been used."
+7. **B joins with the code** — on setup, **Join with code** → B's name + role +
+   the code → **Join baby** (success haptic). B lands on the same baby; both
+   phones now show the baby name and both caregiver chips.
+8. **Log an event on A** — tap Feed (pick a side) → Save. A feels a light save
+   haptic; the orb + timeline update.
+9. **Verify B sees the realtime update** — within ~1s the event appears on B,
+   attributed to A, and B's handoff card leads with a factual catch-up line
+   (e.g. "Mom logged 1 feed. Sleep is running."). The status line reads
+   `Synced just now`.
+10. **B marks caught up** — tap **Mark caught up** (success haptic) → the card
+    becomes "Nothing new since you last checked." The cursor is **device-local**,
+    so A is unaffected.
+11. **Undo behavior (A vs B):**
+    - On **A**, the save toast's **Undo** removes **A's own** most recent
+      event — even if B logged something newer in between. A partner's newer
+      event is never deleted by your Undo.
+    - On **B**, Undo likewise only takes back **B's own** most recent event.
+    - Each Undo replicates to the other phone within ~1s (one row deleted).
+12. **Re-use guard** — entering the same (now-used) code again shows
+    "…already been used."
 
 > Shortcut: signing into the **same account** on two devices also shares the baby
 > (no invite needed) and is the quickest realtime smoke test.
@@ -162,4 +189,10 @@ match…").
   mark another phone caught up, because "have I seen this?" is personal reading
   state rather than shared baby data.
 - **Supabase mode is not offline-persistent** — unsynced changes live in memory
-  until reconnect (local-only mode still caches to AsyncStorage).
+  until reconnect (local-only mode still caches to AsyncStorage). The status line
+  says `Offline · will retry` (not "saved"), and the change re-pushes on the next
+  edit / reconnect; closing the app while offline drops the in-memory change.
+- **Haptics are best-effort** — a light tap on save, a soft tap on Undo, a
+  success buzz on Mark caught up / invite created / join. They are silent (never
+  an error) on web, simulators, in Low Power Mode, or where the Taptic engine is
+  unavailable.

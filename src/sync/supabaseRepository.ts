@@ -75,6 +75,7 @@ export function createSupabaseRepository(
 
   return {
     mode: 'supabase',
+    caregiverId: context.caregiverId,
 
     load: loadState,
 

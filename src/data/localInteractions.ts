@@ -171,6 +171,38 @@ export function undoLastEvent(state: TonightState): TonightState {
   return { events, orbView: hasRunningSleep(events) ? 'sleep' : 'calm' };
 }
 
+/**
+ * Supabase-safe Undo: remove only the most recently created event that belongs
+ * to `caregiverId`. In a shared two-caregiver night the newest event overall can
+ * be the PARTNER's (theirs may land newer over realtime), and Undo must never
+ * delete their work — so this scopes the removal to the current caregiver. If
+ * this caregiver has nothing to undo it is a calm no-op (returns the same state).
+ *
+ * Local-only mode keeps using {@link undoLastEvent} (newest overall), which is
+ * correct on a single-caregiver device and unchanged.
+ */
+export function undoLastOwnEvent(state: TonightState, caregiverId: string): TonightState {
+  if (state.events.length === 0) return state;
+
+  let newestIndex = -1;
+  for (let i = 0; i < state.events.length; i += 1) {
+    if (state.events[i].caregiverId !== caregiverId) continue;
+    if (
+      newestIndex === -1 ||
+      new Date(state.events[i].createdAt).getTime() >
+        new Date(state.events[newestIndex].createdAt).getTime()
+    ) {
+      newestIndex = i;
+    }
+  }
+
+  // Nothing of mine to undo → leave the shared night untouched.
+  if (newestIndex === -1) return state;
+
+  const events = state.events.filter((_, index) => index !== newestIndex);
+  return { events, orbView: hasRunningSleep(events) ? 'sleep' : 'calm' };
+}
+
 /** Which quick-log tile is active (null in the calm state). */
 export function selectActiveTile(state: TonightState): PreviewState | null {
   return state.orbView === 'calm' ? null : state.orbView;

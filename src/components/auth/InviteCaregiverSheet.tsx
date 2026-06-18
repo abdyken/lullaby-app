@@ -14,6 +14,7 @@ import { Modal, Pressable, Share, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { BabyInvite, CaregiverRole } from '@/data/models';
+import { hapticSuccess } from '@/lib/haptics';
 import { useAuth } from '@/state/AuthProvider';
 import { createInvite, formatInviteCode, getActiveInvites } from '@/sync';
 import { colors, fonts, radii, shadows } from '@/theme';
@@ -55,7 +56,10 @@ export function InviteCaregiverSheet({ onClose }: { onClose: () => void }) {
     setError(null);
     try {
       const created = await createInvite(baby.id, role);
-      if (created) setInvite(created);
+      if (created) {
+        hapticSuccess();
+        setInvite(created);
+      }
     } catch (e) {
       setError(
         e && typeof e === 'object' && 'message' in e && typeof e.message === 'string'

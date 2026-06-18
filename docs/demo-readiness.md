@@ -16,6 +16,10 @@ across restarts, and read calm static cards on Reassure.
   the contextual button (Start sleep / Wake baby / End feed / Done) works.
 - **Toast + Undo** — each save shows a calm confirmation toast that auto-dismisses;
   Undo removes the most recently saved event.
+- **Haptics (best-effort)** — a light tap confirms a save (Feed / Diaper / Note /
+  Start sleep / Wake baby), a soft tap confirms Undo, and a success buzz confirms
+  Mark caught up. Purely additive: on a device without a haptics motor (web, many
+  simulators, Low Power Mode) it is simply silent and never errors.
 - **Local handoff card (Tonight)** — a small partner/handoff card below the
   timeline shows who logged the latest event (e.g. "Mom logged the last feed")
   with caregiver color chips, or "Both caregivers are ready" when nothing is
@@ -24,10 +28,10 @@ across restarts, and read calm static cards on Reassure.
 - **Handoff summary (Tonight)** — the handoff card leads with a calm, FACTUAL
   catch-up line built from events since you last checked, e.g. "While you were
   away: 2 feeds and 1 diaper. Sleep is running." A low-emphasis **Mark caught
-  up** action stamps a device-local cursor, after which it reads "Nothing new
-  since you last checked." Strictly descriptive — no advice, no predictions, no
-  "normal/abnormal". In the local demo it summarizes the seeded/current events
-  on this device.
+  up** action stamps a device-local cursor (after a small success haptic), after
+  which it reads "Nothing new since you last checked." Strictly descriptive — no
+  advice, no predictions, no "normal/abnormal". In the local demo it summarizes
+  the seeded/current events on this device.
 - **Log shared history** — the Log tab reads the **same** local events as
   Tonight via `useLocalEvents()`, with Today/Yesterday grouping, Feed/Sleep/
   Diaper filters, a one-line night recap, and a warm empty state.
@@ -106,6 +110,9 @@ Run on a real phone (e.g. OnePlus / Android via Expo Go), in a dim room:
 - [ ] **Reassure copy is safe and static** — no diagnosis, disclaimer present,
       cards don't navigate anywhere (no-op press is expected).
 - [ ] **Night legibility** — text is readable, accents are calm, nothing harsh.
+- [ ] **Haptics fire on save** — a Feed/Diaper/Note save, Start sleep, Wake baby,
+      and Undo each give a subtle tap (best-effort; absent on devices without a
+      haptics motor or in Low Power Mode — should never error either way).
 
 ---
 
@@ -140,9 +147,11 @@ confirms the module graph (including AsyncStorage) resolves.
 
 A low-emphasis **Reset demo night** control sits at the bottom of the **Log**
 tab. Tapping it calls `resetLocalEvents()` — it clears the persisted local
-events from AsyncStorage, restores the seeded night, and dismisses any active
-toast, so Tonight / Log / the Reassure recap all return to the clean seeded
-state (and stay seeded after a reload).
+events from AsyncStorage, restores the seeded night, **clears the device-local
+handoff cursor**, and dismisses any active toast, so Tonight / Log / the Reassure
+recap all return to the clean seeded state (and stay seeded after a reload). The
+cursor reset means the handoff card shows its catch-up story again right away,
+instead of "Nothing new" left over from a previous Mark-caught-up.
 
 - **Prototype-only.** It is gated behind React Native's `__DEV__` flag, so it is
   stripped from production/release bundles and never shown to real users.

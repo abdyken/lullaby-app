@@ -51,7 +51,10 @@ function syncStatusLine(status: SyncStatus | undefined): string | null {
     case 'syncing':
       return 'Syncing…';
     case 'offline':
-      return 'Offline · saved on this device';
+      // Calm + honest: in Supabase mode an unsynced change is held in memory and
+      // re-pushed on the next change/reconnect — it is NOT durably "saved on this
+      // device", so we promise a retry rather than persistence.
+      return 'Offline · will retry';
     case 'synced':
       return 'Synced just now';
     default:

@@ -21,6 +21,7 @@ import { SurfaceToggle } from '@/components/SurfaceToggle';
 import { TimelineCard } from '@/components/TimelineCard';
 import { TonightStatus } from '@/components/TonightStatus';
 import type { PreviewState } from '@/data/currentState';
+import { LOCAL_CURSOR_CONTEXT } from '@/data/handoffCursor';
 import type { Baby } from '@/data/models';
 import {
   baby as seedBaby,
@@ -112,6 +113,7 @@ export default function TonightScreen() {
     saveDiaper,
     saveNote,
     handlePrimaryAction,
+    resetNonce,
   } = useLocalEvents();
   const { baby: remoteBaby, caregivers: remoteCaregivers, caregiver: ownCaregiver } = useAuth();
 
@@ -135,8 +137,13 @@ export default function TonightScreen() {
   // in the demo. currentCaregiverId stays null locally (no "You" attribution).
   const currentCaregiverId = isSupabase ? (ownCaregiver?.id ?? null) : null;
   const cursorContext =
-    isSupabase && currentCaregiverId ? `${currentCaregiverId}:${baby.id}` : 'local';
-  const { cursor, ready: cursorReady, markCaughtUp } = useHandoffCursor(cursorContext);
+    isSupabase && currentCaregiverId
+      ? `${currentCaregiverId}:${baby.id}`
+      : LOCAL_CURSOR_CONTEXT;
+  // A local demo reset clears the cursor and bumps resetNonce so the hook
+  // re-reads it (the seeded night shows its catch-up story again, not "Nothing
+  // new"). resetNonce never changes in Supabase mode.
+  const { cursor, ready: cursorReady, markCaughtUp } = useHandoffCursor(cursorContext, resetNonce);
 
   const [sheet, setSheet] = useState<SheetKind | null>(null);
   // Account/sign-out lives behind the baby header (blueprint settings home), but
