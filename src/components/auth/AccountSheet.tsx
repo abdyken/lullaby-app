@@ -7,16 +7,20 @@
  * Only mounted in Supabase mode (Tonight passes the header onPress only then),
  * so local-demo behavior is unchanged.
  */
+import { useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/state/AuthProvider';
 import { colors, fonts, radii, shadows } from '@/theme';
 
+import { InviteCaregiverSheet } from './InviteCaregiverSheet';
+
 export function AccountSheet({ onClose }: { onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const { session, caregiver, signOut, busy } = useAuth();
   const email = session?.user.email ?? null;
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
@@ -76,6 +80,25 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
             Your night log is shared with your caregivers on this baby.
           </Text>
 
+          {/* Low-emphasis invite entry point (Supabase ready mode only). */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Invite caregiver"
+            onPress={() => setInviteOpen(true)}
+            style={({ pressed }) => ({
+              marginTop: 18,
+              minHeight: 48,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: radii.medium,
+              backgroundColor: colors.sleepTint,
+              opacity: pressed ? 0.7 : 1,
+            })}>
+            <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.sleep }}>
+              Invite caregiver
+            </Text>
+          </Pressable>
+
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Sign out"
@@ -83,7 +106,7 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
             onPress={() => void signOut()}
             disabled={busy}
             style={({ pressed }) => ({
-              marginTop: 18,
+              marginTop: 10,
               minHeight: 48,
               alignItems: 'center',
               justifyContent: 'center',
@@ -99,6 +122,8 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
           </Pressable>
         </View>
       </View>
+
+      {inviteOpen && <InviteCaregiverSheet onClose={() => setInviteOpen(false)} />}
     </Modal>
   );
 }

@@ -17,6 +17,7 @@
 import type {
   Baby,
   BabyCaregiver,
+  BabyInvite,
   Caregiver,
   CaregiverRole,
   LogEvent,
@@ -50,6 +51,19 @@ export interface BabyCaregiverRow {
   baby_id: string;
   caregiver_id: string;
   role: CaregiverRole;
+}
+
+/** `public.baby_invites` row. */
+export interface BabyInviteRow {
+  id: string;
+  baby_id: string;
+  created_by: string;
+  code: string;
+  role_hint: CaregiverRole;
+  created_at: string;
+  expires_at: string;
+  accepted_at: string | null;
+  accepted_by: string | null;
 }
 
 /**
@@ -90,6 +104,20 @@ export function caregiverFromRow(row: ProfileRow): Caregiver {
 
 export function babyCaregiverFromRow(row: BabyCaregiverRow): BabyCaregiver {
   return { babyId: row.baby_id, caregiverId: row.caregiver_id, role: row.role };
+}
+
+export function inviteFromRow(row: BabyInviteRow): BabyInvite {
+  return {
+    id: row.id,
+    babyId: row.baby_id,
+    createdBy: row.created_by,
+    code: row.code,
+    roleHint: row.role_hint,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    acceptedAt: row.accepted_at,
+    acceptedBy: row.accepted_by,
+  };
 }
 
 export function eventFromRow(row: EventRow): LogEvent {
