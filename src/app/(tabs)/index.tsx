@@ -86,6 +86,7 @@ export default function TonightScreen() {
     orb,
     activeTile,
     tonightTimeline,
+    syncMode,
     handleSleepTap,
     saveFeed,
     saveDiaper,
@@ -170,6 +171,7 @@ export default function TonightScreen() {
             caregivers={caregivers}
             babyName={baby.name}
             surfaceMode={surfaceMode}
+            syncMode={syncMode}
           />
         </View>
       </Screen>
