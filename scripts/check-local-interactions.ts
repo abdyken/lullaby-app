@@ -21,6 +21,7 @@ import {
   handleSleepTap,
   initTonightState,
   undoLastEvent,
+  undoLastOwnEvent,
   type TonightState,
 } from '../src/data/localInteractions';
 import {
@@ -566,6 +567,61 @@ check('R9. a null cursor (never checked) counts everything as new', () => {
   const s = buildHandoffSummary(events, SUMMARY_CAREGIVERS, MOM, null);
   assert.equal(s.hasNew, true);
   assert.equal(s.text, 'Dad logged 1 feed.');
+});
+
+// S. Safer Undo (Supabase two-caregiver) — only the current caregiver's newest
+// event is removable, so Undo never deletes a partner's newer event.
+check('S1. undoLastOwnEvent removes only MY most recent event, never the partner’s', () => {
+  const events = [
+    ev({ type: 'feed', caregiverId: DAD, createdAt: '2026-06-16T23:40:00.000Z' }), // partner — newest overall
+    ev({ type: 'diaper', caregiverId: MOM, createdAt: '2026-06-16T23:30:00.000Z' }), // mine — newest of mine
+    ev({ type: 'feed', caregiverId: MOM, createdAt: '2026-06-16T23:10:00.000Z' }), // mine — older
+  ];
+  const after = undoLastOwnEvent({ events, orbView: 'calm' }, MOM);
+  assert.ok(after.events.some((e) => e.caregiverId === DAD), "partner's newer event survives");
+  assert.ok(!after.events.some((e) => e.type === 'diaper'), 'my newest (diaper) is removed');
+  assert.equal(after.events.filter((e) => e.caregiverId === MOM).length, 1); // older feed remains
+  assert.equal(after.events.length, 2);
+});
+
+check('S2. plain undo would delete the partner event; undoLastOwnEvent removes mine instead', () => {
+  const events = [
+    ev({ type: 'feed', caregiverId: DAD, createdAt: '2026-06-16T23:40:00.000Z' }), // partner — newest
+    ev({ type: 'diaper', caregiverId: MOM, createdAt: '2026-06-16T23:30:00.000Z' }), // mine
+  ];
+  // Newest-overall undo (local behavior) would remove the partner's feed…
+  const plain = undoLastEvent({ events, orbView: 'calm' });
+  assert.ok(!plain.events.some((e) => e.caregiverId === DAD));
+  // …the safe variant keeps it and removes my own event.
+  const safe = undoLastOwnEvent({ events, orbView: 'calm' }, MOM);
+  assert.ok(safe.events.some((e) => e.caregiverId === DAD));
+  assert.ok(!safe.events.some((e) => e.caregiverId === MOM));
+});
+
+check('S3. undoLastOwnEvent is a calm no-op when the caregiver has nothing to undo', () => {
+  const state: TonightState = {
+    events: [ev({ type: 'feed', caregiverId: DAD, createdAt: '2026-06-16T23:40:00.000Z' })],
+    orbView: 'calm',
+  };
+  const after = undoLastOwnEvent(state, MOM);
+  assert.equal(after, state); // same reference → genuine no-op, shared night untouched
+});
+
+check('S4. undoLastOwnEvent reconciles the orb to sleep when a partner sleep is still running', () => {
+  const events = [
+    ev({ type: 'sleep', caregiverId: DAD, createdAt: '2026-06-16T23:00:00.000Z', endAt: null }),
+    ev({ type: 'note', caregiverId: MOM, createdAt: '2026-06-16T23:30:00.000Z', meta: { label: 'Fussy' } }),
+  ];
+  const after = undoLastOwnEvent({ events, orbView: 'feed' }, MOM);
+  assert.equal(after.events.length, 1);
+  assert.equal(after.orbView, 'sleep'); // partner's sleep still running → orb stays asleep
+});
+
+// T. Handoff reset story — a cleared cursor (what a local demo reset produces)
+// brings back the catch-up summary instead of "Nothing new".
+check('T1. with a null cursor (post-reset) the seeded night shows its catch-up story', () => {
+  const s = buildHandoffSummary(seedEvents, SUMMARY_CAREGIVERS, MOM, null);
+  assert.equal(s.hasNew, true);
 });
 
 console.log(`\nAll ${passed} checks passed ✅`);

@@ -50,6 +50,13 @@ export const LOCAL_ONLY_STATUS: SyncStatus = { kind: 'local-only', lastSyncedAt:
 export interface EventRepository {
   /** Which backend this instance represents. Drives the surfaced SyncMode. */
   readonly mode: SyncMode;
+  /**
+   * The signed-in caregiver this instance writes as (Supabase only; undefined for
+   * local-only). The state layer uses it to scope a "safe Undo" to the current
+   * caregiver's own most recent event, so a shared night's Undo never deletes a
+   * partner's newer event.
+   */
+  readonly caregiverId?: string;
   /** Load the persisted night state, or null if there is none to adopt. */
   load(): Promise<TonightState | null>;
   /** Persist the full night state (best-effort; must never throw). */

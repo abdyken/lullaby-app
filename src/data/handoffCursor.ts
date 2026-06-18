@@ -14,6 +14,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const PREFIX = 'lullaby/handoff-cursor/';
 
+/** The cursor context used in local-only demo mode (no per-caregiver scoping). */
+export const LOCAL_CURSOR_CONTEXT = 'local';
+
 function keyFor(context: string): string {
   return `${PREFIX}${context}`;
 }
@@ -36,5 +39,18 @@ export async function saveHandoffCursor(context: string, value: number): Promise
     await AsyncStorage.setItem(keyFor(context), String(value));
   } catch {
     // best-effort — losing a cursor write only re-shows a summary the user saw
+  }
+}
+
+/**
+ * Forget the cursor for a context (back to "never caught up"). Used by the local
+ * demo reset so a fresh seeded night shows its catch-up story again instead of
+ * "Nothing new". Silent on failure.
+ */
+export async function clearHandoffCursor(context: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(keyFor(context));
+  } catch {
+    // best-effort — a failed clear just leaves the prior cursor in place
   }
 }
