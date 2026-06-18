@@ -50,6 +50,8 @@ import {
 } from '@/data/mock';
 import type { LogEvent } from '@/data/models';
 import {
+  diffEvents,
+  isEmptyChange,
   LOCAL_ONLY_STATUS,
   localRepository,
   resolveRepository,
@@ -128,6 +130,15 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
   const [syncMode, setSyncMode] = useState<SyncMode>('local-only');
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(LOCAL_ONLY_STATUS);
 
+  // Realtime echo guard: when state is set FROM a remote change (load or a live
+  // subscription update), this is flipped true so the persistence effect skips
+  // pushing it straight back — which would loop forever in Supabase mode.
+  const applyingRemoteRef = useRef(false);
+  // The event set last known to be in sync with the backend. Local changes are
+  // diffed against this so we push only what changed (per-event), and it's reset
+  // whenever a remote state is adopted.
+  const syncedEventsRef = useRef<LogEvent[]>([]);
+
   // Mirror the latest state in a ref so the tap handlers can decide whether a
   // save actually added an event (→ show a toast) without depending on `state`
   // in their deps or running side effects inside a setState updater.
@@ -143,11 +154,13 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
   }, []);
   const dismissToast = useCallback(() => setToast(null), []);
 
-  // Resolve the backend, then load once on mount. If valid saved state exists,
-  // adopt it; otherwise keep the seed. Either way we mark hydrated so saving can
-  // begin. In local-only mode this is identical to the previous direct load.
+  // Resolve the backend, load once on mount, then (Supabase) subscribe to live
+  // changes. If valid saved state exists, adopt it; otherwise keep the seed.
+  // Either way we mark hydrated so saving can begin. In local-only mode this is
+  // identical to the previous direct load (no subscription).
   useEffect(() => {
     let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
     (async () => {
       const repository = await resolveRepository();
       if (cancelled) return;
@@ -159,32 +172,71 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
 
       const saved = await repository.load();
       if (cancelled) return;
-      if (saved) setState(saved);
+      if (saved) {
+        // Adopt remote/persisted state without pushing it back out.
+        applyingRemoteRef.current = true;
+        syncedEventsRef.current = saved.events;
+        setState(saved);
+      }
+
       if (repository.mode === 'supabase') {
         setSyncStatus({ kind: 'synced', lastSyncedAt: new Date().toISOString() });
+        // Live updates: a partner's (or another device's) change re-reads the
+        // night and replaces our event list. Flagged as remote so it isn't
+        // echoed back. We adopt the shared EVENTS but keep our own orbView — the
+        // orb is this device's interaction context (a "Feed logged" confirmation
+        // shouldn't snap to calm when our own write echoes back, or when a
+        // partner logs something). Cleaned up on unmount / sign-out below.
+        unsubscribe = repository.subscribe?.((remoteState) => {
+          if (cancelled) return;
+          applyingRemoteRef.current = true;
+          syncedEventsRef.current = remoteState.events;
+          setState((prev) => ({ events: remoteState.events, orbView: prev.orbView }));
+          setSyncStatus({ kind: 'synced', lastSyncedAt: new Date().toISOString() });
+        });
       }
       setIsHydrated(true);
     })();
     return () => {
       cancelled = true;
+      unsubscribe?.();
     };
   }, []);
 
-  // Persist on every change, but only after hydration. On first launch this
-  // also writes the seed once (so the starting point is captured). The local
-  // repository never throws; the Supabase repository reflects success/failure
-  // through syncStatus.
+  // Persist on every change, but only after hydration.
+  //  - local-only: whole-state save to AsyncStorage (unchanged; writes the seed
+  //    once on first launch).
+  //  - supabase: push only the diff vs the last synced set (per-event upserts +
+  //    deletes), so a tap writes one row and Undo deletes one row.
+  // Remote-applied changes are skipped here (echo guard) — they're already the
+  // source of truth.
   useEffect(() => {
     if (!isHydrated) return;
+
+    if (applyingRemoteRef.current) {
+      applyingRemoteRef.current = false;
+      syncedEventsRef.current = state.events;
+      return;
+    }
+
     const repository = repositoryRef.current;
     if (repository.mode === 'local-only') {
       void repository.save(state);
       return;
     }
+
+    const changes = diffEvents(syncedEventsRef.current, state.events);
+    if (isEmptyChange(changes)) return;
+
     setSyncStatus((prev) => ({ ...prev, kind: 'syncing' }));
-    repository
-      .save(state)
-      .then(() => setSyncStatus({ kind: 'synced', lastSyncedAt: new Date().toISOString() }))
+    const apply = repository.applyChanges
+      ? repository.applyChanges(changes)
+      : repository.save(state);
+    apply
+      .then(() => {
+        syncedEventsRef.current = state.events;
+        setSyncStatus({ kind: 'synced', lastSyncedAt: new Date().toISOString() });
+      })
       .catch(() => setSyncStatus((prev) => ({ ...prev, kind: 'offline' })));
   }, [state, isHydrated]);
 
@@ -246,6 +298,13 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
   }, [dismissToast]);
 
   const resetLocalEvents = useCallback(() => {
+    // Local debug-only affordance. In Supabase mode it must NEVER push the seed
+    // or delete a partner's real night, so it's a no-op there (just clears any
+    // toast). The seed-restore path is local-only.
+    if (repositoryRef.current.mode === 'supabase') {
+      dismissToast();
+      return;
+    }
     void repositoryRef.current.clear();
     setState(initTonightState(seedEvents));
     dismissToast();

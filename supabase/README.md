@@ -66,18 +66,65 @@ readable before its link row exists.
 Until a caregiver is signed in **and** linked to a baby, the app uses the local
 flow — see `src/sync/resolveRepository.ts`.
 
-## Notes for the realtime slice (next)
+## Realtime sync (live shared night)
 
-- **`subscribe` is the seam.** `EventRepository.subscribe?()` is still unset; the
-  Supabase repo (`src/sync/supabaseRepository.ts`) will add a `events` realtime
-  channel filtered by `baby_id` and call back with a fresh `TonightState`. No
-  caller changes — `LocalEventProvider` already tolerates an optional subscribe.
-- **Writes are whole-night upserts** today; narrow to per-event writes when
-  realtime lands to avoid echoing a partner's rows back over the channel.
-- **The Tonight header/handoff still render the seeded `baby`/`caregivers`
-  labels** (from `src/data/mock.ts`) even in Supabase mode — loading the real
-  baby + co-caregivers into the UI (so chips show real names/colors) is part of
-  the realtime/invite slice. Event *sync* already uses the real `baby_id` and
-  `caregiver_id`.
-- **Partner invite** (a second `baby_caregivers` row for another account) is not
-  built yet; the link table + RLS already support it.
+Once `ready`, the app shows the **real baby name + caregivers** (header, handoff
+chips, attribution) and the night log is **live**:
+
+- **Writes are per-event** (`src/sync/supabaseRepository.ts` `applyChanges`): a
+  tap upserts one row (idempotent by `id`), Undo deletes one row. No whole-night
+  upsert, so a deletion is never resurrected.
+- **A realtime channel** (`events:<baby_id>`, filtered to this baby) re-reads the
+  night on any INSERT/UPDATE/DELETE and hands a fresh state to the UI. The
+  `LocalEventProvider` adopts the shared events but keeps the local `orbView`,
+  and an echo guard stops a device's own write from looping back out.
+- **A quiet status line** on the handoff card shows `Syncing…` / `Synced just
+  now` / `Offline · saved on this device`.
+
+### Migrations this needs
+
+`..._realtime_and_shared_profiles.sql` (apply it like the others):
+- `profiles_select_shared` policy + `shares_any_baby()` helper, so caregivers can
+  read each other's name/color (the "own profile" policy is untouched).
+- `alter table public.events replica identity full` so DELETE/UPDATE realtime
+  payloads carry `baby_id` for the channel filter.
+- adds `public.events` to the `supabase_realtime` publication (idempotent).
+
+Also confirm **Realtime is enabled** for the project (Database → Replication /
+Realtime) — Supabase projects have it on by default.
+
+### Testing two-device sync (before invite UI exists)
+
+There is no partner-invite screen yet, so link the second caregiver one of two
+ways:
+
+**Option A — same account, two devices (simplest):**
+1. Sign in with the same email + password on two devices/simulators.
+2. Both resolve to the same linked baby.
+3. Log a Feed/Diaper/Note/Sleep on one → it appears on the other within a second,
+   no restart. Undo on one → it disappears on the other.
+
+**Option B — two accounts sharing one baby (true handoff):**
+1. Device 1: sign up, complete setup → creates baby `B` and links caregiver `A`.
+2. Device 2: sign up as caregiver `C` and complete setup (creates a throwaway
+   baby). Note `C`'s `id` from the `profiles` table.
+3. In the Supabase SQL editor, link `C` to baby `B`:
+   ```sql
+   insert into public.baby_caregivers (baby_id, caregiver_id, role)
+   values ('<baby B id>', '<caregiver C id>', 'dad');
+   ```
+4. Restart device 2's app. It now resolves baby `B`; both devices see the same
+   live night and each other's caregiver chips. (The throwaway baby from step 2
+   is harmless — `resolveRepository` picks the first linked baby.)
+
+## Known limitations (before partner invite)
+
+- **No invite UI** — a second caregiver is linked manually (above). The link
+  table + RLS already support it.
+- **Full re-read on change** (not payload reconciliation) — simple and correct at
+  newborn-night volume; revisit only if event volume grows.
+- **`orbView` is local** — if a partner ends a sleep while your orb is showing the
+  sleep view, your orb keeps its view until your next interaction (the timeline /
+  status cards reflect the shared truth immediately).
+- **Supabase mode is not offline-persistent** — unsynced changes live in memory
+  until reconnect; they are not cached to AsyncStorage (local-only mode still is).

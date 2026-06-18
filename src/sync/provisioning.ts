@@ -10,10 +10,10 @@
  * This module owns the read-side helpers too (linked baby, profile) so both the
  * auth layer and repository resolution share one query path.
  */
-import type { Caregiver, CaregiverRole } from '@/data/models';
+import type { Baby, Caregiver, CaregiverRole } from '@/data/models';
 import { supabase } from '@/lib/supabase';
 
-import { caregiverFromRow, type ProfileRow } from './schema';
+import { babyFromRow, caregiverFromRow, type BabyRow, type ProfileRow } from './schema';
 
 /** The first baby the caregiver is linked to via baby_caregivers, or null. */
 export async function getLinkedBabyId(caregiverId: string): Promise<string | null> {
@@ -29,6 +29,47 @@ export async function getLinkedBabyId(caregiverId: string): Promise<string | nul
     return (data as { baby_id: string }).baby_id;
   } catch {
     return null;
+  }
+}
+
+/** The baby row as a Baby, or null (missing / unreadable). */
+export async function getBaby(babyId: string): Promise<Baby | null> {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('babies')
+      .select('*')
+      .eq('id', babyId)
+      .maybeSingle();
+    if (error || !data) return null;
+    return babyFromRow(data as BabyRow);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Every caregiver linked to a baby, as Caregivers (joins baby_caregivers →
+ * profiles). Reading a partner's profile relies on the `profiles_select_shared`
+ * RLS policy. Returns [] on any failure so the UI falls back softly.
+ */
+export async function getBabyCaregivers(babyId: string): Promise<Caregiver[]> {
+  if (!supabase) return [];
+  try {
+    const { data: links, error: linkError } = await supabase
+      .from('baby_caregivers')
+      .select('caregiver_id')
+      .eq('baby_id', babyId);
+    if (linkError || !links || links.length === 0) return [];
+    const ids = (links as { caregiver_id: string }[]).map((l) => l.caregiver_id);
+    const { data: profiles, error: profileError } = await supabase
+      .from('profiles')
+      .select('*')
+      .in('id', ids);
+    if (profileError || !profiles) return [];
+    return (profiles as ProfileRow[]).map(caregiverFromRow);
+  } catch {
+    return [];
   }
 }
 

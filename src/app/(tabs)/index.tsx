@@ -21,9 +21,27 @@ import { SurfaceToggle } from '@/components/SurfaceToggle';
 import { TimelineCard } from '@/components/TimelineCard';
 import { TonightStatus } from '@/components/TonightStatus';
 import type { PreviewState } from '@/data/currentState';
-import { baby, babyAgeInWeeks, caregivers } from '@/data/mock';
+import type { Baby } from '@/data/models';
+import {
+  baby as seedBaby,
+  babyAgeInWeeks as seedBabyAgeInWeeks,
+  caregivers as seedCaregivers,
+} from '@/data/mock';
+import { useAuth } from '@/state/AuthProvider';
 import { useLocalEvents } from '@/state/LocalEventProvider';
 import { colors, resolveSurfaceMode, type SurfacePreference } from '@/theme';
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Whole-week age from an ISO birth date (Supabase baby has a real birthDate). */
+function ageInWeeks(birthDate: string): number {
+  const born = new Date(birthDate).getTime();
+  if (Number.isNaN(born)) return 0;
+  return Math.max(0, Math.floor((Date.now() - born) / WEEK_MS));
+}
+
+/** Calm fallback while a Supabase baby row is briefly unavailable. */
+const FALLBACK_BABY: Baby = { ...seedBaby, name: 'Your baby' };
 
 /** Which detail sheet is open (null = none). Sleep never uses a sheet. */
 type SheetKind = 'feed' | 'diaper' | 'note';
@@ -81,19 +99,35 @@ const SHEETS: Record<SheetKind, SheetConfig> = {
 };
 
 export default function TonightScreen() {
-  const ageWeeks = babyAgeInWeeks(new Date('2026-06-16'));
   const {
     events,
     orb,
     activeTile,
     tonightTimeline,
     syncMode,
+    syncStatus,
     handleSleepTap,
     saveFeed,
     saveDiaper,
     saveNote,
     handlePrimaryAction,
   } = useLocalEvents();
+  const { baby: remoteBaby, caregivers: remoteCaregivers, caregiver: ownCaregiver } = useAuth();
+
+  // In Supabase mode, show the real linked baby + caregivers; fall back softly if
+  // a read is briefly missing. Local-only keeps the seeded Mia / Mom+Dad exactly.
+  const isSupabase = syncMode === 'supabase';
+  const baby = isSupabase ? (remoteBaby ?? FALLBACK_BABY) : seedBaby;
+  const caregivers = isSupabase
+    ? remoteCaregivers.length > 0
+      ? remoteCaregivers
+      : ownCaregiver
+        ? [ownCaregiver]
+        : []
+    : seedCaregivers;
+  const ageWeeks = isSupabase
+    ? ageInWeeks(baby.birthDate)
+    : seedBabyAgeInWeeks(new Date('2026-06-16'));
 
   const [sheet, setSheet] = useState<SheetKind | null>(null);
   // Account/sign-out lives behind the baby header (blueprint settings home), but
@@ -177,6 +211,7 @@ export default function TonightScreen() {
             babyName={baby.name}
             surfaceMode={surfaceMode}
             syncMode={syncMode}
+            syncStatus={syncStatus}
           />
         </View>
       </Screen>
