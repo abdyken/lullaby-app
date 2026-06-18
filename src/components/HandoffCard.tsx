@@ -16,6 +16,7 @@ import { Text, View } from 'react-native';
 
 import { deriveHandoff } from '@/data/currentState';
 import type { Caregiver, LogEvent } from '@/data/models';
+import type { SyncMode } from '@/sync';
 import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
 type Props = {
@@ -24,6 +25,13 @@ type Props = {
   babyName: string;
   /** surface palette — 'day' (default) or 'night' */
   surfaceMode?: SurfaceMode;
+  /**
+   * Whether real caregiver sync is active. In local-only mode (the default) the
+   * copy must stay explicit that the log lives "on this device" and must never
+   * imply cloud/realtime sync. Only when a Supabase backend is active does the
+   * card say the log is shared with caregivers.
+   */
+  syncMode?: SyncMode;
 };
 
 /** Day: the warm lb-sync gradient. Night: a calm dark navy (low-glare). */
@@ -85,10 +93,18 @@ function CaregiverChip({
   );
 }
 
-export function HandoffCard({ events, caregivers, babyName, surfaceMode = 'day' }: Props) {
+export function HandoffCard({
+  events,
+  caregivers,
+  babyName,
+  surfaceMode = 'day',
+  syncMode = 'local-only',
+}: Props) {
   const { caregiverId, eventLabel } = deriveHandoff(events);
   const lastCaregiver = caregiverId ? caregivers.find((c) => c.id === caregiverId) : undefined;
   const hasLog = eventLabel != null && lastCaregiver != null;
+  // Only claim sharing when real sync is active; otherwise stay "on this device".
+  const isShared = syncMode === 'supabase';
   // In day the bright gradient pairs with a white chip ring; in night use the
   // card's own dark tone so the chips sit cleanly on the navy surface.
   const chipBorder = surfaceMode === 'night' ? CARD_GRADIENT.night[0] : colors.surface;
@@ -100,8 +116,12 @@ export function HandoffCard({ events, caregivers, babyName, surfaceMode = 'day' 
     ? handoffSentence(lastCaregiver.displayName, eventLabel)
     : 'Both caregivers are ready';
   const subline = hasLog
-    ? `${babyName}'s night log is up to date on this device`
-    : 'The first night log will appear here';
+    ? isShared
+      ? `${babyName}'s night log is shared with your caregivers`
+      : `${babyName}'s night log is up to date on this device`
+    : isShared
+      ? `Tonight's log will stay in sync for your caregivers`
+      : 'The first night log will appear here';
 
   return (
     <LinearGradient

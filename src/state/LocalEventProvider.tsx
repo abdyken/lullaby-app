@@ -40,7 +40,6 @@ import {
   undoLastEvent as undoLastEventPure,
   type TonightState,
 } from '@/data/localInteractions';
-import { clearLocalEventStorage, loadPersistedState, savePersistedState } from '@/data/localStorage';
 import {
   events as seedEvents,
   getTonightTimeline,
@@ -50,6 +49,14 @@ import {
   type TimelineEntry,
 } from '@/data/mock';
 import type { LogEvent } from '@/data/models';
+import {
+  LOCAL_ONLY_STATUS,
+  localRepository,
+  resolveRepository,
+  type EventRepository,
+  type SyncMode,
+  type SyncStatus,
+} from '@/sync';
 
 /** A transient confirmation toast. `id` lets each save reset the auto-dismiss timer. */
 export type ToastState = { id: number; message: string };
@@ -82,6 +89,10 @@ type LocalEventContextValue = {
   fullTimeline: TimelineEntry[];
   /** true once the saved state has loaded (or been confirmed absent) */
   isHydrated: boolean;
+  /** which backend the night state is read/written through (local-only by default) */
+  syncMode: SyncMode;
+  /** calm sync status for a future indicator (local-only in demo mode) */
+  syncStatus: SyncStatus;
   /** active confirmation toast (null when none is showing) */
   toast: ToastState | null;
   /** Sleep stays an immediate, stateful quick action (no sheet). */
@@ -110,6 +121,13 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
   const [isHydrated, setIsHydrated] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
 
+  // The backend the night state flows through. Defaults to local (identical to
+  // the previous direct-AsyncStorage behavior); resolveRepository may swap in a
+  // Supabase repository on mount when sync is fully configured + signed in.
+  const repositoryRef = useRef<EventRepository>(localRepository);
+  const [syncMode, setSyncMode] = useState<SyncMode>('local-only');
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>(LOCAL_ONLY_STATUS);
+
   // Mirror the latest state in a ref so the tap handlers can decide whether a
   // save actually added an event (→ show a toast) without depending on `state`
   // in their deps or running side effects inside a setState updater.
@@ -125,25 +143,49 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
   }, []);
   const dismissToast = useCallback(() => setToast(null), []);
 
-  // Load once on mount. If valid saved state exists, adopt it; otherwise keep
-  // the seed. Either way we mark hydrated so saving can begin.
+  // Resolve the backend, then load once on mount. If valid saved state exists,
+  // adopt it; otherwise keep the seed. Either way we mark hydrated so saving can
+  // begin. In local-only mode this is identical to the previous direct load.
   useEffect(() => {
     let cancelled = false;
-    loadPersistedState().then((saved) => {
+    (async () => {
+      const repository = await resolveRepository();
+      if (cancelled) return;
+      repositoryRef.current = repository;
+      setSyncMode(repository.mode);
+      if (repository.mode === 'supabase') {
+        setSyncStatus({ kind: 'syncing', lastSyncedAt: null });
+      }
+
+      const saved = await repository.load();
       if (cancelled) return;
       if (saved) setState(saved);
+      if (repository.mode === 'supabase') {
+        setSyncStatus({ kind: 'synced', lastSyncedAt: new Date().toISOString() });
+      }
       setIsHydrated(true);
-    });
+    })();
     return () => {
       cancelled = true;
     };
   }, []);
 
   // Persist on every change, but only after hydration. On first launch this
-  // also writes the seed once (so the starting point is captured).
+  // also writes the seed once (so the starting point is captured). The local
+  // repository never throws; the Supabase repository reflects success/failure
+  // through syncStatus.
   useEffect(() => {
     if (!isHydrated) return;
-    void savePersistedState(state);
+    const repository = repositoryRef.current;
+    if (repository.mode === 'local-only') {
+      void repository.save(state);
+      return;
+    }
+    setSyncStatus((prev) => ({ ...prev, kind: 'syncing' }));
+    repository
+      .save(state)
+      .then(() => setSyncStatus({ kind: 'synced', lastSyncedAt: new Date().toISOString() }))
+      .catch(() => setSyncStatus((prev) => ({ ...prev, kind: 'offline' })));
   }, [state, isHydrated]);
 
   // Auto-dismiss the current toast after a short, calm delay.
@@ -204,7 +246,7 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
   }, [dismissToast]);
 
   const resetLocalEvents = useCallback(() => {
-    void clearLocalEventStorage();
+    void repositoryRef.current.clear();
     setState(initTonightState(seedEvents));
     dismissToast();
   }, [dismissToast]);
@@ -221,6 +263,8 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
       tonightTimeline: cappedTimeline(state),
       fullTimeline: getTonightTimeline(state.events),
       isHydrated,
+      syncMode,
+      syncStatus,
       toast,
       handleSleepTap,
       saveFeed,
@@ -234,6 +278,8 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
     [
       state,
       isHydrated,
+      syncMode,
+      syncStatus,
       toast,
       handleSleepTap,
       saveFeed,
