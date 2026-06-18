@@ -21,6 +21,13 @@ across restarts, and read calm static cards on Reassure.
   with caregiver color chips, or "Both caregivers are ready" when nothing is
   logged. It reflects the **local** caregiver/event model on this device only —
   no invite, no account, no cloud, no realtime.
+- **Handoff summary (Tonight)** — the handoff card leads with a calm, FACTUAL
+  catch-up line built from events since you last checked, e.g. "While you were
+  away: 2 feeds and 1 diaper. Sleep is running." A low-emphasis **Mark caught
+  up** action stamps a device-local cursor, after which it reads "Nothing new
+  since you last checked." Strictly descriptive — no advice, no predictions, no
+  "normal/abnormal". In the local demo it summarizes the seeded/current events
+  on this device.
 - **Log shared history** — the Log tab reads the **same** local events as
   Tonight via `useLocalEvents()`, with Today/Yesterday grouping, Feed/Sleep/
   Diaper filters, a one-line night recap, and a warm empty state.

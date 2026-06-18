@@ -29,6 +29,7 @@ import {
 } from '@/data/mock';
 import { useAuth } from '@/state/AuthProvider';
 import { useLocalEvents } from '@/state/LocalEventProvider';
+import { useHandoffCursor } from '@/state/useHandoffCursor';
 import { colors, resolveSurfaceMode, type SurfacePreference } from '@/theme';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -129,6 +130,14 @@ export default function TonightScreen() {
     ? ageInWeeks(baby.birthDate)
     : seedBabyAgeInWeeks(new Date('2026-06-16'));
 
+  // Device-local handoff cursor. Keyed per caregiver+baby in Supabase mode so two
+  // accounts on one device don't share a "caught up" state; a single 'local' key
+  // in the demo. currentCaregiverId stays null locally (no "You" attribution).
+  const currentCaregiverId = isSupabase ? (ownCaregiver?.id ?? null) : null;
+  const cursorContext =
+    isSupabase && currentCaregiverId ? `${currentCaregiverId}:${baby.id}` : 'local';
+  const { cursor, ready: cursorReady, markCaughtUp } = useHandoffCursor(cursorContext);
+
   const [sheet, setSheet] = useState<SheetKind | null>(null);
   // Account/sign-out lives behind the baby header (blueprint settings home), but
   // only in real-sync mode — local demo keeps the header inert as before.
@@ -212,6 +221,10 @@ export default function TonightScreen() {
             surfaceMode={surfaceMode}
             syncMode={syncMode}
             syncStatus={syncStatus}
+            currentCaregiverId={currentCaregiverId}
+            since={cursor}
+            cursorReady={cursorReady}
+            onMarkCaughtUp={markCaughtUp}
           />
         </View>
       </Screen>

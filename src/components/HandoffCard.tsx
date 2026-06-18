@@ -12,9 +12,9 @@
  * colors. The chip for whoever logged the newest event is emphasized.
  */
 import { LinearGradient } from 'expo-linear-gradient';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
-import { deriveHandoff } from '@/data/currentState';
+import { buildHandoffSummary, deriveHandoff } from '@/data/currentState';
 import type { Caregiver, LogEvent } from '@/data/models';
 import type { SyncMode, SyncStatus } from '@/sync';
 import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
@@ -34,6 +34,14 @@ type Props = {
   syncMode?: SyncMode;
   /** sync status for the quiet status line (Supabase mode only) */
   syncStatus?: SyncStatus;
+  /** the signed-in caregiver (Supabase) so "You" vs partner can be phrased; null = local */
+  currentCaregiverId?: string | null;
+  /** the "last caught up" cursor (epoch ms) driving the summary; null = never */
+  since?: number | null;
+  /** true once the stored cursor has loaded (avoids a flash of stale summary) */
+  cursorReady?: boolean;
+  /** mark the handoff as seen (shown only when there are new events) */
+  onMarkCaughtUp?: () => void;
 };
 
 /** Quiet one-liner for the live sync state. Null hides the line entirely. */
@@ -117,10 +125,15 @@ export function HandoffCard({
   surfaceMode = 'day',
   syncMode = 'local-only',
   syncStatus,
+  currentCaregiverId = null,
+  since = null,
+  cursorReady = false,
+  onMarkCaughtUp,
 }: Props) {
   const { caregiverId, eventLabel } = deriveHandoff(events);
   const lastCaregiver = caregiverId ? caregivers.find((c) => c.id === caregiverId) : undefined;
   const hasLog = eventLabel != null && lastCaregiver != null;
+  const hasAnyEvents = events.length > 0;
   // Only claim sharing when real sync is active; otherwise stay "on this device".
   const isShared = syncMode === 'supabase';
   // Quiet status line, only in shared mode (never in the local demo).
@@ -131,10 +144,22 @@ export function HandoffCard({
   const titleColor = surfaceMode === 'night' ? surfaces.night.ink : colors.ink;
   const eyebrowColor = surfaceMode === 'night' ? surfaces.night.inkSoft : colors.inkSoft;
   const sublineColor = surfaceMode === 'night' ? surfaces.night.inkSoft : colors.inkSoft;
+  const actionColor = surfaceMode === 'night' ? surfaces.night.ink : colors.sleep;
 
-  const title = hasLog
-    ? handoffSentence(lastCaregiver.displayName, eventLabel)
-    : 'Both caregivers are ready';
+  // The handoff summary takes the title slot once the cursor has loaded and there
+  // is something to summarize. Until then (or with no events) we keep the calm
+  // existing copy so nothing flashes.
+  const summary = buildHandoffSummary(events, caregivers, currentCaregiverId, since ?? null);
+  const useSummary = cursorReady && hasAnyEvents;
+  const showMarkCaughtUp = useSummary && summary.hasNew && onMarkCaughtUp != null;
+
+  const title = !hasAnyEvents
+    ? 'Both caregivers are ready'
+    : useSummary
+      ? summary.text
+      : hasLog
+        ? handoffSentence(lastCaregiver.displayName, eventLabel)
+        : 'Both caregivers are ready';
   const subline = hasLog
     ? isShared
       ? `${babyName}'s night log is shared with your caregivers`
@@ -181,6 +206,18 @@ export function HandoffCard({
             }}>
             {subline}
           </Text>
+          {showMarkCaughtUp && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Mark caught up"
+              onPress={onMarkCaughtUp}
+              hitSlop={8}
+              style={({ pressed }) => ({ alignSelf: 'flex-start', marginTop: 8, opacity: pressed ? 0.6 : 1 })}>
+              <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12, color: actionColor }}>
+                Mark caught up
+              </Text>
+            </Pressable>
+          )}
           {statusLine != null && (
             <Text
               style={{
