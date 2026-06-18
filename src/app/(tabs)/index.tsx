@@ -8,7 +8,7 @@
  * from the pure helpers in '@/data/localInteractions'.
  */
 import { useState } from 'react';
-import { View } from 'react-native';
+import { Animated, Easing, View } from 'react-native';
 
 import { AccountSheet } from '@/components/auth/AccountSheet';
 import { BabyHeader } from '@/components/BabyHeader';
@@ -17,12 +17,13 @@ import { LogSheet, type SheetOption } from '@/components/LogSheet';
 import { OrbHero } from '@/components/OrbHero';
 import { QuickLogRow } from '@/components/QuickLogRow';
 import { Screen } from '@/components/Screen';
-import { SurfaceToggle } from '@/components/SurfaceToggle';
+import { ThemeRevealOverlay } from '@/components/ThemeRevealOverlay';
 import { TimelineCard } from '@/components/TimelineCard';
 import { TonightStatus } from '@/components/TonightStatus';
 import { buildQuickLogMeta, type PreviewState } from '@/data/currentState';
 import { LOCAL_CURSOR_CONTEXT } from '@/data/handoffCursor';
 import type { Baby } from '@/data/models';
+import { hapticSave } from '@/lib/haptics';
 import {
   baby as seedBaby,
   babyAgeInWeeks as seedBabyAgeInWeeks,
@@ -31,7 +32,7 @@ import {
 import { useAuth } from '@/state/AuthProvider';
 import { useLocalEvents } from '@/state/LocalEventProvider';
 import { useHandoffCursor } from '@/state/useHandoffCursor';
-import { colors, resolveSurfaceMode, type SurfacePreference } from '@/theme';
+import { colors, surfaces, type SurfaceMode } from '@/theme';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -163,15 +164,48 @@ export default function TonightScreen() {
   // Account/sign-out lives behind the baby header (blueprint settings home), but
   // only in real-sync mode — local demo keeps the header inert as before.
   const [accountOpen, setAccountOpen] = useState(false);
-  // Surface preference is local to Tonight (no persistence needed for the demo).
-  // 'auto' resolves against the device clock: low-glare night ~20:00–07:00.
-  const [surfacePref, setSurfacePref] = useState<SurfacePreference>('auto');
-  const surfaceMode = resolveSurfaceMode(surfacePref, new Date().getHours());
+  // Telegram-style direct theme toggle. Local to Tonight for now.
+  const [surfaceMode, setSurfaceMode] = useState<SurfaceMode>('day');
+  const [themeAnimating, setThemeAnimating] = useState(false);
+  const [revealVisible, setRevealVisible] = useState(false);
+  const [revealColor, setRevealColor] = useState(surfaces.day.bg);
+  const [revealProgress] = useState(() => new Animated.Value(0));
+  const [revealOpacity] = useState(() => new Animated.Value(0));
 
   // Feed / Diaper open a sheet (logging happens on Save); Sleep stays immediate.
   const handleSelect = (kind: PreviewState) => {
     if (kind === 'sleep') handleSleepTap();
     else setSheet(kind);
+  };
+
+  const handleThemeToggle = () => {
+    if (themeAnimating) return;
+
+    const nextMode: SurfaceMode = surfaceMode === 'night' ? 'day' : 'night';
+    hapticSave();
+    setThemeAnimating(true);
+    setRevealColor(surfaces[nextMode].bg);
+    setRevealVisible(true);
+    revealProgress.setValue(0);
+    revealOpacity.setValue(1);
+
+    Animated.timing(revealProgress, {
+      toValue: 1,
+      duration: 520,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => {
+      setSurfaceMode(nextMode);
+      Animated.timing(revealOpacity, {
+        toValue: 0,
+        duration: 140,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start(() => {
+        setRevealVisible(false);
+        setThemeAnimating(false);
+      });
+    });
   };
 
   // Only Save creates the event + toast; dismissing the sheet logs nothing.
@@ -195,12 +229,9 @@ export default function TonightScreen() {
           caregivers={caregivers}
           surfaceMode={surfaceMode}
           onPress={syncMode === 'supabase' ? () => setAccountOpen(true) : undefined}
+          onThemeToggle={handleThemeToggle}
+          themeToggleDisabled={themeAnimating}
         />
-
-        {/* Low-emphasis Auto / Night / Day control (P0.5). Default Auto. */}
-        <View style={{ marginTop: 10 }}>
-          <SurfaceToggle value={surfacePref} onChange={setSurfacePref} surfaceMode={surfaceMode} />
-        </View>
 
         <View style={{ marginTop: 13 }}>
           <OrbHero
@@ -265,6 +296,13 @@ export default function TonightScreen() {
       )}
 
       {accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} />}
+
+      <ThemeRevealOverlay
+        visible={revealVisible}
+        color={revealColor}
+        progress={revealProgress}
+        opacity={revealOpacity}
+      />
     </>
   );
 }
