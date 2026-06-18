@@ -27,6 +27,7 @@ import {
 import type { Baby, Caregiver, CaregiverRole } from '@/data/models';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
+  acceptInvite,
   ensureCaregiverSetup,
   getBaby,
   getBabyCaregivers,
@@ -49,6 +50,14 @@ export type SetupFields = {
   birthDate: string;
 };
 
+/** Fields the "join with invite code" step collects. */
+export type JoinFields = {
+  displayName: string;
+  role: CaregiverRole;
+  colorHex: string;
+  code: string;
+};
+
 type AuthContextValue = {
   status: AuthStatus;
   session: Session | null;
@@ -66,6 +75,8 @@ type AuthContextValue = {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   completeSetup: (fields: SetupFields) => Promise<void>;
+  /** Join an existing baby with an invite code (alternative to completeSetup). */
+  joinWithInvite: (fields: JoinFields) => Promise<void>;
   signOut: () => Promise<void>;
   clearError: () => void;
 };
@@ -223,6 +234,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [session, evaluate],
   );
 
+  const joinWithInvite = useCallback(
+    async (fields: JoinFields) => {
+      if (!supabase || !session) return;
+      setBusy(true);
+      setErrorMessage(null);
+      try {
+        await acceptInvite({
+          caregiverId: session.user.id,
+          code: fields.code,
+          displayName: fields.displayName.trim(),
+          role: fields.role,
+          colorHex: fields.colorHex,
+        });
+        await evaluate(session); // → ready (now linked to the shared baby)
+      } catch (e) {
+        if (mounted.current) {
+          setErrorMessage(messageFrom(e, 'Could not join with that code. Please try again.'));
+        }
+      } finally {
+        if (mounted.current) setBusy(false);
+      }
+    },
+    [session, evaluate],
+  );
+
   const signOut = useCallback(async () => {
     if (!supabase) return;
     setBusy(true);
@@ -252,6 +288,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signUp,
       completeSetup,
+      joinWithInvite,
       signOut,
       clearError,
     }),
@@ -267,6 +304,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signUp,
       completeSetup,
+      joinWithInvite,
       signOut,
       clearError,
     ],

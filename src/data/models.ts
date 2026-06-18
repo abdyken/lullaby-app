@@ -37,6 +37,24 @@ export interface BabyCaregiver {
   role: CaregiverRole;
 }
 
+/** A short, expiring code that lets a second caregiver join an existing baby. */
+export interface BabyInvite {
+  id: string;
+  babyId: string;
+  /** caregiver id who created the invite */
+  createdBy: string;
+  /** canonical (uppercase, alphanumeric) invite code */
+  code: string;
+  /** the role the inviter expects the joiner to take (a hint, not enforced) */
+  roleHint: CaregiverRole;
+  createdAt: string;
+  expiresAt: string;
+  /** ISO timestamp the invite was redeemed, or null if still open */
+  acceptedAt: string | null;
+  /** caregiver id who redeemed the invite, or null */
+  acceptedBy: string | null;
+}
+
 /** Per-type extra detail. feed: side/duration/amount; diaper: kind; pump: amount; note: label/note. */
 export interface LogEventMeta {
   side?: 'L' | 'R';
