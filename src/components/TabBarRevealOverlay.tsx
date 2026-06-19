@@ -17,7 +17,7 @@ import { usePathname } from 'expo-router';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import type { TabName } from '@/components/TabIcon';
-import { TabBarPill, TAB_BAR_DEBUG, useTabBarLayout, type TabBarTab } from '@/components/TabBarPill';
+import { TabBarPill, useTabBarLayout, type TabBarTab } from '@/components/TabBarPill';
 import { ThemeRevealMask } from '@/components/ThemeRevealOverlay';
 import { useTheme } from '@/state/ThemeProvider';
 import { surfaces, tabbar } from '@/theme';
@@ -87,12 +87,13 @@ export function TabBarRevealOverlay() {
                 backgroundColor: surfaces[reveal.toMode].bg,
               }}
             />
+            {/* Overlay pill is ALWAYS the incoming theme (`reveal.toMode`); the
+                frozen base bar shows `reveal.fromMode`. No shadow inside the mask. */}
             <TabBarPill
               themeMode={reveal.toMode}
               pillWidth={pillWidth}
               tabs={tabs}
               withShadow={false}
-              debugBorder={TAB_BAR_DEBUG ? '#00e000' : undefined}
             />
           </View>
         </View>

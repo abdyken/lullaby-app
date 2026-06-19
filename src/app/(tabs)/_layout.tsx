@@ -22,7 +22,6 @@ import { View } from 'react-native';
 import { AppToast } from '@/components/AppToast';
 import { AuthGate } from '@/components/auth/AuthGate';
 import { LullabyTabBar } from '@/components/LullabyTabBar';
-import { TAB_BAR_DEBUG } from '@/components/TabBarPill';
 import { TabBarRevealOverlay } from '@/components/TabBarRevealOverlay';
 import { AuthProvider } from '@/state/AuthProvider';
 import { LocalEventProvider } from '@/state/LocalEventProvider';
@@ -36,12 +35,6 @@ export default function TabsLayout() {
   const { mode } = useTheme();
   const background = surfaces[mode].bg;
 
-  // PURPLE = the safe-area / root backdrop behind the navigator (debug only).
-  const rootBackground = TAB_BAR_DEBUG ? 'purple' : background;
-  // BLUE = the React Navigation tab-bar container (debug only). Normally fully
-  // transparent + chrome-free so only the custom pill + reveal overlay are seen.
-  const tabBarBackground = TAB_BAR_DEBUG ? 'blue' : 'transparent';
-
   return (
     <AuthProvider>
       <AuthGate>
@@ -50,7 +43,7 @@ export default function TabsLayout() {
         <LocalEventProvider>
           {/* flex:1 wrapper so AppToast + the tab-bar reveal overlay can float as
               app-level overlays above the floating tab bar. */}
-          <View style={{ flex: 1, backgroundColor: rootBackground }}>
+          <View style={{ flex: 1, backgroundColor: background }}>
             <Tabs
               tabBar={(props) => <LullabyTabBar {...props} />}
               detachInactiveScreens={false}
@@ -63,11 +56,13 @@ export default function TabsLayout() {
                   config: { duration: 180 },
                 },
                 sceneStyle: { backgroundColor: background },
-                // Fully transparent + chrome-free: the visible bar is entirely the
-                // custom pill (base) + the full-window reveal overlay. No RN
-                // container background/border/shadow that could change separately.
+                // Fully transparent + chrome-free ON PURPOSE: the visible bar is
+                // entirely the custom pill (base) + the full-window reveal overlay.
+                // Keep this transparent with no border/elevation/shadow so the RN
+                // tab-bar container can never paint chrome that changes separately
+                // from (or draws over) the custom pill during the theme reveal.
                 tabBarStyle: {
-                  backgroundColor: tabBarBackground,
+                  backgroundColor: 'transparent',
                   borderTopWidth: 0,
                   borderTopColor: 'transparent',
                   elevation: 0,

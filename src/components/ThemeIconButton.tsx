@@ -116,7 +116,7 @@ export function ThemeIconButton({ surfaceMode, onPress, disabled = false }: Prop
   useEffect(() => {
     if (reveal.active) {
       Animated.timing(icon, {
-        toValue: nightAmount(reveal.mode),
+        toValue: nightAmount(reveal.toMode),
         duration: ICON_DURATION,
         easing: ICON_EASING,
         useNativeDriver: true,
@@ -124,7 +124,7 @@ export function ThemeIconButton({ surfaceMode, onPress, disabled = false }: Prop
     } else {
       icon.setValue(nightAmount(committedMode));
     }
-  }, [reveal.active, reveal.mode, committedMode, icon]);
+  }, [reveal.active, reveal.toMode, committedMode, icon]);
 
   // Centre-anchored swap only: fade + scale + gentle rotation. No translate, so
   // the icon never drifts up/down — moon fades/scales out as sun fades/scales in.

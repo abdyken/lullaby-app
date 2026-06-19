@@ -29,12 +29,9 @@ import type { SurfaceMode } from '@/theme';
 
 const STORAGE_KEY = 'lullaby.surfaceMode';
 const DEFAULT_MODE: SurfaceMode = 'day';
-/** TEMP debug aid: flip to true to slow the reveal to 2s so the tab-bar frame can
- *  be inspected for any micro shift/brightness change. Keep false in production. */
-const REVEAL_DEBUG_SLOW = false;
 /** Long and unhurried so the circle is readable the whole way across the screen
  *  (Telegram-like). */
-const REVEAL_DURATION = REVEAL_DEBUG_SLOW ? 2000 : 900;
+const REVEAL_DURATION = 900;
 /** Balanced curve (the classic "ease"): gentle start so the circle grows from a
  *  small point — never jumping to a large radius — an even, followable middle,
  *  and a soft landing (no snap at either end). NOT a strong ease-out, which
@@ -53,17 +50,19 @@ export type RevealOrigin = { x: number; y: number };
 type RevealState = {
   /** whether a reveal is currently playing */
   active: boolean;
-  /** the theme being revealed (the target, not yet committed) — alias of `toMode` */
-  mode: SurfaceMode;
-  /** the committed theme the reveal started FROM (what the base layers must keep
-   *  showing outside the circle, frozen for the whole transition) */
+  /** the committed theme the reveal started FROM — what the base layers (the real
+   *  tab bar, the screen underneath) keep showing OUTSIDE the circle, frozen for
+   *  the whole transition. The base bar reads this while `active`. */
   fromMode: SurfaceMode;
-  /** the incoming theme the reveal grows TO (what overlay layers must show inside
-   *  the circle) */
+  /** the incoming theme the reveal grows TO — what the overlay layers (the reveal
+   *  tab bar copy, the screen reveal copy, the toggle icon) show INSIDE the
+   *  circle, and what every layer commits to when the reveal completes. */
   toMode: SurfaceMode;
   /** window-coordinate centre the circle grows from */
   origin: RevealOrigin;
-  /** radius (px) that fully covers the screen + safe areas */
+  /** radius (px) at progress = 1 — fully covers the screen + safe areas. The
+   *  shared `revealProgress` (0→1) is interpolated against this to drive the
+   *  circle's radius; it lives on the context, not here, so it never re-renders. */
   maxRadius: number;
 };
 
@@ -86,7 +85,6 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 const IDLE_REVEAL: RevealState = {
   active: false,
-  mode: DEFAULT_MODE,
   fromMode: DEFAULT_MODE,
   toMode: DEFAULT_MODE,
   origin: { x: 0, y: 0 },
@@ -159,7 +157,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         REVEAL_RADIUS_PADDING;
 
       revealProgress.setValue(0);
-      setReveal({ active: true, mode: next, fromMode: from, toMode: next, origin, maxRadius });
+      setReveal({ active: true, fromMode: from, toMode: next, origin, maxRadius });
 
       Animated.timing(revealProgress, {
         toValue: 1,
