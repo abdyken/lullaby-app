@@ -5,7 +5,7 @@
  * Theme behaviour during a reveal:
  *  - This base pill is FROZEN to the theme the reveal started from
  *    (`reveal.fromMode`, the explicit committed mode captured at reveal start) —
- *    NOT the live committed `mode`, and NOT derived as `opposite(reveal.mode)`
+ *    NOT the live committed `mode`, and NOT derived as `opposite(reveal.toMode)`
  *    (which can read stale after commit). So it never repaints mid-transition or
  *    on commit. It returns to the live `mode` only when `reveal.active` flips
  *    false (the same frame the overlay is torn down), so there's no snap.
@@ -19,7 +19,7 @@ import { Tabs } from 'expo-router';
 import type { ComponentProps } from 'react';
 import { View } from 'react-native';
 
-import { TabBarPill, TAB_BAR_DEBUG, useTabBarLayout, type TabBarTab } from '@/components/TabBarPill';
+import { TabBarPill, useTabBarLayout, type TabBarTab } from '@/components/TabBarPill';
 import type { TabName } from '@/components/TabIcon';
 import { useTheme } from '@/state/ThemeProvider';
 import { type SurfaceMode } from '@/theme';
@@ -43,7 +43,7 @@ export function LullabyTabBar({ state, navigation }: LullabyTabBarProps) {
 
   // Frozen during a reveal: the base pill shows the explicit theme the reveal
   // started FROM (captured once at reveal start), never the live committed mode
-  // and never `opposite(reveal.mode)` (so no mid-transition repaint, no commit
+  // and never `opposite(reveal.toMode)` (so no mid-transition repaint, no commit
   // snap, no stale-target read). Returns to the live mode once the reveal ends.
   const baseTabTheme: SurfaceMode = reveal.active ? reveal.fromMode : mode;
 
@@ -79,12 +79,7 @@ export function LullabyTabBar({ state, navigation }: LullabyTabBarProps) {
         // float clear of the Android gesture bar / home indicator
         paddingBottom,
       }}>
-      <TabBarPill
-        themeMode={baseTabTheme}
-        pillWidth={pillWidth}
-        tabs={tabs}
-        debugBorder={TAB_BAR_DEBUG ? 'red' : undefined}
-      />
+      <TabBarPill themeMode={baseTabTheme} pillWidth={pillWidth} tabs={tabs} />
     </View>
   );
 }

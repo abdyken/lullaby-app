@@ -332,7 +332,7 @@ export default function TonightScreen() {
       {/* Flip the status bar to the incoming theme as the reveal starts (the
           top edge is covered almost immediately). On commit this unmounts and
           the root status bar — now on the committed mode — takes over seamlessly. */}
-      {reveal.active && <StatusBar style={reveal.mode === 'night' ? 'light' : 'dark'} />}
+      {reveal.active && <StatusBar style={reveal.toMode === 'night' ? 'light' : 'dark'} />}
 
       {/* The incoming theme, rendered through the *same* Screen component as the
           base (so layout/padding match exactly — no misalignment) and revealed
@@ -345,8 +345,8 @@ export default function TonightScreen() {
         originY={reveal.origin.y}
         maxRadius={reveal.maxRadius}
         progress={revealProgress}>
-        <Screen surfaceMode={reveal.mode} scrollEnabled={false} contentOffset={{ x: 0, y: revealScrollY }}>
-          {renderBody(reveal.mode)}
+        <Screen surfaceMode={reveal.toMode} scrollEnabled={false} contentOffset={{ x: 0, y: revealScrollY }}>
+          {renderBody(reveal.toMode)}
         </Screen>
       </ThemeRevealOverlay>
     </>
