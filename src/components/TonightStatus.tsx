@@ -17,12 +17,14 @@ import { fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
 type Props = {
   events: LogEvent[];
+  /** Frozen clock — passed so the "X ago" values don't shift mid theme-reveal. */
+  now?: number;
   surfaceMode?: SurfaceMode;
 };
 
-export function TonightStatus({ events, surfaceMode = 'day' }: Props) {
+export function TonightStatus({ events, now, surfaceMode = 'day' }: Props) {
   const palette = surfaces[surfaceMode];
-  const items = buildTonightStatus(events);
+  const items = buildTonightStatus(events, now);
 
   return (
     <View

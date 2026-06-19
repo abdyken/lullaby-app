@@ -127,6 +127,43 @@ export const tabbar = {
   ...shadows.tabbar,
 } as const;
 
+/** Per-mode pill colours for the floating tab bar. Day mirrors the tokens above;
+ *  night is a calm dark pill so the bar follows the theme instead of staying a
+ *  bright cream pill on the navy night surface.
+ *
+ *  OPAQUE ON PURPOSE. The mockup tokens are translucent (surface 0.94, border
+ *  0.7/0.12 white). The base pill (frozen, current theme) and the reveal-overlay
+ *  pill (incoming theme) are stacked exactly during the transition, so any
+ *  translucency lets the layer behind bleed through differently in each — a few
+ *  percent of brightness / a faint white outline that shifts as the circle
+ *  passes. These are the SAME tokens pre-composited over the screen background
+ *  each pill floats on (cream in day, #191826 at night), accounting for the
+ *  border ring sitting under the surface fill. Result: both pills paint identical
+ *  pixels regardless of what's behind them, so the tab bar is dead-static through
+ *  the reveal — only the circular colour change is visible (matches the
+ *  Feed/Sleep/Diaper tiles, which are opaque too). Negligibly different from the
+ *  old frosted look when the pill sits over the background (the common case). */
+export const tabbarSurfaces: Record<'day' | 'night', {
+  surface: string;
+  border: string;
+  inactiveColor: string;
+}> = {
+  day: {
+    // rgba(255,255,255,0.94) over the border-over-cream stack ≈ pure white
+    surface: '#FFFFFF',
+    // rgba(255,255,255,0.7) over cream (#FBF4EF)
+    border: '#FEFCFA',
+    inactiveColor: tabbar.inactiveColor,
+  },
+  night: {
+    // rgba(37,35,58,0.94) over the border-over-#191826 stack
+    surface: '#262438',
+    // rgba(255,255,255,0.12) over the night bg (#191826)
+    border: '#353440',
+    inactiveColor: '#8C87A8',
+  },
+};
+
 /** The live states the Tonight screen moves through during a night.
  *  These are NOT a carousel (that's the landing page) — they are real states. */
 export type AccentState = 'sleep' | 'feed' | 'diaper' | 'partner';
