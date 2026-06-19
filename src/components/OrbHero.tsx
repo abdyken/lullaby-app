@@ -23,7 +23,37 @@ export type OrbHeroProps = {
   onActionPress?: () => void;
   /** surface palette for the caption below the orb (the orb itself is unchanged) */
   surfaceMode?: SurfaceMode;
+  /**
+   * Optional shared breathe driver. Pass the value from `useOrbBreathe()` so a
+   * second (theme-reveal overlay) copy of the orb breathes in perfect phase with
+   * the base — otherwise each copy runs its own loop and the orb edge appears to
+   * jump where the reveal circle crosses it. Omit it for a standalone orb.
+   */
+  breathe?: Animated.Value;
 };
+
+const BREATHE_HALF_MS = 2750;
+
+function startBreatheLoop(value: Animated.Value) {
+  const animation = Animated.loop(
+    Animated.sequence([
+      Animated.timing(value, { toValue: 1, duration: BREATHE_HALF_MS, useNativeDriver: true }),
+      Animated.timing(value, { toValue: 0, duration: BREATHE_HALF_MS, useNativeDriver: true }),
+    ]),
+  );
+  animation.start();
+  return animation;
+}
+
+/** A self-running breathe value to share across orb copies (e.g. a reveal overlay). */
+export function useOrbBreathe() {
+  const [breathe] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    const animation = startBreatheLoop(breathe);
+    return () => animation.stop();
+  }, [breathe]);
+  return breathe;
+}
 
 const ORB_SIZE = 178;
 const RING_RADIUS = 79;
@@ -201,11 +231,15 @@ export function OrbHero({
   coreKind = 'timer',
   onActionPress,
   surfaceMode = 'day',
+  breathe: externalBreathe,
 }: OrbHeroProps) {
   const accent = getAccentForState(state);
   const actionColor = actionLabel === 'Start sleep' ? colors.feed : accent.color;
   const caption = surfaces[surfaceMode];
-  const [breathe] = useState(() => new Animated.Value(0));
+  // Use the shared breathe driver when given (so a reveal-overlay copy stays in
+  // phase); otherwise run our own loop.
+  const [internalBreathe] = useState(() => new Animated.Value(0));
+  const breathe = externalBreathe ?? internalBreathe;
   const progressValue = clampProgress(progress);
   const strokeDashoffset = useMemo(
     () => RING_CIRCUMFERENCE * (1 - progressValue),
@@ -213,24 +247,10 @@ export function OrbHero({
   );
 
   useEffect(() => {
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(breathe, {
-          toValue: 1,
-          duration: 2750,
-          useNativeDriver: true,
-        }),
-        Animated.timing(breathe, {
-          toValue: 0,
-          duration: 2750,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-
-    animation.start();
+    if (externalBreathe) return; // an external owner drives the loop
+    const animation = startBreatheLoop(internalBreathe);
     return () => animation.stop();
-  }, [breathe]);
+  }, [externalBreathe, internalBreathe]);
 
   const scale = breathe.interpolate({
     inputRange: [0, 1],

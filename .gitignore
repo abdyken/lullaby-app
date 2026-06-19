@@ -42,6 +42,9 @@ example
 /ios
 /android
 
+# Local QA/debug artifacts (screen recordings, scratch)
+debug/
+
 # Local AI/tool state
 .claude/
 
