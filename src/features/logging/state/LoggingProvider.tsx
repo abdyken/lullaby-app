@@ -36,7 +36,7 @@ import { isLoggingV2Enabled } from '../config/featureFlags';
 import { createDeviceLoggingRepository } from '../data/loggingStorage';
 import type { LoggingRepository } from '../data/LoggingRepository';
 import type { LoggingError } from '../domain/errors';
-import type { BreastFeedEvent, BreastSide, SleepEvent } from '../domain/types';
+import type { BreastFeedEvent, BreastSide, DiaperKind, SleepEvent } from '../domain/types';
 import { systemClock } from '../timer/clock';
 import { subscribeForeground } from '../timer/appStateReconcile';
 import {
@@ -46,6 +46,7 @@ import {
   finishSleep as runFinishSleep,
   saveBottleFeed,
   saveCompletedSleep as runSaveCompletedSleep,
+  saveDiaper as runSaveDiaper,
   startBreastFeed,
   startSleep as runStartSleep,
   switchBreastSide,
@@ -97,6 +98,9 @@ type LoggingContextValue = {
   cancelSleep: () => Promise<void>;
   /** Log an already-finished sleep. Returns false when validation rejected it. */
   saveCompletedSleep: (input: SaveCompletedSleepInput) => Promise<boolean>;
+
+  /** Log a diaper change (instant, two-tap). Returns false when validation rejected it. */
+  saveDiaper: (kind: DiaperKind) => Promise<boolean>;
 };
 
 const LoggingContext = createContext<LoggingContextValue | null>(null);
@@ -313,6 +317,28 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
     [deps, refresh, runExclusive],
   );
 
+  // Diaper — an instant log, same instant-save pattern as the bottle: validate,
+  // write, refresh on success / set the recover-error state on failure. The
+  // shared mutation lock plus the use-case's `clientEventId` idempotency mean a
+  // fumbled double-tap never lands two diapers (plan Phase 2 acceptance).
+  const saveDiaper = useCallback(
+    async (kind: DiaperKind) => {
+      if (!deps) return false;
+      let ok = false;
+      await runExclusive(async () => {
+        const result = await runSaveDiaper(deps, { kind });
+        if (result.ok) {
+          ok = true;
+          await refresh();
+        } else {
+          setState((prev) => withError(prev, result.error));
+        }
+      });
+      return ok;
+    },
+    [deps, refresh, runExclusive],
+  );
+
   const clearError = useCallback(() => setState((prev) => clearErrorTransition(prev)), []);
 
   const value = useMemo<LoggingContextValue>(
@@ -333,6 +359,7 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       finishSleep,
       cancelSleep,
       saveCompletedSleep,
+      saveDiaper,
     }),
     [
       enabled,
@@ -351,6 +378,7 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       finishSleep,
       cancelSleep,
       saveCompletedSleep,
+      saveDiaper,
     ],
   );
 

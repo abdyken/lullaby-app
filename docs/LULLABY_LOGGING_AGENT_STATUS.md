@@ -9,17 +9,18 @@ AUTOPILOT_STATUS: RUNNING
 
 ## Current phase
 
-Phase 6 (Sleep) — done. Sleep now runs end-to-end behind the `loggingV2` flag on
-the live session engine + provider built in tasks 04–05: the use-cases
-(`startSleep` incl. backdated "started earlier", `finishSleep` → `endedAt = now`,
-`cancelSleep`, `saveCompletedSleep` for the manual completed-sleep path), the
-provider actions + `activeSleep` slot, and the Sleep UI (`SleepSheet` + idle +
-active). Sleep is a single active session per child with a live,
-timestamp-derived timer (no persisted counter) that survives restart via
-hydration. This task also fixed the audit's **highest-priority behavioral bug**:
-the legacy `endRunningSleep` (`src/data/mock.ts`) now finalizes at `endedAt = now`
-(clamped ≥ `startAt`) instead of the hardcoded `+72 min`. All gated so the MVP is
-untouched while the flag is off. Next: status task 07 "Diaper quick-log flow".
+Phase 2 (Diaper) — done. Diaper now runs end-to-end behind the `loggingV2` flag:
+the `saveDiaper` use-case (an INSTANT `completed` `DiaperEvent`, `occurredAt = now`,
+no timer, validated kind, idempotent by `clientEventId`), the provider `saveDiaper`
+action (same validate-then-write / refresh-on-success / set-error-on-failure
+pattern + mutation lock as the Feed bottle save), and the Diaper UI (`DiaperSheet` +
+`DiaperTypeButton`) whose four buttons — Wet / Dirty / Both / **Dry** — each save
+on a single tap and close the sheet, so a wet diaper is two taps: `Diaper → Wet`.
+This closes the audit gaps that the legacy diaper had no `dry` and took three taps.
+Wired into `(tabs)/index.tsx`: with the flag on the Diaper card opens `DiaperSheet`;
+with it off the legacy `LogSheet` diaper path is byte-for-byte unchanged. Undo +
+the toast (plan Phase 2 acceptance) land with the shared Undo in **task 10**. Next:
+status task 08 "Pump flow: side + timer + optional volume".
 
 ## Task queue
 
@@ -30,7 +31,7 @@ untouched while the flag is off. Next: status task 07 "Diaper quick-log flow".
 - [x] 04. Add active session model for timestamp-based timers
 - [x] 05. Implement Feed flow: breast + bottle
 - [x] 06. Implement Sleep flow: start/stop session
-- [ ] 07. Implement Diaper quick-log flow
+- [x] 07. Implement Diaper quick-log flow
 - [ ] 08. Implement Pump flow: side + timer + optional volume
 - [ ] 09. Integrate all events into Today timeline
 - [ ] 10. Add Undo behavior
@@ -187,18 +188,52 @@ untouched while the flag is off. Next: status task 07 "Diaper quick-log flow".
     rejected (nothing persisted); cancel discards; hydration restores after
     restart; `saveCompletedSleep` logs a completed sleep (no timer) and rejects a
     future start → suite now **105/105**.
+- **07 — Diaper quick-log flow (plan Phase 2 / §16 vertical slice, third live
+  flow; the simplest event, two taps).** The instant-log counterpart to the bottle
+  save — no session, no timer:
+  - `application/saveDiaper.ts` — a pure use-case over `{ repo, clock, actor }`:
+    validates the kind (`validateDiaperKind` → wet / dirty / both / dry, plan §4.3),
+    creates a `completed` `DiaperEvent` with `occurredAt = now` and
+    `startedAt`/`endedAt = null`, idempotent by `clientEventId` so a fumbled
+    double-tap lands a single event. `rash`/`note` stay off the quick-log path.
+    Exported from the barrel (Node-safe).
+  - `state/LoggingProvider.tsx` — added the `saveDiaper(kind)` bound action, same
+    validate-then-write / refresh-on-success / set-error-on-failure pattern and
+    shared mutation lock as the bottle save.
+  - `diaper/` UI — `DiaperSheet` (Modal shell + diaper accent; title + "saves
+    instantly" hint) and `DiaperTypeButton` (one action row per kind: a tap calls
+    `saveDiaper(kind)` and closes the sheet on success — no Save button). Distinct
+    per-kind glyph (droplet / disc / half-disc / ring) but the bold text label +
+    `accessibilityLabel="<Kind> diaper"` carry the meaning (plan Phase 10 — never
+    colour-only). Inner-View surface for reliable Android paint, like `ChoicePill`.
+  - Wired into `(tabs)/index.tsx`: with the flag on the Diaper card opens
+    `DiaperSheet`; with it off the legacy `LogSheet` diaper path is unchanged.
+  - Extended the smoke test with 6 checks (Z1–Z6): "wet" → one completed,
+    timer-less diaper in the timeline; every kind (incl. **dry**) maps to the exact
+    kind; an unknown kind is rejected and persists nothing; a double save with one
+    `clientEventId` lands a single event; a diaper is never an active session;
+    a logged diaper survives a restart (offline-safe) → suite now **111/111**.
 
 ## Current task
 
-07. Implement the Diaper quick-log flow (plan Phase 2 — the simplest flow, the
-canonical two-tap path). Add `application/saveDiaper.ts` (instant `completed`
-`DiaperEvent`, `occurredAt = now`, idempotent by `clientEventId`, validated kind),
-the provider action, and a `DiaperSheet` whose four type buttons — Wet / Dirty /
-Both / **Dry** — each call `saveDiaper(kind)` and close the sheet on success (no
-separate Save button), so a wet diaper is two taps: `Diaper → Wet`. This closes
-the audit gap that the legacy diaper has no `dry` and is a 3-tap save. Behind the
-`loggingV2` flag; the legacy `LogSheet` diaper path stays default while off. Undo
-(plan Phase 2 acceptance) is wired as part of **task 10** with the shared Undo.
+08. Implement the Pump flow: side + timer + optional volume (plan Phase 7, the
+last of the four flows and the most stateful). Pump belongs to the caregiver, not
+the child (`subjectUserId = caregiver`, `childId` optional — plan §4.4), and is the
+only flow with a post-finish **volume draft** step. Add the use-cases over
+`{ repo, clock, actor }`: `startPump` (active `PumpEvent` with `side` left/right/both;
+reopens the existing session instead of creating a second — one active pump per
+caregiver, plan Phase 4); `finishPump` (sets `endedAt`/duration but does NOT complete
+— moves the session into `pumpVolumeDraft`, which must survive sheet-close + restart,
+plan Phase 7.2); `savePump` (writes `leftVolumeMl`/`rightVolumeMl` per side, computes
+total in a selector not a stored field, `status = completed`); a `Save without volume`
+path (null volumes, duration-only, the only way zero is allowed); and `cancelPump`.
+Add the provider actions over the existing `activePump` + `pumpVolumeDraft` slots
+(both already in `loggingStore`), then the Pump UI (`PumpSheet` + `PumpIdle` side
+chooser + `PumpActive` timer + `PumpVolumeDraft` stepper) reusing `ChoicePill` /
+`PrimaryActionButton`. Wire into `(tabs)/index.tsx` behind the flag (the Pump card
+currently opens the legacy `LogSheet`). Validate with `validatePumpVolumes`; extend
+the smoke test with a pump series (start/resume, finish→draft, both sums L+R, save
+without volume, draft restores after hydration — plan §11.1). Undo is **task 10**.
 
 > Ordering note: the status queue lists Feed (05) before Diaper (07), whereas the
 > plan's §16 vertical slice suggests Diaper-first. The queue governs autopilot
@@ -332,6 +367,19 @@ the audit gap that the legacy diaper has no `dry` and is a 3-tap save. Behind th
   of truth) is the same "wire the rendered UI to the v2 store" work as the timeline
   + card subtitles, so it is deferred to **task 09** (integrate) to keep task 06 a
   clean application + UI increment, consistent with how task 05 handled Feed.
+- **Task 07 Diaper is an INSTANT event, modelled like the bottle save, not the
+  session flows.** It is created `completed` with `occurredAt = now` and no
+  `startedAt`/`endedAt`, so it never touches the `activeSleep`/`activeBreastFeed`/
+  `activePump` slots and never appears in `getActiveSessions`. The four kind
+  buttons each call `saveDiaper(kind)` on a single tap and close the sheet — no
+  intermediate selection and no Save button — so a wet diaper is exactly two taps
+  (plan Phase 2). The legacy quick-log used three kinds (Wet/Dirty/Mixed) and a
+  Save step; the v2 sheet adds `dry` and removes the Save step.
+- **Diaper's success closes the sheet silently for now; the toast + Undo are
+  deferred to task 10**, exactly as Feed/Sleep defer their visible-timeline wiring
+  to task 09 and Undo to task 10. The use-case + idempotency are in place, so task
+  10 only adds the shared `UndoableMutation` snapshot + toast on top — no rework of
+  the diaper write path. This keeps task 07 a clean application + UI increment.
 
 ## Known issues (found during audit, to fix in later tasks)
 
@@ -339,23 +387,38 @@ the audit gap that the legacy diaper has no `dry` and is a 3-tap save. Behind th
   `endRunningSleep` (`src/data/mock.ts`) now finalizes at `endAt = now` (clamped
   ≥ `startAt`); `SLEEP_FINALIZE_MIN` removed. v2 `finishSleep` likewise uses
   `endedAt = now`.
-- The LIVE Feed + Sleep flows are wired (tasks 05–06) behind the flag: the provider
-  runs `hydrateLoggingState` on mount and `subscribeForeground` →
-  `reconcileLoggingState` on foreground. Diaper/Pump still use the legacy
-  `orbView`/`addX` path until their flows land (07–08).
+- The LIVE Feed + Sleep + Diaper flows are wired (tasks 05–07) behind the flag: the
+  provider runs `hydrateLoggingState` on mount and `subscribeForeground` →
+  `reconcileLoggingState` on foreground. Pump still uses the legacy `LogSheet`/
+  `savePump` path until its flow lands (08).
 - The VISIBLE timeline + quick-log card subtitles/active-ring still read the legacy
-  `useLocalEvents` store, so v2 Feed + Sleep events are persisted + in
+  `useLocalEvents` store, so v2 Feed + Sleep + Diaper events are persisted + in
   `LoggingState` but not yet rendered there — **task 09** (integrate timeline) wires
   the rendered UI to the v2 store, and unifies the Sleep Hero with the v2 session
   (single source of truth, plan Phase 6.5).
-- Diaper has no `dry` and quick-log is 3 taps, not 2 — **task 07, next.** Pump drops
-  `both` and captures no volume — **task 08.** (Bottle volume/milk type ✓, Breast
-  timers/side segments ✓ as of task 05; Sleep start/stop + completed ✓ as of task 06.)
+- ~~Diaper has no `dry` and quick-log is 3 taps, not 2~~ **FIXED (task 07):** the v2
+  `DiaperSheet` adds `dry` and saves in two taps (`Diaper → Wet`). Pump drops `both`
+  and captures no volume — **task 08, next.** (Bottle volume/milk type ✓, Breast
+  timers/side segments ✓ as of task 05; Sleep start/stop + completed ✓ as of task 06;
+  Diaper wet/dirty/both/dry two-tap ✓ as of task 07.)
 - Undo is delete-newest only (no `UndoableMutation` snapshot / undo-finish) — the
-  v2 Feed + Sleep flows do not show Undo yet; **task 10** adds it.
+  v2 Feed + Sleep + Diaper flows do not show Undo/toast yet (the Diaper save closes
+  the sheet silently for now); **task 10** adds the shared Undo + `Diaper logged ·
+  wet` toast (plan Phase 2 acceptance).
 
 ## Last verification
 
+- 2026-06-21 (task 07) — `npx tsc --noEmit` → exit 0. `npm run
+  check:local-interactions` → **all 111 checks pass** (105 prior + 6 new, Z1–Z6,
+  for the Diaper use-case: "wet" creates one completed timer-less diaper in the
+  timeline; every kind incl. **dry** maps to the exact kind; an unknown kind is
+  rejected with `invalid_diaper_kind` and persists nothing; a double save with one
+  `clientEventId` lands a single event; a diaper is never an active session; and a
+  logged diaper survives a restart). `npm run lint` (`expo lint`) → exit 0, clean.
+  `npm test` still not available (no runner; the smoke test is the substitute). MVP
+  behavior is unchanged with the flag off: the new `DiaperSheet` is only reachable
+  when `loggingV2` is on (`(tabs)/index.tsx` gates the Diaper card on the flag), and
+  the legacy `LogSheet` diaper path is otherwise byte-for-byte untouched.
 - 2026-06-21 (task 06) — `npx tsc --noEmit` → exit 0. `npm run
   check:local-interactions` → **all 105 checks pass** (97 prior + 8 new, Y1–Y8, for
   the Sleep use-cases: start creates one active sleep; start→+40m finish = 40m

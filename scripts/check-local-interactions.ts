@@ -119,6 +119,7 @@ import {
   finishSleep,
   saveBottleFeed,
   saveCompletedSleep,
+  saveDiaper,
   startBreastFeed,
   startSleep,
   switchBreastSide,
@@ -1533,6 +1534,76 @@ async function runAsyncChecks(): Promise<void> {
     });
     assert.equal(bad.ok, false);
     if (!bad.ok) assert.equal(bad.error.code, 'started_in_future');
+  });
+
+  // Z. Diaper use-case (plan Phase 2 / §11.1, task 07). The simplest flow: an
+  // INSTANT log, never an active session — created `completed` with
+  // `occurredAt = now` and no timer — that a single tap saves (two taps total:
+  // Diaper → Wet). Same in-memory repo + fake clock + actor/scope as above.
+  await checkAsync('Z1. saveDiaper("wet") creates one completed wet diaper with no timer, in the timeline', async () => {
+    const { repo, deps } = newFeedDeps();
+    const r = await saveDiaper(deps, { kind: 'wet' });
+    assert.ok(r.ok);
+    if (r.ok) {
+      assert.equal(r.event.type, 'diaper');
+      assert.equal(r.event.status, 'completed');
+      assert.equal(r.event.details.kind, 'wet');
+      assert.notEqual(r.event.occurredAt, null);
+      assert.equal(r.event.startedAt, null); // instant — no session
+      assert.equal(r.event.endedAt, null);
+    }
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.filter(isDiaperEvent).length, 1);
+  });
+
+  await checkAsync('Z2. every kind — wet / dirty / both / dry — creates a diaper of that exact kind', async () => {
+    for (const kind of ['wet', 'dirty', 'both', 'dry'] as const) {
+      const { repo, deps } = newFeedDeps();
+      const r = await saveDiaper(deps, { kind });
+      assert.ok(r.ok, `kind ${kind} should save`);
+      if (r.ok) assert.equal(r.event.details.kind, kind);
+      const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+      assert.ok(today.some((e) => isDiaperEvent(e) && e.details.kind === kind));
+    }
+  });
+
+  await checkAsync('Z3. an unknown diaper kind is rejected and persists nothing', async () => {
+    const { repo, deps } = newFeedDeps();
+    // The use-case input is typed; cast through to exercise the runtime validator.
+    const r = await saveDiaper(deps, { kind: 'soaked' as unknown as DiaperEvent['details']['kind'] });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.error.code, 'invalid_diaper_kind');
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.filter(isDiaperEvent).length, 0);
+  });
+
+  await checkAsync('Z4. a double saveDiaper with the same clientEventId creates exactly one event', async () => {
+    const { repo, deps } = newFeedDeps();
+    const cid = 'diaper-dup-1';
+    assert.ok((await saveDiaper(deps, { kind: 'dirty', clientEventId: cid })).ok);
+    assert.ok((await saveDiaper(deps, { kind: 'dirty', clientEventId: cid })).ok);
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.filter(isDiaperEvent).length, 1);
+  });
+
+  await checkAsync('Z5. a logged diaper is never an active session', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await saveDiaper(deps, { kind: 'both' })).ok);
+    const active = await repo.getActiveSessions(feedScope);
+    assert.equal(active.filter(isDiaperEvent).length, 0);
+  });
+
+  await checkAsync('Z6. a logged diaper survives a restart (offline-safe, plan Phase 2 acceptance)', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    assert.ok((await saveDiaper({ repo, clock, actor }, { kind: 'dry' })).ok);
+    // "Restart": a fresh repository over the same persisted snapshot.
+    const repo2 = createLoggingRepository(persistence, clock);
+    const state = await hydrateLoggingState(repo2, feedScope, clock);
+    const restored = state.todayEvents.filter(isDiaperEvent);
+    assert.equal(restored.length, 1);
+    assert.equal(restored[0].details.kind, 'dry');
   });
 }
 
