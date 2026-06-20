@@ -39,6 +39,7 @@ import type { LoggingError } from '../domain/errors';
 import type {
   BreastFeedEvent,
   BreastSide,
+  CareEvent,
   DiaperKind,
   PumpEvent,
   PumpSide,
@@ -83,6 +84,8 @@ type LoggingContextValue = {
   hydrated: boolean;
   /** True when enabled AND an actor (family/child/caregiver) is resolved. */
   ready: boolean;
+  /** Today's events for the timeline (newest first); empty until hydrated. */
+  todayEvents: CareEvent[];
   /** The running breastfeeding session, or null. */
   activeBreastFeed: BreastFeedEvent | null;
   /** The running sleep session for the child, or null. */
@@ -427,6 +430,7 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       enabled,
       hydrated: enabled ? state.hydrated : true,
       ready: enabled && actor !== null,
+      todayEvents: state.todayEvents,
       activeBreastFeed: state.activeBreastFeed,
       activeSleep: state.activeSleep,
       activePump: state.activePump,
@@ -452,6 +456,7 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       enabled,
       actor,
       state.hydrated,
+      state.todayEvents,
       state.activeBreastFeed,
       state.activeSleep,
       state.activePump,

@@ -9,27 +9,31 @@ AUTOPILOT_STATUS: RUNNING
 
 ## Current phase
 
-Phase 7 (Pump) — done. Pump now runs end-to-end behind the `loggingV2` flag and is
-the **fourth and last** of the core flows. Pump belongs to the caregiver
-(`subjectUserId = caregiver`, `childId` kept as an optional family association so it
-still shows in the family timeline — plan §4.4). It is the only flow with a
-post-finish **volume draft**: four pure use-cases over `{ repo, clock, actor }` —
-`startPump` (active `PumpEvent` with side left/right/both; reopens the existing
-session instead of creating a second — one active pump per caregiver, plan Phase 4),
-`finishPump` (sets `endedAt` but keeps `status = 'active'`, so the finished session
-stays in `getActiveSessions` and the store turns it into a `pumpVolumeDraft` — that
-is what makes the draft survive sheet-close + restart for free, plan Phase 7.2),
-`savePump` (writes `leftVolumeMl`/`rightVolumeMl`, `status = completed`; "save without
-volume" is the same use-case with null volumes — the only way zero is allowed), and
-`cancelPump`. The total is derived by the `pumpTotalVolumeMl` selector, never stored
-(plan §7.3). The provider exposes `activePump`/`pumpVolumeDraft` + `startPump`/
-`finishPump`/`savePump`/`cancelPump` (same validate-then-write / refresh-on-success /
-error pattern + mutation lock as Sleep). The Pump UI (`PumpSheet` + `PumpIdle` side
-chooser + `PumpActive` timer + `PumpVolumeDraft` stepper) reuses `ChoicePill` /
-`PrimaryActionButton`. Wired into `(tabs)/index.tsx`: with the flag on the Pump card
-opens `PumpSheet`; with it off the legacy `LogSheet` pump path is byte-for-byte
-unchanged. Undo + the toast land with the shared Undo in **task 10**. Next:
-status task 09 "Integrate all events into Today timeline".
+Phase 8 (timeline integration) — done. The Today screen now RENDERS from the v2
+store behind the `loggingV2` flag, so the four flows (Feed, Sleep, Diaper, Pump)
+that already WROTE to `lullaby/logging-v2/v1` are finally visible. Three pieces, all
+purely descriptive (no business logic in a formatter, plan §8):
+1. `formatTimelineEvent(event, now)` (plan §7.4) — a single formatter that turns any
+   `CareEvent` into `{ title, subtitle, icon, tint }`: "Breastfeeding · 12m · right",
+   "Sleep · 40m", "Diaper · wet", "Pump · 110 ml · both", and the draft
+   "Pump · finished · add volume". Running sessions read in the present tense.
+2. `buildV2QuickLogSubtitles` (plan §7.1) — the four card second lines: an active
+   session leads ("Feeding · 12m · right", "Sleeping · 42m", "Pumping · 18m · both",
+   "Finished · add volume"), otherwise the last event + recency ("4h 20m ago · 90 ml",
+   "Awake for 1h 24m") or a calm "Tap to …". Plus `buildV2TonightStatus` for the strip.
+3. **Single source of truth for Sleep** (plan Phase 6.5): a UI hook `useV2TodayView`
+   rebuilds the existing display shapes (orb / activeTile / `TimelineEntry[]` /
+   `QuickLogMeta` / status items) from the v2 store, and the Hero primary action calls
+   v2 `startSleep`/`finishSleep`. So the Hero, the Quick Log Sleep card, and the Sleep
+   sheet now all drive the SAME v2 `activeSleep` — start from the Hero → the card +
+   timeline show active; start from the card's sheet → the Hero flips to "Baby woke up".
+
+The presentational components (`OrbHero`, `QuickLogRow`, `TimelineCard`,
+`TimelineItem`) are UNCHANGED — the screen just swaps the data source. The only
+component edit is an additive optional `items` prop on `TonightStatus`. The provider
+now exposes `todayEvents`. With the flag OFF every widget reads the legacy
+`useLocalEvents` store exactly as before (byte-for-byte). Undo + the toast land in
+**task 10**; deeper restart-recovery acceptance is **task 11**.
 
 ## Task queue
 
@@ -42,7 +46,7 @@ status task 09 "Integrate all events into Today timeline".
 - [x] 06. Implement Sleep flow: start/stop session
 - [x] 07. Implement Diaper quick-log flow
 - [x] 08. Implement Pump flow: side + timer + optional volume
-- [ ] 09. Integrate all events into Today timeline
+- [x] 09. Integrate all events into Today timeline
 - [ ] 10. Add Undo behavior
 - [ ] 11. Add active session recovery after app restart
 - [ ] 12. Add validation and edge-case handling
@@ -264,40 +268,76 @@ status task 09 "Integrate all events into Today timeline".
     volume stores null volumes + duration only; a single-side pump can't record the
     other side (rejected, draft intact); the draft survives a restart; cancel
     discards; a pump and an active sleep coexist → suite now **120/120**.
+- **09 — Integrate all events into the Today timeline (plan §7.1, §7.4, Phase 6.5,
+  Phase 8). The first task to RENDER the v2 store on the live Today screen** (the four
+  flows already wrote to it; the visible UI still read the legacy store). All behind
+  the flag — the MVP path is byte-for-byte unchanged:
+  - `state/timelineSelectors.ts` (pure, Node-safe, in the barrel) — three §7.4/§7.1
+    selectors: `formatTimelineEvent(event, now)` → `{ title, subtitle, icon, tint }`
+    for every `CareEvent` type/state (running sessions read present-tense
+    "Breastfeeding"/"Sleeping"/"Pumping"; a finished-unsaved pump reads
+    "finished · add volume"; `tint` is the per-type accent from `@/theme`, which is
+    Node-safe); `buildV2QuickLogSubtitles` → the four card second lines (active leads,
+    else "{recency} · {detail}" or "Tap to …"); `buildV2TonightStatus` → the strip.
+    A `recencyIso(event) = endedAt ?? occurredAt` helper makes "ago" count from when a
+    session ENDED (a just-finished 40m sleep reads "5m ago", not "45m ago").
+  - `state/useV2TodayView.ts` (UI hook, NOT in the barrel — imports React + app types) —
+    consumes `useLogging()` and rebuilds the EXISTING display shapes the screen already
+    passes down (`CurrentBabyState` orb, `PreviewState` active tile, `TimelineEntry[]`,
+    `QuickLogMeta`, `TonightStatusItem[]`) so the presentational components never
+    change. The orb is the sleep Hero: the running v2 sleep, or a calm
+    "Last feed · Last diaper" line. `onPrimaryAction` toggles the v2 sleep session
+    (`startSleep` ⇄ `finishSleep`) — the **single source of truth** (Phase 6.5): Hero +
+    Quick Log Sleep card + Sleep sheet all act on the same `activeSleep`. Returns `null`
+    when the flag is off, so the screen falls straight back to the legacy view.
+    (`Date.now()` is read in a plain `resolveNow` helper, off the render path, to
+    satisfy `react-hooks/purity` — same trick as legacy `getOrbView`.)
+  - `state/LoggingProvider.tsx` — now exposes `todayEvents` (the timeline source).
+  - `components/TonightStatus.tsx` — additive optional `items` prop; when omitted it
+    derives from `events` exactly as before (legacy path untouched).
+  - `(tabs)/index.tsx` — one flag-gated branch: `const v2 = loggingV2 ? v2View : null`,
+    then `v2 ? v2.X : legacyX` for the orb / active tile / Hero action / timeline /
+    card meta / status items. The legacy `useLocalEvents` values are kept and used
+    verbatim when the flag is off.
+  - **HandoffCard stays on the legacy store** — it is the partner-handoff/sync wedge
+    (plan Phase 9), not part of "the timeline"; it degrades to the local seed handoff
+    under the flag (documented boundary). The current-state cluster (orb, status,
+    cards, timeline) is fully v2.
+  - Extended the smoke test with 7 checks (BB1–BB7): `formatTimelineEvent` for instant
+    bottle/diaper, sleep active vs completed, breastfeed active + the canonical
+    5m-left/3m-right summary, and pump running → draft → completed (110 ml total);
+    `buildV2QuickLogSubtitles` active-session lines, the pump draft "Finished · add
+    volume" + last-pump "5m ago · 90 ml", idle "Tap to …" prompts, and the "Awake for"
+    line; `buildV2TonightStatus` sleeping/awake + last feed/diaper → suite now
+    **127/127**.
 
 ## Current task
 
-09. Integrate all events into the Today timeline (plan §7.1, §7.4, Phase 6.5,
-Phase 8). All four flows now WRITE to the v2 store (`lullaby/logging-v2/v1`) and
-appear in `LoggingState.todayEvents`, but the VISIBLE timeline + the quick-log card
-subtitles/active-ring still read the legacy `useLocalEvents` store, so v2 events are
-persisted but not yet rendered there. Task 09 wires the rendered UI to the v2 store:
-a `formatTimelineEvent(event: CareEvent)` formatter (title/subtitle/icon/tint by
-type — plan §7.4), the quick-log card subtitle selector (plan §7.1 examples:
-`Feeding · 12m · right`, `Sleeping · 42m`, `Pumping · 18m · both`, `Finished · add
-volume`, `4h 20m ago · 90 ml`), and the **single source of truth** for Sleep —
-unifying the Hero `Start sleep / Baby woke up` + the Quick Log card + the v2 sheet on
-one v2 session (plan Phase 6.5; today the Sleep card opens the v2 sheet while the Hero
-still drives the legacy orb session). Keep it behind the flag: with `loggingV2` off
-the legacy timeline/cards are byte-for-byte unchanged. Undo for v2 mutations is
-**task 10**; deeper restart-recovery acceptance is **task 11**.
+10. Add Undo behavior (plan §8, Phase 2/3/5/6 "Show Undo", §16). Every v2 flow
+currently closes its sheet silently on success — there is no `UndoableMutation`
+snapshot and no toast yet. Task 10 adds the shared single-Undo: record a
+`lastMutation` (`{ kind, eventId, previousSnapshot }`) on each create/finish, surface
+the calm "{event} logged · Undo" toast (reuse the existing `AppToast` pattern, e.g.
+`Diaper logged · wet`, `Pump saved · 110 ml`), and wire Undo to soft-delete a created
+event / restore the previous active snapshot on undo-finish (plan §8: "Undo finish →
+restore previous active snapshot if no new conflict appeared"). A new action replaces
+the previous Undo context. Undo also enters the (future) sync queue. Keep it behind
+the flag; the legacy `LocalEventProvider` toast/Undo stays the flag-off path.
 
-> Milestone: with Pump (08) done, **all four flows (Feed, Sleep, Diaper, Pump) are
-> live behind the `loggingV2` flag** — each an application + UI increment on the
-> shared session engine + provider. The session engine handles three concurrent
-> kinds (sleep + breast scoped per child, pump per caregiver) and one persistent
-> draft (pump volume).
+> Milestone: with timeline integration (09) done, **all four flows are now visible
+> end-to-end behind the flag** — they write to the v2 store AND render on the Today
+> screen (orb / quick-log cards / status strip / timeline), and Sleep is driven from
+> one v2 session across the Hero, the card, and the sheet (single source of truth,
+> plan Phase 6.5). The presentational components were untouched (the screen swaps the
+> data source via `useV2TodayView`); the only component edit was an additive optional
+> `items` prop on `TonightStatus`.
 >
-> Scope boundary carried forward: all four flows now WRITE to the v2 store
-> (`lullaby/logging-v2/v1`) and appear in the v2 `LoggingState.todayEvents`, but the
-> VISIBLE timeline + the quick-log card subtitle/active-ring still read the legacy
-> `useLocalEvents` store. Wiring the rendered timeline + quick-log cards to the v2
-> store is **task 09** (integrate timeline). The **single source of truth** for
-> Sleep — unifying the Hero `Start sleep / Baby woke up` + the Quick Log card + the
-> sheet on one v2 session (plan Phase 6.5) — also lands in task 09: today the Sleep
-> card opens the v2 sheet, while the Hero still drives the legacy orb session, so
-> with the flag on the two are not yet the same session. Undo for v2 mutations is
-> **task 10**; deeper restart-recovery acceptance is **task 11**.
+> Scope boundary carried forward: the current-state cluster (orb, status, quick-log
+> cards, timeline) reads the v2 store under the flag, but **HandoffCard still reads
+> the legacy `useLocalEvents` store** — it is the partner-handoff/sync wedge (plan
+> Phase 9), out of the "integrate timeline" scope, and degrades to the local seed
+> handoff under the flag. The visible save-confirmation **toast + Undo** for v2
+> mutations is **task 10**; deeper restart-recovery acceptance is **task 11**.
 
 ## Decisions made
 
@@ -458,6 +498,34 @@ the legacy timeline/cards are byte-for-byte unchanged. Undo for v2 mutations is
   on it (`getActiveSessions` scopes pump by `subjectUserId`; `getTodayEvents` shows
   pump family-wide), so this just keeps the pump visible in the family timeline
   without affecting session scoping (plan §4.4).
+- **Task 09 swaps the DATA SOURCE, not the components.** Rather than rewrite the
+  timeline/cards/orb to consume `CareEvent`, a UI hook (`useV2TodayView`) rebuilds the
+  exact legacy display shapes (`TimelineEntry[]`, `QuickLogMeta`, `CurrentBabyState`,
+  `TonightStatusItem[]`) from the v2 store, and the screen picks v2-vs-legacy with one
+  flag-gated ternary. So `OrbHero`/`QuickLogRow`/`TimelineCard`/`TimelineItem` are
+  byte-for-byte unchanged, the flag-off path is provably identical, and the §7.4
+  formatter + §7.1 selectors are pure and Node-testable. The only component edit is an
+  additive optional `items` prop on `TonightStatus` (omitted → legacy behavior).
+- **The v2 orb is the Sleep hero only (sleep ∪ calm), not a feed/diaper confirmation.**
+  Legacy `getOrbView` flips the orb to a "Feed logged"/"Diaper logged" preview; the v2
+  orb instead reflects the sleep session (plan Phase 6.5 makes the Hero the single
+  source of truth for SLEEP), and feed/pump activity is surfaced on their cards (active
+  ring + "Feeding · …"/"Pumping · …" subtitle). The save confirmation for instant
+  events is the timeline row + the toast (task 10), not the orb. This keeps the Hero's
+  meaning singular and the orb logic simple.
+- **"Ago" counts from `endedAt ?? occurredAt` (`recencyIso`), not `startedAt`.** A
+  just-finished 40m sleep reads "5m ago", and the pump card's "4h 20m ago · 90 ml"
+  counts from when pumping ended — what a parent means by "last X". The timeline still
+  SORTS by `occurredAt` desc (plan §8), so a long session keeps its chronological slot.
+- **HandoffCard stays on the legacy store (deferred to Phase 9, not task 09).** It is
+  the partner-handoff/sync wedge; wiring it to v2 needs cross-caregiver attribution +
+  the sync cursor over `CareEvent`s, which is plan Phase 9 work. Under the flag it shows
+  the local seed handoff — a documented boundary, the same kind prior tasks carried.
+- **`Date.now()` lives in a plain `resolveNow` helper, off the hook's render path.**
+  `react-hooks/purity` forbids a literal `Date.now()` in a hook body; the legacy code
+  hides it the same way (a regular function's `now = Date.now()` default, e.g.
+  `getOrbView`). A frozen `now` (during a theme reveal) is passed straight through, so
+  the v2 time-based labels hold still mid-reveal exactly like the legacy ones.
 
 ## Known issues (found during audit, to fix in later tasks)
 
@@ -469,11 +537,12 @@ the legacy timeline/cards are byte-for-byte unchanged. Undo for v2 mutations is
   behind the flag: the provider runs `hydrateLoggingState` on mount and
   `subscribeForeground` → `reconcileLoggingState` on foreground, so every active
   session (and the pump volume draft) is recovered from timestamps after a restart.
-- The VISIBLE timeline + quick-log card subtitles/active-ring still read the legacy
-  `useLocalEvents` store, so v2 Feed + Sleep + Diaper + Pump events are persisted +
-  in `LoggingState` but not yet rendered there — **task 09** (integrate timeline)
-  wires the rendered UI to the v2 store, and unifies the Sleep Hero with the v2
-  session (single source of truth, plan Phase 6.5).
+- ~~The VISIBLE timeline + quick-log card subtitles/active-ring still read the legacy
+  `useLocalEvents` store~~ **FIXED (task 09):** under the flag the orb, quick-log card
+  subtitles/active-ring, status strip, and timeline all render from the v2 store via
+  `useV2TodayView` + `timelineSelectors`, and the Sleep Hero/card/sheet share one v2
+  session (single source of truth, plan Phase 6.5). Remaining v2 read still on legacy:
+  **HandoffCard** (partner/sync wedge → plan Phase 9, documented boundary).
 - ~~Diaper has no `dry` and quick-log is 3 taps, not 2~~ **FIXED (task 07):** the v2
   `DiaperSheet` adds `dry` and saves in two taps (`Diaper → Wet`). ~~Pump drops
   `both` and captures no volume~~ **FIXED (task 08):** the v2 `PumpSheet` supports
@@ -489,6 +558,23 @@ the legacy timeline/cards are byte-for-byte unchanged. Undo for v2 mutations is
 
 ## Last verification
 
+- 2026-06-21 (task 09) — `npx tsc --noEmit` → exit 0. `npm run
+  check:local-interactions` → **all 127 checks pass** (120 prior + 7 new, BB1–BB7,
+  for the timeline + quick-log selectors: `formatTimelineEvent` renders instant
+  bottle/diaper, sleep "Sleeping" (active) vs "Sleep" (completed), breastfeed active
+  + the canonical 5m-left/3m-right summary, and pump running → draft
+  ("finished · add volume") → completed (110 ml derived total);
+  `buildV2QuickLogSubtitles` leads with active sessions ("Feeding · 12m · right",
+  "Sleeping · 12m", "Pumping · 12m · both"), shows the pump draft "Finished · add
+  volume" then the last-pump "5m ago · 90 ml", the idle "Tap to …" prompts, and the
+  "Awake for 10m" line counting from when the sleep ended; `buildV2TonightStatus`
+  sleeping/awake + last feed/diaper). `npm run lint` (`expo lint`) → exit 0, clean
+  (fixed one `react-hooks/purity` finding by moving `Date.now()` into a plain
+  `resolveNow` helper, the legacy `getOrbView` pattern). `npm test` still not
+  available (no runner; the smoke test is the substitute). MVP behavior is unchanged
+  with the flag off: `useV2TodayView` returns `null`, so the Today screen reads the
+  legacy `useLocalEvents` orb/timeline/cards/status verbatim, and `TonightStatus`
+  derives from `events` when no `items` prop is passed.
 - 2026-06-21 (task 08) — `npx tsc --noEmit` → exit 0. `npm run
   check:local-interactions` → **all 120 checks pass** (111 prior + 9 new, AA1–AA9,
   for the Pump use-cases: start creates one caregiver-scoped active pump with no
