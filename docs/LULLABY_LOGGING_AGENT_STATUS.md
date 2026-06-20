@@ -9,13 +9,15 @@ AUTOPILOT_STATUS: RUNNING
 
 ## Current phase
 
-Phase 0 — Audit complete. Next: Phase 1 foundation (shared types).
+Phase 1.1 — Domain foundation complete (CareEvent model + Clock + ids +
+validators). Next: Phase 1.2 repository (`LoggingRepository` interface + impl
+over the existing local/Supabase boundary) and the `loggingV2` feature flag.
 
 ## Task queue
 
 - [x] 00. Audit existing MVP structure
 - [x] 01. Identify current navigation, state management, storage, and logging code
-- [ ] 02. Create or adapt shared logging event TypeScript models
+- [x] 02. Create or adapt shared logging event TypeScript models
 - [ ] 03. Create logging repository/service layer
 - [ ] 04. Add active session model for timestamp-based timers
 - [ ] 05. Implement Feed flow: breast + bottle
@@ -40,12 +42,35 @@ Phase 0 — Audit complete. Next: Phase 1 foundation (shared types).
   analytics, no notifications, and no feature-flag system. Wrote
   `docs/LULLABY_LOGGING_MVP_AUDIT.md` with a prioritized gap analysis. No app
   code changed (docs-only).
+- **02 — Shared logging event model (Phase 1.1).** Added the `src/features/logging`
+  module BESIDE the legacy `LogEvent` (nothing wired into the app yet):
+  - `domain/types.ts` — the discriminated `CareEvent` union
+    (`BreastFeedEvent` / `BottleFeedEvent` / `SleepEvent` / `DiaperEvent` /
+    `PumpEvent`) on `CareEventBase`, plus `BreastSideSegment`, `PumpVolumeDraft`,
+    `UndoableMutation`, alias unions (sides/kinds/milk/sleep type), and type
+    guards (`isBreastFeed`, `isBottleFeed`, `isSleepEvent`, `isDiaperEvent`,
+    `isPumpEvent`, `isActiveSession`).
+  - `domain/ids.ts` — `newUuid()` (v4, prefers `crypto.randomUUID`, Math.random
+    fallback) and `newClientEventId()` for idempotent retries.
+  - `domain/errors.ts` — serializable `LoggingError` + `loggingError()` factory.
+  - `domain/rules.ts` — the five plan validators (`validateBottleAmount`,
+    `validateSessionRange` with optional future-start guard, `validateBreastSegments`,
+    `validatePumpVolumes`, `validateDiaperKind`) returning `ValidationResult`
+    (no throws — errors flow into store state per plan §6).
+  - `timer/clock.ts` — `Clock` + `systemClock` + `createManualClock()` (fake clock
+    for session tests, plan §11.1).
+  - `index.ts` — public-API barrel (plan §2.3).
+  - Extended the smoke test with 10 checks (U1–U10) covering the clock, ids,
+    every validator branch, and guard narrowing → suite now 70/70.
 
 ## Current task
 
-02. Create or adapt shared logging event TypeScript models (plan Phase 1.1) —
-build the discriminated `CareEvent` union + `Clock` + validators **beside** the
-existing `LogEvent` (do not delete the old model yet).
+03. Create the logging repository/service layer (plan Phase 1.2) — define the
+`LoggingRepository` interface (§5) and a `LoggingRepositoryImpl` that adapts the
+existing local AsyncStorage + Supabase `EventRepository` boundary, mapping
+`CareEvent` ↔ rows via a `LegacyLoggingMapper` skeleton. Introduce the
+`loggingV2` feature flag here (deferred from task 02 on purpose — see Decisions).
+Implement create / update / soft-delete, read-today, and read-active-sessions.
 
 ## Decisions made
 
@@ -59,6 +84,15 @@ existing `LogEvent` (do not delete the old model yet).
   is `text` and `events.meta` is JSONB.
 - `loggingV2` feature flag will be introduced when the new domain module is
   created (task 02+), not during the audit.
+- **Task 02 was kept to the pure domain model only** (types + clock + ids +
+  validators + errors). The `loggingV2` flag and the repository were deliberately
+  deferred to task 03 so each run stays one logical unit; the new module is not
+  imported by the app yet, so the running MVP is untouched.
+- Validators **return** `ValidationResult` rather than throwing, so the
+  application/store layer can surface a recover/error state (plan §6) instead of
+  crashing on bad input.
+- Added small sanity caps (`BOTTLE_MAX_ML = 4000`, `PUMP_MAX_ML = 2000`) as
+  garbage filters, not product limits, alongside the plan's explicit "> 0" rules.
 
 ## Known issues (found during audit, to fix in later tasks)
 
@@ -76,10 +110,12 @@ existing `LogEvent` (do not delete the old model yet).
 
 ## Last verification
 
-- 2026-06-21 — `npx tsc --noEmit` → exit 0 (no `typecheck` script exists; `tsc`
-  used directly). `npm run check:local-interactions` → all 60 checks pass.
-  `npm test` not available (no runner; smoke test is the substitute). This task
-  is docs-only, so no app behavior changed.
+- 2026-06-21 (task 02) — `npx tsc --noEmit` → exit 0 (no `typecheck` script;
+  `tsc` used directly). `npm run check:local-interactions` → **all 70 checks
+  pass** (60 legacy + 10 new for the logging v2 foundation). `npm run lint`
+  (`expo lint`) → clean. `npm test` still not available (no runner; the smoke
+  test is the substitute and was extended for the new code). The new module is
+  additive and unreferenced by the app, so MVP behavior is unchanged.
 
 ## Final result
 

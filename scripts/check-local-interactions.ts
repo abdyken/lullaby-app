@@ -38,6 +38,32 @@ import { buildSeedEvents, getTonightTimeline } from '../src/data/mock';
 import type { Caregiver, LogEvent, LogEventType } from '../src/data/models';
 import { resolveSurfaceMode } from '../src/theme';
 import { parsePersistedState, serializeState } from '../src/data/persistedState';
+// Logging v2 foundation (plan Phase 1.1) — new model lives beside the legacy one.
+import { createManualClock, systemClock } from '../src/features/logging/timer/clock';
+import { newClientEventId, newUuid } from '../src/features/logging/domain/ids';
+import {
+  validateBottleAmount,
+  validateBreastSegments,
+  validateDiaperKind,
+  validatePumpVolumes,
+  validateSessionRange,
+} from '../src/features/logging/domain/rules';
+import {
+  isBottleFeed,
+  isBreastFeed,
+  isDiaperEvent,
+  isPumpEvent,
+  isSleepEvent,
+} from '../src/features/logging/domain/types';
+import type {
+  BottleFeedEvent,
+  BreastFeedEvent,
+  BreastSideSegment,
+  CareEventBase,
+  DiaperEvent,
+  PumpEvent,
+  SleepEvent,
+} from '../src/features/logging/domain/types';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
 const NOW = Date.parse('2026-06-17T00:00:00.000Z');
@@ -622,6 +648,185 @@ check('S4. undoLastOwnEvent reconciles the orb to sleep when a partner sleep is 
 check('T1. with a null cursor (post-reset) the seeded night shows its catch-up story', () => {
   const s = buildHandoffSummary(seedEvents, SUMMARY_CAREGIVERS, MOM, null);
   assert.equal(s.hasNew, true);
+});
+
+// U. Logging v2 foundation (plan Phase 1.1) — discriminated CareEvent model,
+// Clock, id helpers, and validators. These live beside the legacy LogEvent and
+// are not wired into the app yet; this section locks down their behavior.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+check('U1. systemClock.now is a number and nowIso round-trips through Date', () => {
+  assert.equal(typeof systemClock.now(), 'number');
+  assert.ok(!Number.isNaN(Date.parse(systemClock.nowIso())));
+});
+
+check('U2. manual clock reports, sets, and advances a controllable "now"', () => {
+  const clock = createManualClock(NOW);
+  assert.equal(clock.now(), NOW);
+  assert.equal(clock.nowIso(), new Date(NOW).toISOString());
+  clock.advance(60_000);
+  assert.equal(clock.now(), NOW + 60_000);
+  clock.set(NOW);
+  assert.equal(clock.now(), NOW);
+});
+
+check('U3. newUuid is a v4 UUID and successive ids/clientEventIds are unique', () => {
+  const a = newUuid();
+  const b = newUuid();
+  assert.match(a, UUID_RE);
+  assert.match(b, UUID_RE);
+  assert.notEqual(a, b);
+  assert.notEqual(newClientEventId(), newClientEventId());
+});
+
+check('U4. validateBottleAmount accepts a positive amount, rejects 0/negative/garbage/over-max', () => {
+  assert.equal(validateBottleAmount(120).ok, true);
+  assert.equal(validateBottleAmount(0).ok, false);
+  assert.equal(validateBottleAmount(-10).ok, false);
+  assert.equal(validateBottleAmount(Number.NaN).ok, false);
+  assert.equal(validateBottleAmount(Number.POSITIVE_INFINITY).ok, false);
+  assert.equal(validateBottleAmount(99999).ok, false);
+});
+
+check('U5. validateSessionRange enforces ordering, allows still-running, rejects future start', () => {
+  const start = '2026-06-17T00:00:00.000Z';
+  const later = '2026-06-17T00:40:00.000Z';
+  assert.equal(validateSessionRange(start, later).ok, true);
+  assert.equal(validateSessionRange(start, null).ok, true); // still running
+  assert.equal(validateSessionRange(later, start).ok, false); // ends before it starts
+  assert.equal(validateSessionRange('not-a-date', null).ok, false);
+  const future = new Date(NOW + 60_000).toISOString();
+  assert.equal(validateSessionRange(future, null, NOW).ok, false); // started_in_future
+});
+
+check('U6. validateBreastSegments accepts a clean chain and one trailing open segment', () => {
+  const closed: BreastSideSegment = {
+    id: 's1',
+    side: 'left',
+    startedAt: '2026-06-17T00:00:00.000Z',
+    endedAt: '2026-06-17T00:05:00.000Z',
+  };
+  const open: BreastSideSegment = {
+    id: 's2',
+    side: 'right',
+    startedAt: '2026-06-17T00:05:00.000Z',
+    endedAt: null,
+  };
+  assert.equal(validateBreastSegments([]).ok, true); // empty is structurally valid
+  assert.equal(validateBreastSegments([open]).ok, true); // single open
+  assert.equal(validateBreastSegments([closed, open]).ok, true); // switch L→R
+});
+
+check('U7. validateBreastSegments rejects an open non-last segment and overlaps', () => {
+  const openFirst: BreastSideSegment = {
+    id: 's1',
+    side: 'left',
+    startedAt: '2026-06-17T00:00:00.000Z',
+    endedAt: null,
+  };
+  const second: BreastSideSegment = {
+    id: 's2',
+    side: 'right',
+    startedAt: '2026-06-17T00:05:00.000Z',
+    endedAt: '2026-06-17T00:08:00.000Z',
+  };
+  assert.equal(validateBreastSegments([openFirst, second]).ok, false); // open must be last
+
+  const a: BreastSideSegment = {
+    id: 'a',
+    side: 'left',
+    startedAt: '2026-06-17T00:00:00.000Z',
+    endedAt: '2026-06-17T00:05:00.000Z',
+  };
+  const overlapping: BreastSideSegment = {
+    id: 'b',
+    side: 'right',
+    startedAt: '2026-06-17T00:03:00.000Z', // starts before `a` ended
+    endedAt: null,
+  };
+  assert.equal(validateBreastSegments([a, overlapping]).ok, false);
+});
+
+check('U8. validatePumpVolumes: both 50/60 ok, save-without-volume ok, side mismatch rejected', () => {
+  assert.equal(validatePumpVolumes({ side: 'both', leftVolumeMl: 50, rightVolumeMl: 60 }).ok, true);
+  assert.equal(validatePumpVolumes({ side: 'left', leftVolumeMl: null, rightVolumeMl: null }).ok, true);
+  assert.equal(validatePumpVolumes({ side: 'left', leftVolumeMl: 80, rightVolumeMl: null }).ok, true);
+  assert.equal(validatePumpVolumes({ side: 'left', leftVolumeMl: 80, rightVolumeMl: 60 }).ok, false);
+  assert.equal(validatePumpVolumes({ side: 'both', leftVolumeMl: 0, rightVolumeMl: 60 }).ok, false); // 0 not allowed
+});
+
+check('U9. validateDiaperKind accepts the four kinds and rejects legacy "mixed"', () => {
+  assert.equal(validateDiaperKind('wet').ok, true);
+  assert.equal(validateDiaperKind('dirty').ok, true);
+  assert.equal(validateDiaperKind('both').ok, true);
+  assert.equal(validateDiaperKind('dry').ok, true);
+  assert.equal(validateDiaperKind('mixed').ok, false);
+});
+
+check('U10. CareEvent type guards narrow each event to its concrete shape', () => {
+  const base = (over: Partial<CareEventBase> = {}): CareEventBase => ({
+    id: 'evt-1',
+    clientEventId: 'cid-1',
+    familyId: 'fam-1',
+    childId: 'baby-mia',
+    createdByUserId: 'cg-mom',
+    type: 'feed',
+    status: 'completed',
+    occurredAt: '2026-06-17T00:00:00.000Z',
+    startedAt: null,
+    endedAt: null,
+    timezoneOffsetMinutes: 0,
+    createdAt: '2026-06-17T00:00:00.000Z',
+    updatedAt: '2026-06-17T00:00:00.000Z',
+    syncStatus: 'local',
+    version: 1,
+    ...over,
+  });
+
+  const breast: BreastFeedEvent = {
+    ...base({ status: 'active' }),
+    type: 'feed',
+    childId: 'baby-mia',
+    method: 'breast',
+    details: { activeSide: 'left', segments: [], totalLeftMs: 0, totalRightMs: 0 },
+  };
+  const bottle: BottleFeedEvent = {
+    ...base(),
+    type: 'feed',
+    childId: 'baby-mia',
+    status: 'completed',
+    method: 'bottle',
+    details: { amountMl: 120, milkType: 'formula' },
+  };
+  const sleep: SleepEvent = {
+    ...base({ type: 'sleep', status: 'active' }),
+    type: 'sleep',
+    childId: 'baby-mia',
+    details: { sleepType: 'night' },
+  };
+  const diaper: DiaperEvent = {
+    ...base({ type: 'diaper' }),
+    type: 'diaper',
+    childId: 'baby-mia',
+    status: 'completed',
+    details: { kind: 'wet' },
+  };
+  const pump: PumpEvent = {
+    ...base({ type: 'pump', childId: null }),
+    type: 'pump',
+    childId: null,
+    subjectUserId: 'cg-mom',
+    details: { side: 'both', leftVolumeMl: null, rightVolumeMl: null },
+  };
+
+  assert.ok(isBreastFeed(breast) && !isBottleFeed(breast));
+  assert.ok(isBottleFeed(bottle) && !isBreastFeed(bottle));
+  assert.ok(isSleepEvent(sleep) && !isPumpEvent(sleep));
+  assert.ok(isDiaperEvent(diaper) && !isSleepEvent(diaper));
+  assert.ok(isPumpEvent(pump) && pump.childId === null);
+  // The guard narrows: these property accesses are type-checked by tsc.
+  assert.equal(breast.details.activeSide, 'left');
+  assert.equal(bottle.details.amountMl, 120);
 });
 
 console.log(`\nAll ${passed} checks passed ✅`);
