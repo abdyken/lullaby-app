@@ -23,27 +23,19 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { Animated, Dimensions, Easing } from 'react-native';
+import { Animated, Easing } from 'react-native';
+import * as SystemUI from 'expo-system-ui';
 
-import type { SurfaceMode } from '@/theme';
+import { surfaces, type SurfaceMode } from '@/theme';
 
 const STORAGE_KEY = 'lullaby.surfaceMode';
 const DEFAULT_MODE: SurfaceMode = 'day';
-/** Long and unhurried so the circle is readable the whole way across the screen
- *  (Telegram-like). */
-const REVEAL_DURATION = 900;
-/** Balanced curve (the classic "ease"): gentle start so the circle grows from a
- *  small point — never jumping to a large radius — an even, followable middle,
- *  and a soft landing (no snap at either end). NOT a strong ease-out, which
- *  expands most of the circle instantly and reads as a sharp switch. */
+/** Cross-fade length. Short enough to feel responsive, long enough to read as an
+ *  intentional theme morph rather than a hard cut. */
+const REVEAL_DURATION = 340;
+/** Balanced "ease" (gentle in, soft landing) so the recolour eases on and off
+ *  rather than snapping at either end. */
 const REVEAL_EASING = Easing.bezier(0.25, 0.1, 0.25, 1);
-/** Tiny overshoot past the farthest corner — just enough to clear rounding and
- *  leave no sliver. Coverage itself is guaranteed by measuring the layer + using
- *  the larger of window/screen dimensions, so the padding stays small ON PURPOSE:
- *  a large overshoot is reached late on the ease-out tail and would eat the
- *  visible soft landing, making the wave feel shorter/faster — the opposite of
- *  what we want. */
-const REVEAL_RADIUS_PADDING = 8;
 
 export type RevealOrigin = { x: number; y: number };
 
@@ -109,6 +101,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     modeRef.current = mode;
   }, [mode]);
 
+  // Paint the native root view (the layer BEHIND the React tree, which shows
+  // through the transparent edge-to-edge system bars / safe-area strip) the
+  // committed surface colour. Without this the bottom gesture/home-indicator
+  // region keeps the OS default (light) when the app goes dark — the "white
+  // strip at the bottom" bug. Committed `mode` only flips at the end of a
+  // transition (under the opaque cross-fade), so this stays in sync with the UI.
+  useEffect(() => {
+    SystemUI.setBackgroundColorAsync(surfaces[mode].bg).catch(() => {
+      /* no-op: not fatal if the platform can't set the root background */
+    });
+  }, [mode]);
+
   useEffect(() => {
     let active = true;
     AsyncStorage.getItem(STORAGE_KEY)
@@ -146,18 +150,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       // `next` = the incoming mode (revealed overlay).
       const from: SurfaceMode = modeRef.current;
       const next: SurfaceMode = from === 'night' ? 'day' : 'night';
-      // Use the larger of window/screen so the radius spans the full physical
-      // screen (incl. Android system bars), then overshoot for safety.
-      const win = Dimensions.get('window');
-      const scr = Dimensions.get('screen');
-      const w = Math.max(win.width, scr.width);
-      const h = Math.max(win.height, scr.height);
-      const maxRadius =
-        Math.hypot(Math.max(origin.x, w - origin.x), Math.max(origin.y, h - origin.y)) +
-        REVEAL_RADIUS_PADDING;
 
       revealProgress.setValue(0);
-      setReveal({ active: true, fromMode: from, toMode: next, origin, maxRadius });
+      // The cross-fade ignores `origin`/`maxRadius`; they're retained on the state
+      // shape so existing consumers compile unchanged.
+      setReveal({ active: true, fromMode: from, toMode: next, origin, maxRadius: 0 });
 
       Animated.timing(revealProgress, {
         toValue: 1,
