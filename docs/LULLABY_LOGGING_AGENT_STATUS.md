@@ -8,12 +8,12 @@ AUTOPILOT_STATUS: RUNNING
 
 ## Current phase
 
-Phase 0 — Not started.
+Phase 1 — Foundation: domain types and repository.
 
 ## Task queue
 
-- [ ] 00. Audit existing MVP structure
-- [ ] 01. Identify current navigation, state management, storage, and logging code
+- [x] 00. Audit existing MVP structure
+- [x] 01. Identify current navigation, state management, storage, and logging code
 - [ ] 02. Create or adapt shared logging event TypeScript models
 - [ ] 03. Create logging repository/service layer
 - [ ] 04. Add active session model for timestamp-based timers
@@ -31,23 +31,78 @@ Phase 0 — Not started.
 
 ## Completed tasks
 
-None yet.
+### 00 + 01 — Audit existing MVP structure and identify navigation/state/storage/logging code
+
+**Key files found:**
+
+| Layer | File | Role |
+|---|---|---|
+| Model | `src/data/models.ts` | `LogEvent` + `LogEventMeta` (current flat model) |
+| Pure logic | `src/data/localInteractions.ts` | State transition functions (no React, no I/O) |
+| Derived state | `src/data/currentState.ts` | Orb/QuickLog view models, night status |
+| Seed data | `src/data/mock.ts` | Test seed + event factories |
+| Persistence | `src/data/persistedState.ts` | Serialize/parse for AsyncStorage |
+| Storage | `src/data/localStorage.ts` | AsyncStorage I/O |
+| Feature flags | `src/data/featureFlags.ts` | `loggingV2` flag (added in this task) |
+| State context | `src/state/LocalEventProvider.tsx` | React context wrapping all state |
+| Tonight screen | `src/app/(tabs)/index.tsx` | Primary home with QuickLogRow + OrbHero |
+| Log screen | `src/app/(tabs)/log.tsx` | Full event history |
+| Generic sheet | `src/components/LogSheet.tsx` | Current bottom sheet (options + Save) |
+| Quick log grid | `src/components/QuickLogRow.tsx` | 2×2 Feed/Sleep/Diaper/Pump cards |
+| Sync types | `src/sync/types.ts` | `EventRepository` interface |
+| Sync local | `src/sync/localRepository.ts` | AsyncStorage repository impl |
+| Sync remote | `src/sync/supabaseRepository.ts` | Supabase repository impl |
+
+**Current logging behavior per type:**
+
+| Type | Current flow | Gaps |
+|---|---|---|
+| Feed | LogSheet (Bottle/L/R) → instant event | No active session, no side timers, no segments, no milk type, no volume |
+| Sleep | QuickLog tap → `{endAt:null}` event; Hero action → sets `endAt` | No restart recovery (relies on persisted state), no "started earlier" |
+| Diaper | LogSheet (Wet/Dirty/Both) → instant event | Missing 'dry' option; Undo not mutation-tracked |
+| Pump | LogSheet (L/R/Both) → instant event | No timer, no volume entry, no session |
+
+**Current storage key:** `lullaby/local-events/v1` → `{ events: LogEvent[], orbView: OrbView }`
+
+**Field mapping (old → new):**
+
+| Old | New |
+|---|---|
+| `id` | `id` + `clientEventId` (new, dedup key) |
+| `babyId` | `childId` |
+| `caregiverId` | `createdByUserId` |
+| `type` | `type` |
+| `startAt` | `startedAt` / `occurredAt` |
+| `endAt` | `endedAt` |
+| `createdAt` | `createdAt` |
+| `meta.side ('L'/'R')` | `details.activeSide` + `details.segments[]` |
+| `meta.kind` | `details.kind` |
+| `meta.amountMl` | `details.amountMl` |
+| `meta.durationMin` | (calculated from segments, not stored) |
+
+**Feature flag added:** `src/data/featureFlags.ts` → `loggingV2: false`
 
 ## Current task
 
-None.
+Next: Task 02 — Create shared logging event TypeScript models.
 
 ## Decisions made
 
-None yet.
+- Feature flag `loggingV2` is placed in `src/data/featureFlags.ts` (no new directories yet).
+- New domain types will go in `src/features/logging/domain/types.ts`.
+- The legacy `LogEvent` model is kept intact; new `CareEvent` types live alongside it.
+- The `LegacyLoggingMapper` will bridge old → new in a later task.
 
 ## Known issues
 
-None yet.
+- `npm run typecheck` — not available (no script in package.json).
+- `npm test` — not available (no test script in package.json).
+- `npm run lint` — available and ran cleanly.
+- `npm run check:local-interactions` — available (smoke test for pure logic).
 
 ## Last verification
 
-Not verified yet.
+- `npm run lint` — ran cleanly after audit (no errors).
 
 ## Final result
 
