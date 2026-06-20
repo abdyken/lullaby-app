@@ -8,7 +8,7 @@ AUTOPILOT_STATUS: RUNNING
 
 ## Current phase
 
-Phase 1 — Foundation: domain types and repository.
+Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
 
 ## Task queue
 
@@ -17,7 +17,7 @@ Phase 1 — Foundation: domain types and repository.
 - [x] 02. Create or adapt shared logging event TypeScript models
 - [x] 03. Create logging repository/service layer
 - [x] 04. Add active session model for timestamp-based timers
-- [ ] 05. Implement Feed flow: breast + bottle
+- [x] 05. Implement Feed flow: breast + bottle
 - [ ] 06. Implement Sleep flow: start/stop session
 - [ ] 07. Implement Diaper quick-log flow
 - [ ] 08. Implement Pump flow: side + timer + optional volume
@@ -30,6 +30,35 @@ Phase 1 — Foundation: domain types and repository.
 - [ ] 15. Final cleanup and implementation summary
 
 ## Completed tasks
+
+### 05 — Implement Feed flow: breast + bottle
+
+**Files created:**
+- `src/features/logging/application/makeId.ts` — simple timestamp+random ID generator (no external dependency)
+- `src/features/logging/application/startBreastFeed.ts` — pure builder: `buildStartBreastFeedEvent` → active BreastFeedEvent with first segment
+- `src/features/logging/application/switchBreastSide.ts` — pure builder: `buildSwitchBreastSideEvent` → closes current segment, opens new one
+- `src/features/logging/application/finishBreastFeed.ts` — pure builder: `buildFinishBreastFeedEvent` → closes last segment, status=completed
+- `src/features/logging/application/saveBottleFeed.ts` — pure builder: `buildSaveBottleFeedEvent` → completed BottleFeedEvent
+- `src/features/logging/feed/BreastFeedIdle.tsx` — side selection UI (Left/Right + Start button)
+- `src/features/logging/feed/BreastFeedActive.tsx` — active timer display (total + per-side), side switch, finish/cancel; side-switch debounced via ref
+- `src/features/logging/feed/BottleFeedForm.tsx` — amount presets (60/90/120/150ml), stepper (±10ml), milk type selector (Breast milk/Formula/Mixed), save guarded against double-press and zero amount
+- `src/features/logging/feed/FeedSheet.tsx` — modal bottom sheet with Breast/Bottle tabs; Breast tab shows active session if one exists, idle view otherwise; uses `useLoggingStore()` for all actions
+
+**Files modified:**
+- `src/app/(tabs)/_layout.tsx` — added `LoggingStoreProvider` wrapping all tabs (alongside `LocalEventProvider`)
+- `src/app/(tabs)/index.tsx` — added `featureFlags` + `FeedSheet` imports; when `loggingV2` is true and sheet is 'feed', renders `FeedSheet` instead of `LogSheet`
+
+Key decisions:
+- All use case builders are pure functions — no I/O, no React. UI calls builder → store action.
+- `FeedSheet` is gated behind `featureFlags.loggingV2` (false by default) so the legacy path is unaffected.
+- `LoggingStoreProvider` is always mounted in the tabs layout (lightweight, harmless when v2 is off).
+- Side-switch protected from double-tap via a `useRef` flag with 600ms cooldown.
+- Save protected from double-press via a `savingRef` in `BottleFeedForm`.
+- `accessibilityLiveRegion="off"` on the timer text prevents TalkBack from announcing every second.
+
+Verification: `npm run lint` — clean (EXIT:0). `npm run check:local-interactions` — 60/60 passed.
+
+---
 
 ### 04 — Add active session model for timestamp-based timers
 
@@ -137,7 +166,7 @@ Verification: `npm run lint` — clean (EXIT:0).
 
 ## Current task
 
-Next: Task 05 — Implement Feed flow: breast + bottle.
+Next: Task 06 — Implement Sleep flow: start/stop session.
 
 ## Decisions made
 
@@ -155,8 +184,8 @@ Next: Task 05 — Implement Feed flow: breast + bottle.
 
 ## Last verification
 
-- `npm run lint` — ran cleanly after task 04 (EXIT:0).
-- `npm run check:local-interactions` — 60/60 passed after task 04.
+- `npm run lint` — ran cleanly after task 05 (EXIT:0).
+- `npm run check:local-interactions` — 60/60 passed after task 05.
 
 ## Final result
 

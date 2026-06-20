@@ -26,6 +26,7 @@ import { TabBarRevealOverlay } from '@/components/TabBarRevealOverlay';
 import { AuthProvider } from '@/state/AuthProvider';
 import { LocalEventProvider } from '@/state/LocalEventProvider';
 import { useTheme } from '@/state/ThemeProvider';
+import { LoggingStoreProvider } from '@/features/logging/state/loggingStore';
 import { surfaces } from '@/theme';
 
 export default function TabsLayout() {
@@ -41,6 +42,7 @@ export default function TabsLayout() {
         {/* One shared event store for all tabs, so Tonight and Log see the same
             events. Reassure simply ignores it. */}
         <LocalEventProvider>
+          <LoggingStoreProvider>
           {/* flex:1 wrapper so AppToast + the tab-bar reveal overlay can float as
               app-level overlays above the floating tab bar. */}
           <View style={{ flex: 1, backgroundColor: background }}>
@@ -83,6 +85,7 @@ export default function TabsLayout() {
             {/* Next-theme tab bar, revealed by the shared circle, above everything. */}
             <TabBarRevealOverlay />
           </View>
+          </LoggingStoreProvider>
         </LocalEventProvider>
       </AuthGate>
     </AuthProvider>
