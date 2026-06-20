@@ -25,11 +25,28 @@ Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
 - [x] 10. Add Undo behavior
 - [x] 11. Add active session recovery after app restart
 - [x] 12. Add validation and edge-case handling
-- [ ] 13. Add or update tests
+- [x] 13. Add or update tests
 - [ ] 14. Run final verification
 - [ ] 15. Final cleanup and implementation summary
 
 ## Completed tasks
+
+### 13 — Add or update tests
+
+**Files created:**
+- `scripts/check-logging-v2.ts` — 44 pure-function checks covering: session math helpers (`calcElapsedMs`, `calcBreastSegmentTotals`, `formatElapsedTime`, `formatElapsedHuman`), all five validators (`validateBottleAmount`, `validateSessionRange`, `validateBreastSegments`, `validatePumpVolumes`, `validateDiaperKind`), breast feed session lifecycle (start → switch side → multiple switches → finish → invalid range throws), bottle feed builder (payload, zero-amount guard, clientEventId), sleep session lifecycle (start now, backdated start, endedAt-before-startedAt throws), diaper quick-log (all four kinds, invalid kind throws), pump session lifecycle (start, save with volume totalling 110 ml, save without volume, childId null)
+
+**Files modified:**
+- `package.json` — added `"check:logging-v2": "tsx scripts/check-logging-v2.ts"` script
+
+Key decisions:
+- Same pattern as the existing `check:local-interactions` script: `node:assert/strict` + `tsx`, no test framework dependency.
+- `checkThrows` helper follows the same fail-fast pattern (rethrows `AssertionError` so a missing throw is flagged clearly).
+- All tests use a pinned reference time `T0` (deterministic, no real `Date.now()` calls in assertions).
+
+Verification: `npm run check:logging-v2` — 44/44 passed (EXIT:0). `npm run lint` — clean (EXIT:0). `npm run check:local-interactions` — 60/60 passed (EXIT:0).
+
+---
 
 ### 12 — Add validation and edge-case handling
 
@@ -318,7 +335,7 @@ Verification: `npm run lint` — clean (EXIT:0).
 
 ## Current task
 
-Next: Task 13 — Add or update tests.
+Next: Task 14 — Run final verification.
 
 ## Decisions made
 
@@ -336,8 +353,9 @@ Next: Task 13 — Add or update tests.
 
 ## Last verification
 
-- `npm run lint` — ran cleanly after task 12 (EXIT:0).
-- `npm run check:local-interactions` — 60/60 passed after task 12.
+- `npm run lint` — ran cleanly after task 13 (EXIT:0).
+- `npm run check:local-interactions` — 60/60 passed after task 13.
+- `npm run check:logging-v2` — 44/44 passed after task 13 (new).
 
 ## Final result
 

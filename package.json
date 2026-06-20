@@ -52,7 +52,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "check:local-interactions": "tsx scripts/check-local-interactions.ts"
+    "check:local-interactions": "tsx scripts/check-local-interactions.ts",
+    "check:logging-v2": "tsx scripts/check-logging-v2.ts"
   },
   "private": true
 }
