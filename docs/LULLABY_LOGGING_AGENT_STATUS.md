@@ -9,15 +9,16 @@ AUTOPILOT_STATUS: RUNNING
 
 ## Current phase
 
-Phase 1.3 — Store/state + timer helpers complete. The active-session model now
-has distinct `activeSleep`/`activeBreastFeed`/`activePump` slots (`loggingStore`),
-session selectors, `hydrateLoggingState` (launch) + `reconcileLoggingState`
-(foreground), and the timestamp-based timer helpers (`sessionMath` +
-`useElapsedTime`). The Phase 1 foundation (plan §13 PR 1–2 + the Phase 4
-session-engine STATE) is in place; the React provider, the live `AppState`
-subscription, and the start/finish/cancel use-cases land with the flows. Next:
-status task 05 "Feed flow: breast + bottle" — the first UI + application layer on
-top of the repository + store + session model, behind the `loggingV2` flag.
+Phases 3 + 5 (Feed) — the first live flow. The Feed flow now runs end-to-end
+behind the `loggingV2` flag: the application use-cases
+(`startBreastFeed`/`switchBreastSide`/`finishBreastFeed`/`cancelBreastFeed`/
+`saveBottleFeed`), a React `LoggingProvider` that hydrates on launch and
+reconciles on `AppState` foreground, and the Feed UI (`FeedSheet` + breast
+idle/active + bottle form). Breast is a real active session with side segments and
+live, timestamp-derived timers; bottle is an instant volume+milk-type event. All
+gated so the MVP is untouched while the flag is off. Next: status task 06 "Sleep
+flow: start/stop session" (the session engine + provider are now in place to build
+on; the Sleep finish-time bug in `mock.ts` is fixed there).
 
 ## Task queue
 
@@ -26,7 +27,7 @@ top of the repository + store + session model, behind the `loggingV2` flag.
 - [x] 02. Create or adapt shared logging event TypeScript models
 - [x] 03. Create logging repository/service layer
 - [x] 04. Add active session model for timestamp-based timers
-- [ ] 05. Implement Feed flow: breast + bottle
+- [x] 05. Implement Feed flow: breast + bottle
 - [ ] 06. Implement Sleep flow: start/stop session
 - [ ] 07. Implement Diaper quick-log flow
 - [ ] 08. Implement Pump flow: side + timer + optional volume
@@ -119,25 +120,67 @@ top of the repository + store + session model, behind the `loggingV2` flag.
     Extended the smoke test with 8 checks (W1–W8) covering the math, selectors,
     pure store transitions, restart recovery, and clock-anomaly detection → suite
     now **87/87**.
+- **05 — Feed flow: breast + bottle (Phase 3 + Phase 5, first live flow).** The
+  first task to add the application layer, a React provider, and UI, all behind
+  the `loggingV2` flag (MVP untouched while off):
+  - `application/` — pure async use-cases over `{ repo, clock, actor }` returning
+    a `UseCaseResult` (never throwing): `saveBottleFeed` (validates amount, instant
+    completed event, idempotent by `clientEventId`), `startBreastFeed` (active
+    session + first open segment; reopens the existing session instead of creating
+    a second — plan Phase 4), `switchBreastSide` (closes the open segment / opens
+    the other side / recomputes totals from segments; same-side tap is a no-op),
+    `finishBreastFeed` (closes last segment, totals from segments, → completed),
+    `cancelBreastFeed` (→ cancelled, never a logged feed). Plus `newCareEventBase`
+    + `LoggingActor`/`LoggingUseCaseDeps` in `application/types.ts`. Exported from
+    the barrel (Node-safe — no React/AsyncStorage).
+  - `state/LoggingProvider.tsx` — the React seam: owns a device repository + system
+    clock, holds `LoggingState`, runs `hydrateLoggingState` on mount and
+    `subscribeForeground` → `reconcileLoggingState` on foreground, and exposes the
+    Feed actions (with a mutation lock for double-tap safety). GATED on the flag:
+    no I/O at all while `loggingV2` is off. Derives the actor from `useAuth`
+    (Supabase) or the seed baby/caregiver (local-only). NOT in the barrel (React +
+    AsyncStorage); mounted in `(tabs)/_layout.tsx` inside `LocalEventProvider`.
+  - `feed/` UI — `FeedSheet` (Modal shell + Breast/Bottle tabs; opens straight into
+    the active view when a session is running), `BreastFeedIdle` (side + start),
+    `BreastFeedActive` (live total + per-side via `useElapsedTime`/
+    `breastSegmentTotals`, switch, Finish, separated Cancel), `BottleFeedForm`
+    (presets + ±10 stepper + milk type, no keyboard, Save disabled at 0), and a
+    shared `ChoicePill` (inner-View surface for reliable Android paint).
+  - Wired into `(tabs)/index.tsx`: with the flag on, the Feed quick-log tap opens
+    `FeedSheet`; with it off, the legacy `LogSheet` path is unchanged.
+  - Extended the smoke test with 10 checks (X1–X10) for the Feed use-cases
+    (bottle save/validation/idempotency; breast start/switch/finish totals, the
+    canonical 5m/3m and multi-switch cases, resume-existing, hydration restore,
+    same-side no-op, cancel) → suite now **97/97**.
 
 ## Current task
 
-05. Implement the Feed flow (breast + bottle) on the task-04 foundation. Bottle is
-an instant quantity event (volume presets + ±10 stepper + milk type; no save when
-amount ≤ 0 via `validateBottleAmount`; remember last milk type — plan Phase 3).
-Breast is an active session (choose start side → side segments → switch side →
-finish) built on the session model: `activeBreastFeed`, `breastSegmentTotals`,
-`useElapsedTime`, and side-switch that closes the open segment and opens the new
-one (plan Phase 5). This is the first task to add UI + application use-cases
-(`startBreastFeed`/`switchBreastSide`/`finishBreastFeed`/`saveBottleFeed`) and to
-begin wiring the new domain behind the `loggingV2` flag (a `LoggingProvider` that
-calls `hydrateLoggingState` on mount and `subscribeForeground` →
-`reconcileLoggingState`).
+06. Implement the Sleep flow (start/stop active session) on the now-live session
+engine + provider. Sleep is a single active session per child: `startSleep`
+(`status = active`, `startedAt = now`, also accept a backdated/"started earlier"
+start, validated not-future), `finishSleep` (`endedAt = now`, `status = completed`)
+and a manual completed-sleep path; durations always derive from timestamps (no
+ticking counter). This is also where the audit's **highest-priority behavioral
+bug** is fixed: the legacy Sleep finish is hardcoded to +72 min
+(`SLEEP_FINALIZE_MIN`/`endRunningSleep`, `src/data/mock.ts`) instead of
+`endedAt = now`. Add `application/startSleep.ts` + `finishSleep.ts`, the Sleep UI
+(`SleepSheet`/idle/active), the provider actions, and a single source of truth so
+Hero + Quick Log + sheet control the same session (plan Phase 6). Behind the
+`loggingV2` flag.
 
 > Ordering note: the status queue lists Feed (05) before Diaper (07), whereas the
 > plan's §16 vertical slice suggests Diaper-first. The queue governs autopilot
-> order, so the next run does Feed; the session model is ready either way. Revisit
-> if a human prefers the plan's order.
+> order; Diaper (07) and Pump (08) follow Sleep. The session engine + provider are
+> now in place, so each remaining flow is an application + UI increment.
+>
+> Scope boundary carried forward: the new Feed events are written to the v2 store
+> (`lullaby/logging-v2/v1`) and appear in the v2 `LoggingState.todayEvents`, but
+> the VISIBLE timeline + the quick-log card subtitle/active-ring still read the
+> legacy `useLocalEvents` store. Wiring the rendered timeline + quick-log cards to
+> the v2 store is **task 09** (integrate timeline). Undo for v2 mutations is **task
+> 10**; deeper restart-recovery acceptance is **task 11**. Tapping Feed already
+> opens the active v2 session, so "Feed card opens the active session if running"
+> holds via the sheet today.
 
 ## Decisions made
 
@@ -201,27 +244,66 @@ calls `hydrateLoggingState` on mount and `subscribeForeground` →
   `startedAt` is after `now` stays in place (it is real, stored data) but the
   store sets `error: started_in_future` so the UI can show a recover prompt (plan
   §6), while `elapsedMs` clamps the displayed duration to 0.
+- **Task 05 wired the new domain into the app for the first time, but only behind
+  the flag.** `LoggingProvider` is always mounted, yet does ZERO I/O (no hydrate,
+  no `AppState` subscription) while `loggingV2` is off, and the only consumer
+  (`FeedSheet`) is rendered only when the flag is on. So the running MVP is
+  byte-for-byte unchanged by default; the flag (env `EXPO_PUBLIC_LOGGING_V2` or a
+  runtime override) is the single switch, exactly as plan §2.1 intends.
+- **Use-cases validate before writing and return `{ ok: false, error }` on
+  failure**; the provider sets that error into store state and SKIPS the
+  post-mutation refresh (a failure changed nothing, and `reconcileLoggingState`
+  would otherwise clear the error). A success refreshes from the repo, which also
+  clears any stale error.
+- **Breast totals are always recomputed from segments**, never trusted as stored
+  fields: `switchBreastSide`/`finishBreastFeed` recompute `totalLeftMs/RightMs` via
+  `breastSegmentTotals`, and the active UI re-derives them every tick from
+  `startedAt` (`useElapsedTime` + segment math). Nothing ticking is persisted, so
+  totals are correct after any number of switches and after a restart.
+- **Cancel ≠ finish:** cancel sets `status = 'cancelled'` (excluded from both the
+  today read and active-session read) so an abandoned session never becomes a
+  logged feed and never lingers as a timer (plan Phase 5 acceptance). Finish sets
+  `completed` with a real `endedAt`.
+- **Bottle "remember last milk type/amount" is in-memory for the session** (module
+  vars in `BottleFeedForm`), not yet persisted. It satisfies the within-session
+  preference (plan Phase 3) cheaply; durable persistence can layer on later without
+  touching the use-case.
+- **The provider repo is created with `useMemo([])`, not a lazy ref**, to satisfy
+  `react-hooks/refs` (no ref access during render). The repository is a stateless
+  AsyncStorage wrapper, so even an unlikely memo discard/recreate is harmless.
 
 ## Known issues (found during audit, to fix in later tasks)
 
 - **Sleep finish is hardcoded to +72 min** (`SLEEP_FINALIZE_MIN` /
   `endRunningSleep`, `src/data/mock.ts:214,354`) instead of `endedAt = now`.
-  Highest-priority behavioral fix for the Sleep flow (task 06).
-- No independent sessions IN THE LIVE APP: the running MVP still uses the single
-  `orbView`. The new `loggingStore` models concurrent `activeSleep`/
-  `activeBreastFeed`/`activePump` (task 04), but it is not wired in until the
-  flows + provider land (05+).
-- `useElapsedTime`, `sessionMath`, and the `reconcileLoggingState` logic now exist
-  (task 04), plus a `subscribeForeground` seam over `AppState`. What remains is the
-  live wiring: a provider that runs `hydrateLoggingState` on mount and calls
-  `subscribeForeground` → `reconcileLoggingState` on foreground (lands with 05+).
+  Highest-priority behavioral fix — addressed in the Sleep flow (task 06, next).
+- The LIVE Feed flow is now wired (task 05) behind the flag: the provider runs
+  `hydrateLoggingState` on mount and `subscribeForeground` → `reconcileLoggingState`
+  on foreground. Sleep/Diaper/Pump still use the legacy `orbView`/`addX` path until
+  their flows land (06–08).
+- The VISIBLE timeline + quick-log card subtitles/active-ring still read the legacy
+  `useLocalEvents` store, so v2 Feed events are persisted + in `LoggingState` but
+  not yet rendered there — **task 09** (integrate timeline) wires the rendered UI to
+  the v2 store.
 - Diaper has no `dry`; quick-log is 3 taps, not 2. Pump drops `both` and captures
-  no volume. Bottle captures no volume/milk type. Breast has no real timers or
-  side segments.
-- Undo is delete-newest only (no `UndoableMutation` snapshot / undo-finish).
+  no volume. (Bottle volume/milk type ✓ and Breast timers/side segments ✓ as of
+  task 05.)
+- Undo is delete-newest only (no `UndoableMutation` snapshot / undo-finish) — the
+  v2 Feed flow does not show Undo yet; **task 10** adds it.
 
 ## Last verification
 
+- 2026-06-21 (task 05) — `npx tsc --noEmit` → exit 0. `npm run
+  check:local-interactions` → **all 97 checks pass** (87 prior + 10 new, X1–X10,
+  for the Feed use-cases: bottle save/validation/idempotency and breast
+  start/switch/finish totals incl. the canonical 5m/3m + multi-switch cases,
+  resume-existing, hydration restore, same-side no-op, and cancel). `npm run lint`
+  (`expo lint`) → exit 0, clean (fixed one `react-hooks/refs` finding by switching
+  the provider repo to `useMemo`). `npm test` still not available (no runner; the
+  smoke test is the substitute). MVP behavior is unchanged: `loggingV2` defaults to
+  `false`, the provider does no I/O while off, and the new `FeedSheet` is only
+  reachable when the flag is on (verified by gating in `featureFlags.ts`,
+  `LoggingProvider.tsx`, and `(tabs)/index.tsx`).
 - 2026-06-21 (task 04) — `npx tsc --noEmit` → exit 0. `npm run
   check:local-interactions` → **all 87 checks pass** (79 prior + 8 new, W1–W8,
   for `sessionMath` / session selectors / pure store transitions / hydration /

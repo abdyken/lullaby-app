@@ -26,9 +26,14 @@ export * from './state/loggingStore';
 export * from './state/loggingSelectors';
 export * from './state/loggingHydration';
 
+// Application use-cases (plan §3). Pure + Node-safe (no React, no AsyncStorage).
+export * from './application';
+
 // NOTE: a few files are intentionally NOT re-exported here so this barrel stays
 // runnable under plain Node (the smoke test):
 //   - './data/loggingStorage'        — imports AsyncStorage (React Native)
 //   - './timer/useElapsedTime'       — a React hook (imports `react`)
 //   - './timer/appStateReconcile'    — imports `react-native` AppState
-// Import those three directly from the UI/provider where they are needed.
+//   - './state/LoggingProvider'      — a React provider (react + AsyncStorage)
+//   - './feed/*'                     — React Native UI (the Feed flow)
+// Import those directly from the UI/provider where they are needed.
