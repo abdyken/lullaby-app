@@ -46,7 +46,9 @@ example
 debug/
 
 # Local AI/tool state
-.claude/
+.claude/settings.local.json
+.claude/autopilot.log
+.claude/nohup-autopilot.out
 
 # Expo local state
 .expo/
@@ -56,4 +58,3 @@ debug/
 .env.*
 !.env.example
 .gstack/
-.claude/settings.local.json
