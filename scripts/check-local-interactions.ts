@@ -64,6 +64,25 @@ import type {
   PumpEvent,
   SleepEvent,
 } from '../src/features/logging/domain/types';
+// Logging v2 repository/service layer (plan Phase 1.2) — interface, in-memory
+// persistence, the impl, the legacy mapper, and the loggingV2 feature flag.
+import {
+  createInMemoryLoggingPersistence,
+  parseLoggingSnapshot,
+  serializeLoggingSnapshot,
+} from '../src/features/logging/data/loggingPersistence';
+import { createLoggingRepository } from '../src/features/logging/data/LoggingRepositoryImpl';
+import {
+  careEventToLegacyEvent,
+  legacyEventToCareEvent,
+  mapLegacyEvents,
+} from '../src/features/logging/data/LegacyLoggingMapper';
+import {
+  isLoggingV2Enabled,
+  resetLoggingFlags,
+  resolveLoggingFlags,
+  setLoggingV2Enabled,
+} from '../src/features/logging/config/featureFlags';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
 const NOW = Date.parse('2026-06-17T00:00:00.000Z');
@@ -829,4 +848,245 @@ check('U10. CareEvent type guards narrow each event to its concrete shape', () =
   assert.equal(bottle.details.amountMl, 120);
 });
 
-console.log(`\nAll ${passed} checks passed ✅`);
+// V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are
+// async (the repository contract returns Promises), so they run after the sync
+// checks above and print the final summary on completion.
+async function checkAsync(name: string, fn: () => Promise<void>): Promise<void> {
+  await fn();
+  passed += 1;
+  console.log(`  ✓ ${name}`);
+}
+
+async function runAsyncChecks(): Promise<void> {
+  const iso = (msValue: number) => new Date(msValue).toISOString();
+
+  const careBase = (over: Partial<CareEventBase> = {}): CareEventBase => ({
+    id: 'evt',
+    clientEventId: 'cid',
+    familyId: 'fam-1',
+    childId: 'baby-mia',
+    createdByUserId: 'cg-mom',
+    type: 'diaper',
+    status: 'completed',
+    occurredAt: iso(NOW),
+    startedAt: null,
+    endedAt: null,
+    timezoneOffsetMinutes: 0,
+    createdAt: iso(NOW),
+    updatedAt: iso(NOW),
+    syncStatus: 'local',
+    version: 1,
+    ...over,
+  });
+
+  const makeDiaper = (id: string, cid: string, over: Partial<CareEventBase> = {}): DiaperEvent => ({
+    ...careBase({ id, clientEventId: cid, type: 'diaper', ...over }),
+    type: 'diaper',
+    childId: 'baby-mia',
+    status: 'completed',
+    details: { kind: 'wet' },
+  });
+
+  const makeSleep = (id: string, cid: string, status: 'active' | 'completed'): SleepEvent => ({
+    ...careBase({
+      id,
+      clientEventId: cid,
+      type: 'sleep',
+      status,
+      startedAt: iso(NOW),
+      endedAt: status === 'completed' ? iso(NOW + 60_000) : null,
+    }),
+    type: 'sleep',
+    childId: 'baby-mia',
+    details: { sleepType: 'night' },
+  });
+
+  const makePump = (id: string, cid: string, subjectUserId: string): PumpEvent => ({
+    ...careBase({ id, clientEventId: cid, type: 'pump', status: 'active', childId: null, startedAt: iso(NOW) }),
+    type: 'pump',
+    childId: null,
+    subjectUserId,
+    details: { side: 'both', leftVolumeMl: null, rightVolumeMl: null },
+  });
+
+  await checkAsync('V1. createEvent stores an event; getTodayEvents returns it; retry is idempotent by clientEventId', async () => {
+    const repo = createLoggingRepository(createInMemoryLoggingPersistence(), createManualClock(NOW));
+    const diaper = makeDiaper('evt-d1', 'cid-d1');
+    await repo.createEvent(diaper);
+    await repo.createEvent(diaper); // retried create — same clientEventId, must not duplicate
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.length, 1);
+    assert.equal(today[0].id, 'evt-d1');
+  });
+
+  await checkAsync('V2. getActiveSessions returns active sleep (by child) + pump (by caregiver), excludes completed and other caregivers', async () => {
+    const repo = createLoggingRepository(createInMemoryLoggingPersistence(), createManualClock(NOW));
+    await repo.createEvent(makeSleep('evt-s1', 'cid-s1', 'active'));
+    await repo.createEvent(makeSleep('evt-s2', 'cid-s2', 'completed'));
+    await repo.createEvent(makePump('evt-p1', 'cid-p1', 'cg-mom'));
+    await repo.createEvent(makePump('evt-p2', 'cid-p2', 'cg-dad')); // a different caregiver's pump
+    const active = await repo.getActiveSessions({ familyId: 'fam-1', childId: 'baby-mia', userId: 'cg-mom' });
+    assert.deepEqual(active.map((e) => e.id).sort(), ['evt-p1', 'evt-s1']);
+  });
+
+  await checkAsync('V3. updateEvent bumps version/updatedAt; softDeleteEvent hides the event from the timeline', async () => {
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(createInMemoryLoggingPersistence(), clock);
+    const diaper = makeDiaper('evt-d1', 'cid-d1');
+    await repo.createEvent(diaper);
+    clock.advance(60_000);
+    const updated: DiaperEvent = { ...diaper, details: { kind: 'dirty' } };
+    await repo.updateEvent(updated);
+    let today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.length, 1);
+    assert.equal(today[0].version, 2); // bumped from 1
+    assert.equal((today[0] as DiaperEvent).details.kind, 'dirty');
+    assert.equal(today[0].updatedAt, iso(NOW + 60_000));
+    await repo.softDeleteEvent('evt-d1');
+    today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.length, 0); // soft-deleted → not shown in the timeline
+  });
+
+  await checkAsync('V4. enqueueSync queues an id once (deduped)', async () => {
+    const port = createInMemoryLoggingPersistence();
+    const repo = createLoggingRepository(port, createManualClock(NOW));
+    await repo.enqueueSync('evt-d1');
+    await repo.enqueueSync('evt-d1'); // duplicate
+    await repo.enqueueSync('evt-d2');
+    const snap = await port.load();
+    assert.deepEqual(snap.syncQueue, ['evt-d1', 'evt-d2']);
+  });
+
+  await checkAsync('V5. getTodayEvents excludes events from a previous day', async () => {
+    const repo = createLoggingRepository(createInMemoryLoggingPersistence(), createManualClock(NOW));
+    await repo.createEvent(makeDiaper('evt-today', 'cid-today'));
+    await repo.createEvent(makeDiaper('evt-old', 'cid-old', { occurredAt: iso(NOW - 2 * 86_400_000) }));
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.deepEqual(today.map((e) => e.id), ['evt-today']);
+  });
+
+  await checkAsync('V6. legacyEventToCareEvent maps breast/bottle/sleep/diaper/pump and skips notes', async () => {
+    const legacyBreast: LogEvent = {
+      id: 'l-feed-L',
+      babyId: 'baby-mia',
+      caregiverId: 'cg-mom',
+      type: 'feed',
+      startAt: '2026-06-17T00:00:00.000Z',
+      endAt: '2026-06-17T00:10:00.000Z',
+      meta: { side: 'L' },
+      createdAt: '2026-06-17T00:10:00.000Z',
+    };
+    const breast = legacyEventToCareEvent(legacyBreast);
+    assert.ok(breast && isBreastFeed(breast));
+    if (breast && isBreastFeed(breast)) {
+      assert.equal(breast.familyId, 'baby-mia'); // familyId mirrors baby scope (audit §13)
+      assert.equal(breast.clientEventId, 'l-feed-L'); // legacy id → stable idempotency key
+      assert.equal(breast.details.segments.length, 1);
+      assert.equal(breast.details.totalLeftMs, 10 * 60_000);
+      assert.equal(breast.details.totalRightMs, 0);
+      assert.equal(breast.status, 'completed');
+    }
+
+    const bottle = legacyEventToCareEvent({ ...legacyBreast, id: 'l-bottle', meta: { amountMl: 120 } });
+    assert.ok(bottle && isBottleFeed(bottle));
+    if (bottle && isBottleFeed(bottle)) {
+      assert.equal(bottle.details.amountMl, 120);
+      assert.equal(bottle.details.milkType, 'other');
+    }
+
+    const legacySleep: LogEvent = {
+      id: 'l-sleep',
+      babyId: 'baby-mia',
+      caregiverId: 'cg-mom',
+      type: 'sleep',
+      startAt: '2026-06-17T00:00:00.000Z',
+      endAt: null,
+      meta: {},
+      createdAt: '2026-06-17T00:00:00.000Z',
+    };
+    const sleep = legacyEventToCareEvent(legacySleep);
+    assert.ok(sleep && isSleepEvent(sleep) && sleep.status === 'active'); // running sleep → active
+
+    const diaper = legacyEventToCareEvent({ ...legacySleep, id: 'l-diaper', type: 'diaper', meta: { kind: 'both' } });
+    assert.ok(diaper && isDiaperEvent(diaper) && diaper.details.kind === 'both');
+
+    const pump = legacyEventToCareEvent({ ...legacySleep, id: 'l-pump', type: 'pump', endAt: '2026-06-17T00:15:00.000Z', meta: { side: 'R' } });
+    assert.ok(pump && isPumpEvent(pump));
+    if (pump && isPumpEvent(pump)) {
+      assert.equal(pump.details.side, 'right');
+      assert.equal(pump.subjectUserId, 'cg-mom');
+      assert.equal(pump.details.leftVolumeMl, null);
+    }
+
+    const note = legacyEventToCareEvent({ ...legacySleep, id: 'l-note', type: 'note', meta: { label: 'Fussy' } });
+    assert.equal(note, null); // notes are out of scope for the four core flows
+
+    assert.equal(mapLegacyEvents([legacyBreast, legacySleep, { ...legacySleep, id: 'l-note', type: 'note', meta: {} }]).length, 2);
+  });
+
+  await checkAsync('V7. careEventToLegacyEvent preserves what the legacy shape can hold', async () => {
+    const bottle: BottleFeedEvent = {
+      ...careBase({ id: 'c-bottle', clientEventId: 'c-bottle' }),
+      type: 'feed',
+      childId: 'baby-mia',
+      status: 'completed',
+      method: 'bottle',
+      details: { amountMl: 90, milkType: 'formula' },
+    };
+    const bottleBack = careEventToLegacyEvent(bottle);
+    assert.equal(bottleBack.type, 'feed');
+    assert.equal(bottleBack.meta.amountMl, 90);
+    assert.equal(bottleBack.babyId, 'baby-mia');
+
+    const pump: PumpEvent = {
+      ...careBase({ id: 'c-pump', clientEventId: 'c-pump', type: 'pump', childId: null }),
+      type: 'pump',
+      childId: null,
+      subjectUserId: 'cg-mom',
+      details: { side: 'left', leftVolumeMl: 50, rightVolumeMl: null },
+    };
+    assert.equal(careEventToLegacyEvent(pump).meta.side, 'L');
+    assert.equal(careEventToLegacyEvent(pump).babyId, ''); // childId null → placeholder (lossy)
+
+    const diaperDry: DiaperEvent = {
+      ...careBase({ id: 'c-dry', clientEventId: 'c-dry', type: 'diaper' }),
+      type: 'diaper',
+      childId: 'baby-mia',
+      status: 'completed',
+      details: { kind: 'dry' },
+    };
+    assert.equal(careEventToLegacyEvent(diaperDry).meta.kind, undefined); // 'dry' has no legacy kind
+  });
+
+  await checkAsync('V8. logging snapshot serialize → parse round-trips events + queue; bad input degrades safely', async () => {
+    const snapshot = { events: [makeDiaper('evt-d1', 'cid-d1')], syncQueue: ['evt-d1'] };
+    const restored = parseLoggingSnapshot(serializeLoggingSnapshot(snapshot));
+    assert.ok(restored && restored.events.length === 1);
+    assert.deepEqual(restored?.syncQueue, ['evt-d1']);
+    assert.equal(parseLoggingSnapshot(null), null);
+    assert.equal(parseLoggingSnapshot('not json {'), null);
+    // a malformed row is dropped rather than failing the whole load
+    const partial = parseLoggingSnapshot(JSON.stringify({ events: [{ id: 'x' }], syncQueue: [] }));
+    assert.ok(partial && partial.events.length === 0);
+  });
+
+  await checkAsync('V9. loggingV2 flag honors a runtime override and resolves as a flag set', async () => {
+    resetLoggingFlags();
+    assert.equal(typeof isLoggingV2Enabled(), 'boolean');
+    setLoggingV2Enabled(true);
+    assert.equal(isLoggingV2Enabled(), true);
+    assert.equal(resolveLoggingFlags().loggingV2, true);
+    setLoggingV2Enabled(false);
+    assert.equal(isLoggingV2Enabled(), false);
+    resetLoggingFlags();
+  });
+}
+
+runAsyncChecks()
+  .then(() => {
+    console.log(`\nAll ${passed} checks passed ✅`);
+  })
+  .catch((err) => {
+    console.error(err);
+    process.exitCode = 1;
+  });
