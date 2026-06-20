@@ -140,3 +140,24 @@ If you cannot continue safely:
 3. Explain what human input is needed
 4. Commit only safe documentation/status updates
 5. Exit
+## Interrupted run recovery
+
+Before selecting the next unchecked task, always inspect:
+
+- `git status --short`
+- `docs/LULLABY_LOGGING_AGENT_STATUS.md`
+- recent commits via `git log --oneline -5`
+
+If there are uncommitted changes, assume the previous autopilot run was interrupted by a session limit, usage limit, rate limit, timeout, or terminal interruption.
+
+In that case:
+
+1. Do not start a new task.
+2. Infer the interrupted task from the changed files and the status file.
+3. Finish that same task first.
+4. Run verification.
+5. Update the status file.
+6. Commit the completed work.
+7. Only then allow the next run to move to the next unchecked task.
+
+Never mark a task as complete unless the code is implemented, verified, status is updated, and a commit is created.
