@@ -48,6 +48,8 @@ import { useLocalEvents } from '@/state/LocalEventProvider';
 import { useTheme } from '@/state/ThemeProvider';
 import { useHandoffCursor } from '@/state/useHandoffCursor';
 import { colors, type SurfaceMode } from '@/theme';
+import { featureFlags } from '@/data/featureFlags';
+import { FeedSheet } from '@/features/logging/feed/FeedSheet';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -318,14 +320,21 @@ export default function TonightScreen() {
         {renderBody(surfaceMode)}
       </Screen>
 
-      {sheet !== null && (
+      {featureFlags.loggingV2 && sheet === 'feed' ? (
+        <FeedSheet
+          familyId="family-local"
+          childId="baby-mia"
+          userId="cg-mom"
+          onClose={() => setSheet(null)}
+        />
+      ) : sheet !== null ? (
         <LogSheet
           key={sheet}
           {...SHEETS[sheet]}
           onSave={handleSheetSave}
           onClose={() => setSheet(null)}
         />
-      )}
+      ) : null}
 
       {accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} />}
 
