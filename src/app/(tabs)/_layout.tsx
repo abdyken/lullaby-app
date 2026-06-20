@@ -23,6 +23,7 @@ import { AppToast } from '@/components/AppToast';
 import { AuthGate } from '@/components/auth/AuthGate';
 import { LullabyTabBar } from '@/components/LullabyTabBar';
 import { TabBarRevealOverlay } from '@/components/TabBarRevealOverlay';
+import { LoggingProvider } from '@/features/logging/state/LoggingProvider';
 import { AuthProvider } from '@/state/AuthProvider';
 import { LocalEventProvider } from '@/state/LocalEventProvider';
 import { useTheme } from '@/state/ThemeProvider';
@@ -41,9 +42,12 @@ export default function TabsLayout() {
         {/* One shared event store for all tabs, so Tonight and Log see the same
             events. Reassure simply ignores it. */}
         <LocalEventProvider>
-          {/* flex:1 wrapper so AppToast + the tab-bar reveal overlay can float as
-              app-level overlays above the floating tab bar. */}
-          <View style={{ flex: 1, backgroundColor: background }}>
+          {/* Logging v2 feature API (Feed/Sleep/Diaper/Pump). Inert while the
+              loggingV2 flag is off — no I/O, no behavior change to the MVP. */}
+          <LoggingProvider>
+            {/* flex:1 wrapper so AppToast + the tab-bar reveal overlay can float as
+                app-level overlays above the floating tab bar. */}
+            <View style={{ flex: 1, backgroundColor: background }}>
             <Tabs
               tabBar={(props) => <LullabyTabBar {...props} />}
               detachInactiveScreens={false}
@@ -82,7 +86,8 @@ export default function TabsLayout() {
             <AppToast />
             {/* Next-theme tab bar, revealed by the shared circle, above everything. */}
             <TabBarRevealOverlay />
-          </View>
+            </View>
+          </LoggingProvider>
         </LocalEventProvider>
       </AuthGate>
     </AuthProvider>

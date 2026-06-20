@@ -110,6 +110,16 @@ import {
   reconcileLoggingState,
 } from '../src/features/logging/state/loggingHydration';
 import { loggingError } from '../src/features/logging/domain/errors';
+// Logging v2 Feed use-cases (plan Phase 3 & 5, task 05) — pure async functions
+// over an in-memory repository + a fake clock.
+import {
+  cancelBreastFeed,
+  finishBreastFeed,
+  saveBottleFeed,
+  startBreastFeed,
+  switchBreastSide,
+  type LoggingActor,
+} from '../src/features/logging/application';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
 const NOW = Date.parse('2026-06-17T00:00:00.000Z');
@@ -1270,6 +1280,142 @@ async function runAsyncChecks(): Promise<void> {
     assert.equal(s3.error?.code, 'invalid_diaper_kind');
     assert.equal(s2.error, null); // input unchanged
     assert.equal(clearError(s3).error, null);
+  });
+
+  // X. Feed use-cases (plan Phase 3 Bottle + Phase 5 Breast, task 05). Run over a
+  // fresh in-memory repo + a fake clock, with a fixed actor/scope.
+  const actor: LoggingActor = { familyId: 'fam-1', childId: 'baby-mia', userId: 'cg-mom' };
+  const feedScope = { familyId: 'fam-1', childId: 'baby-mia', userId: 'cg-mom' };
+  const newFeedDeps = () => {
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(createInMemoryLoggingPersistence(), clock);
+    return { repo, clock, deps: { repo, clock, actor } };
+  };
+  const activeBreast = async (repo: ReturnType<typeof createLoggingRepository>) =>
+    selectActiveBreastFeed(await repo.getActiveSessions(feedScope));
+
+  await checkAsync('X1. saveBottleFeed 120 + breast milk creates one completed bottle event', async () => {
+    const { repo, deps } = newFeedDeps();
+    const r = await saveBottleFeed(deps, { amountMl: 120, milkType: 'breast_milk' });
+    assert.ok(r.ok);
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.length, 1);
+    const e = today[0];
+    assert.ok(isBottleFeed(e) && e.details.amountMl === 120 && e.details.milkType === 'breast_milk');
+    assert.equal(e.status, 'completed');
+    assert.equal(e.startedAt, null); // bottle is an instant event, never a session
+  });
+
+  await checkAsync('X2. saveBottleFeed amount 0 is rejected and saves nothing', async () => {
+    const { repo, deps } = newFeedDeps();
+    const r = await saveBottleFeed(deps, { amountMl: 0, milkType: 'formula' });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.error.code, 'invalid_bottle_amount');
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.length, 0);
+  });
+
+  await checkAsync('X3. double saveBottleFeed with the same clientEventId creates one event', async () => {
+    const { repo, deps } = newFeedDeps();
+    const cid = 'cid-bottle-x3';
+    await saveBottleFeed(deps, { amountMl: 90, milkType: 'formula', clientEventId: cid });
+    await saveBottleFeed(deps, { amountMl: 90, milkType: 'formula', clientEventId: cid });
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.length, 1);
+  });
+
+  await checkAsync('X4. startBreastFeed Left creates one open left segment on an active session', async () => {
+    const { repo, deps } = newFeedDeps();
+    const r = await startBreastFeed(deps, { side: 'left' });
+    assert.ok(r.ok);
+    const breast = await activeBreast(repo);
+    assert.ok(breast && breast.status === 'active');
+    assert.equal(breast.details.activeSide, 'left');
+    assert.equal(breast.details.segments.length, 1);
+    assert.equal(breast.details.segments[0].side, 'left');
+    assert.equal(breast.details.segments[0].endedAt, null);
+  });
+
+  await checkAsync('X5. Start Left → +5m switch Right → +3m finish gives Left 5m / Right 3m', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps, { side: 'left' })).ok);
+    clock.advance(5 * 60_000);
+    const open1 = await activeBreast(repo);
+    assert.ok(open1);
+    assert.ok((await switchBreastSide(deps, { event: open1, side: 'right' })).ok);
+    clock.advance(3 * 60_000);
+    const open2 = await activeBreast(repo);
+    assert.ok(open2);
+    const fin = await finishBreastFeed(deps, { event: open2 });
+    assert.ok(fin.ok);
+    if (fin.ok) {
+      assert.equal(fin.event.status, 'completed');
+      assert.equal(fin.event.details.activeSide, null);
+      assert.notEqual(fin.event.endedAt, null);
+      assert.equal(fin.event.details.totalLeftMs, 5 * 60_000);
+      assert.equal(fin.event.details.totalRightMs, 3 * 60_000);
+    }
+    // No longer active; the completed feed is in today's timeline.
+    assert.equal(await activeBreast(repo), null);
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.ok(today.some((e) => isBreastFeed(e) && e.status === 'completed'));
+  });
+
+  await checkAsync('X6. multiple side switches sum correctly (L 4m / R 2m)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps, { side: 'left' })).ok);
+    clock.advance(2 * 60_000);
+    assert.ok((await switchBreastSide(deps, { event: (await activeBreast(repo))!, side: 'right' })).ok);
+    clock.advance(2 * 60_000);
+    assert.ok((await switchBreastSide(deps, { event: (await activeBreast(repo))!, side: 'left' })).ok);
+    clock.advance(2 * 60_000);
+    const fin = await finishBreastFeed(deps, { event: (await activeBreast(repo))! });
+    assert.ok(fin.ok);
+    if (fin.ok) {
+      assert.equal(fin.event.details.totalLeftMs, 4 * 60_000);
+      assert.equal(fin.event.details.totalRightMs, 2 * 60_000);
+    }
+  });
+
+  await checkAsync('X7. a second Start returns the existing session and never creates a duplicate', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps, { side: 'left' })).ok);
+    const r2 = await startBreastFeed(deps, { side: 'right' });
+    assert.ok(r2.ok && r2.resumed === true);
+    if (r2.ok) assert.equal(r2.event.details.activeSide, 'left'); // the original, not a new right one
+    const active = await repo.getActiveSessions(feedScope);
+    assert.equal(active.filter(isBreastFeed).length, 1);
+  });
+
+  await checkAsync('X8. hydration restores the active breast side after a restart', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    assert.ok((await startBreastFeed({ repo, clock, actor }, { side: 'right' })).ok);
+    clock.advance(4 * 60_000);
+    // "Restart": a fresh repository over the same persisted snapshot.
+    const repo2 = createLoggingRepository(persistence, clock);
+    const state = await hydrateLoggingState(repo2, feedScope, clock);
+    assert.ok(state.activeBreastFeed);
+    assert.equal(state.activeBreastFeed?.details.activeSide, 'right');
+  });
+
+  await checkAsync('X9. switching to the already-active side is a no-op', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps, { side: 'left' })).ok);
+    const r = await switchBreastSide(deps, { event: (await activeBreast(repo))!, side: 'left' });
+    assert.ok(r.ok && r.noop === true);
+    const breast = await activeBreast(repo);
+    assert.equal(breast?.details.segments.length, 1); // not split into two
+  });
+
+  await checkAsync('X10. cancel discards the session — never active, never in the timeline', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps, { side: 'left' })).ok);
+    await cancelBreastFeed(deps, { event: (await activeBreast(repo))! });
+    assert.equal(await activeBreast(repo), null);
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.ok(!today.some((e) => isBreastFeed(e)));
   });
 }
 

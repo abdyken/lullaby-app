@@ -27,6 +27,8 @@ import { AccountSheet } from '@/components/auth/AccountSheet';
 import { BabyHeader } from '@/components/BabyHeader';
 import { HandoffCard } from '@/components/HandoffCard';
 import { LogSheet, type SheetOption } from '@/components/LogSheet';
+import { isLoggingV2Enabled } from '@/features/logging';
+import { FeedSheet } from '@/features/logging/feed/FeedSheet';
 import { OrbHero, useOrbBreathe } from '@/components/OrbHero';
 import { QuickLogRow } from '@/components/QuickLogRow';
 import { Screen } from '@/components/Screen';
@@ -183,6 +185,10 @@ export default function TonightScreen() {
   const { mode: surfaceMode, reveal, revealProgress, isTransitioning, beginReveal } = useTheme();
 
   const [sheet, setSheet] = useState<SheetKind | null>(null);
+  // Logging v2 Feed sheet (breast session + bottle). Behind the loggingV2 flag;
+  // the legacy LogSheet feed path stays the default while the flag is off.
+  const loggingV2 = isLoggingV2Enabled();
+  const [feedV2Open, setFeedV2Open] = useState(false);
   // Account/sign-out lives behind the baby header (blueprint settings home), but
   // only in real-sync mode — local demo keeps the header inert as before.
   const [accountOpen, setAccountOpen] = useState(false);
@@ -210,9 +216,17 @@ export default function TonightScreen() {
   };
 
   // Feed / Diaper open a sheet (logging happens on Save); Sleep stays immediate.
+  // With loggingV2 on, Feed opens the new purpose-built FeedSheet instead.
   const handleSelect = (kind: PreviewState) => {
-    if (kind === 'sleep') handleSleepTap();
-    else setSheet(kind);
+    if (kind === 'sleep') {
+      handleSleepTap();
+      return;
+    }
+    if (kind === 'feed' && loggingV2) {
+      setFeedV2Open(true);
+      return;
+    }
+    setSheet(kind);
   };
 
   const handleThemeToggle = (origin?: RevealOrigin) => {
@@ -326,6 +340,8 @@ export default function TonightScreen() {
           onClose={() => setSheet(null)}
         />
       )}
+
+      {feedV2Open && <FeedSheet onClose={() => setFeedV2Open(false)} />}
 
       {accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} />}
 
