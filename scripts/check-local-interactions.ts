@@ -83,6 +83,33 @@ import {
   resolveLoggingFlags,
   setLoggingV2Enabled,
 } from '../src/features/logging/config/featureFlags';
+// Logging v2 active-session model + timestamp-based timers (plan §1.3, §6, Phase 4).
+import {
+  breastSegmentTotals,
+  elapsedMs,
+  formatClock,
+  formatCompactDuration,
+  isReversedRange,
+  sessionElapsedMs,
+} from '../src/features/logging/timer/sessionMath';
+import {
+  applyActiveSessions,
+  applyTodayEvents,
+  clearError,
+  createInitialLoggingState,
+  withError,
+} from '../src/features/logging/state/loggingStore';
+import {
+  selectActiveBreastFeed,
+  selectActivePump,
+  selectActiveSleep,
+  selectIsAnySessionActive,
+} from '../src/features/logging/state/loggingSelectors';
+import {
+  hydrateLoggingState,
+  reconcileLoggingState,
+} from '../src/features/logging/state/loggingHydration';
+import { loggingError } from '../src/features/logging/domain/errors';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
 const NOW = Date.parse('2026-06-17T00:00:00.000Z');
@@ -909,6 +936,33 @@ async function runAsyncChecks(): Promise<void> {
     details: { side: 'both', leftVolumeMl: null, rightVolumeMl: null },
   });
 
+  const makeBreast = (id: string, cid: string, status: 'active' | 'completed'): BreastFeedEvent => ({
+    ...careBase({
+      id,
+      clientEventId: cid,
+      type: 'feed',
+      status,
+      startedAt: iso(NOW),
+      endedAt: status === 'completed' ? iso(NOW + 8 * 60_000) : null,
+    }),
+    type: 'feed',
+    childId: 'baby-mia',
+    method: 'breast',
+    details: {
+      activeSide: status === 'completed' ? null : 'left',
+      segments: [
+        {
+          id: `${id}-seg1`,
+          side: 'left',
+          startedAt: iso(NOW),
+          endedAt: status === 'completed' ? iso(NOW + 8 * 60_000) : null,
+        },
+      ],
+      totalLeftMs: status === 'completed' ? 8 * 60_000 : 0,
+      totalRightMs: 0,
+    },
+  });
+
   await checkAsync('V1. createEvent stores an event; getTodayEvents returns it; retry is idempotent by clientEventId', async () => {
     const repo = createLoggingRepository(createInMemoryLoggingPersistence(), createManualClock(NOW));
     const diaper = makeDiaper('evt-d1', 'cid-d1');
@@ -1079,6 +1133,143 @@ async function runAsyncChecks(): Promise<void> {
     setLoggingV2Enabled(false);
     assert.equal(isLoggingV2Enabled(), false);
     resetLoggingFlags();
+  });
+
+  // W. Active-session model + timestamp-based timers (plan §1.3, §6, Phase 4) —
+  // session math, selectors, store transitions, hydration, foreground reconcile.
+  const scope = { familyId: 'fam-1', childId: 'baby-mia', userId: 'cg-mom' };
+
+  await checkAsync('W1. elapsedMs uses now for a running session, endedAt for a completed one, and clamps a reversed range to 0', async () => {
+    assert.equal(elapsedMs(iso(NOW), null, NOW + 42 * 60_000), 42 * 60_000); // running → now − start
+    assert.equal(elapsedMs(iso(NOW), iso(NOW + 10 * 60_000), NOW + 99_000_000), 10 * 60_000); // completed → fixed span
+    assert.equal(elapsedMs(iso(NOW), null, NOW - 60_000), 0); // backwards clock clamps to 0
+    assert.equal(sessionElapsedMs(makeSleep('s', 'cs', 'active'), NOW + 60_000), 60_000);
+    assert.equal(sessionElapsedMs(makeDiaper('d', 'cd'), NOW + 60_000), 0); // instant event → no duration
+  });
+
+  await checkAsync('W2. isReversedRange flags a backwards clock but not a normal running session', async () => {
+    assert.equal(isReversedRange(iso(NOW), null, NOW + 60_000), false);
+    assert.equal(isReversedRange(iso(NOW), null, NOW - 60_000), true);
+    assert.equal(isReversedRange(iso(NOW), iso(NOW - 1), NOW), true);
+  });
+
+  await checkAsync('W3. breastSegmentTotals sums per side and counts the open segment up to now', async () => {
+    const segments: BreastSideSegment[] = [
+      { id: 'g1', side: 'left', startedAt: iso(NOW), endedAt: iso(NOW + 5 * 60_000) },
+      { id: 'g2', side: 'right', startedAt: iso(NOW + 5 * 60_000), endedAt: iso(NOW + 8 * 60_000) },
+      { id: 'g3', side: 'left', startedAt: iso(NOW + 8 * 60_000), endedAt: null }, // still running
+    ];
+    const totals = breastSegmentTotals(segments, NOW + 10 * 60_000); // 2 more min on the open left
+    assert.equal(totals.totalLeftMs, (5 + 2) * 60_000); // 5m closed + 2m open
+    assert.equal(totals.totalRightMs, 3 * 60_000);
+  });
+
+  await checkAsync('W4. duration formatters render stopwatch and compact text', async () => {
+    assert.equal(formatClock(0), '0:00');
+    assert.equal(formatClock(16 * 60_000 + 24_000), '16:24');
+    assert.equal(formatClock(9 * 60_000 + 4_000), '9:04');
+    assert.equal(formatClock(3_723_000), '01:02:03'); // 1h 2m 3s
+    assert.equal(formatClock(42 * 60_000 + 18_000, { alwaysHours: true }), '00:42:18');
+    assert.equal(formatCompactDuration(0), '0m');
+    assert.equal(formatCompactDuration(9 * 60_000), '9m');
+    assert.equal(formatCompactDuration(84 * 60_000), '1h 24m');
+    assert.equal(formatCompactDuration(60 * 60_000), '1h');
+  });
+
+  await checkAsync('W5. selectors pick the active session of each kind; pump is scoped to the caregiver', async () => {
+    const events = [
+      makeSleep('s1', 'cs1', 'active'),
+      makeSleep('s2', 'cs2', 'completed'),
+      makeBreast('b1', 'cb1', 'active'),
+      makePump('p1', 'cp1', 'cg-mom'),
+      makePump('p2', 'cp2', 'cg-dad'),
+    ];
+    assert.equal(selectActiveSleep(events)?.id, 's1');
+    assert.equal(selectActiveBreastFeed(events)?.id, 'b1');
+    assert.equal(selectActivePump(events, 'cg-dad')?.id, 'p2'); // caregiver-scoped, not child-scoped
+    assert.equal(selectActivePump(events, 'cg-nobody'), null);
+  });
+
+  await checkAsync('W6. hydrateLoggingState restores active timers from timestamps and survives a restart', async () => {
+    const port = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(port, clock);
+    await repo.createEvent(makeSleep('evt-s1', 'cid-s1', 'active'));
+    await repo.createEvent(makeDiaper('evt-d1', 'cid-d1'));
+    clock.advance(42 * 60_000); // 42 minutes pass with the session running
+
+    const state = await hydrateLoggingState(repo, scope, clock);
+    assert.equal(state.hydrated, true);
+    assert.equal(state.error, null);
+    assert.equal(state.activeSleep?.id, 'evt-s1');
+    assert.equal(state.activeBreastFeed, null);
+    assert.equal(state.activePump, null);
+    assert.equal(state.todayEvents.length, 2); // active sleep + diaper both in today's window
+    assert.ok(state.activeSleep);
+    if (state.activeSleep) {
+      // Duration is recomputed from the stored startedAt — no persisted counter.
+      assert.equal(sessionElapsedMs(state.activeSleep, clock.now()), 42 * 60_000);
+    }
+
+    // Simulate a full app restart: a brand-new repository over the SAME persisted store.
+    const restarted = await hydrateLoggingState(createLoggingRepository(port, clock), scope, clock);
+    assert.equal(restarted.activeSleep?.id, 'evt-s1'); // session survived the restart
+  });
+
+  await checkAsync('W7. reconcileLoggingState drops a session finished elsewhere and flags a backwards clock', async () => {
+    const port = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(port, clock);
+    await repo.createEvent(makeSleep('evt-s1', 'cid-s1', 'active'));
+    const hydrated = await hydrateLoggingState(repo, scope, clock);
+    assert.equal(hydrated.activeSleep?.id, 'evt-s1');
+
+    // The session is finished on another device.
+    clock.advance(30 * 60_000);
+    await repo.updateEvent({
+      ...makeSleep('evt-s1', 'cid-s1', 'active'),
+      status: 'completed',
+      endedAt: iso(clock.now()),
+    });
+    const reconciled = await reconcileLoggingState(repo, scope, clock, hydrated);
+    assert.equal(reconciled.activeSleep, null); // no longer active
+    assert.ok(reconciled.todayEvents.some((e) => e.id === 'evt-s1')); // completed event stays in the timeline
+
+    // A backwards clock (now before the active start) surfaces a recover/error state.
+    const clock2 = createManualClock(NOW);
+    const repo2 = createLoggingRepository(createInMemoryLoggingPersistence(), clock2);
+    await repo2.createEvent(makeSleep('evt-s9', 'cid-s9', 'active')); // startedAt = NOW
+    clock2.set(NOW - 60_000); // clock jumps backwards before the session start
+    const anomalous = await hydrateLoggingState(repo2, scope, clock2);
+    assert.equal(anomalous.activeSleep?.id, 'evt-s9'); // session still present (real, stored data)
+    assert.equal(anomalous.error?.code, 'started_in_future'); // but flagged for a recover prompt
+  });
+
+  await checkAsync('W8. store transitions are pure (no input mutation) and the initial state is empty', async () => {
+    const s0 = createInitialLoggingState();
+    assert.equal(s0.hydrated, false);
+    assert.deepEqual(s0.todayEvents, []);
+    assert.equal(s0.activeSleep, null);
+
+    const s1 = applyTodayEvents(s0, [makeDiaper('d', 'cd')]);
+    assert.equal(s0.todayEvents.length, 0); // input unchanged
+    assert.equal(s1.todayEvents.length, 1);
+    assert.notEqual(s0, s1);
+
+    const s2 = applyActiveSessions(
+      s1,
+      [makeSleep('s', 'cs', 'active'), makePump('p', 'cp', 'cg-mom')],
+      'cg-mom',
+    );
+    assert.equal(s2.activeSleep?.id, 's');
+    assert.equal(s2.activePump?.id, 'p');
+    assert.equal(selectIsAnySessionActive(s2), true);
+    assert.equal(selectIsAnySessionActive(s1), false);
+
+    const s3 = withError(s2, loggingError('invalid_diaper_kind', 'x'));
+    assert.equal(s3.error?.code, 'invalid_diaper_kind');
+    assert.equal(s2.error, null); // input unchanged
+    assert.equal(clearError(s3).error, null);
   });
 }
 
