@@ -57,6 +57,7 @@ import { useLoggingStore } from '@/features/logging/state/loggingStore';
 import { careEventsToTimeline } from '@/features/logging/ui/careEventFormatter';
 import { LoggingToast } from '@/features/logging/ui/LoggingToast';
 import { undoLoggingMutation } from '@/features/logging/application/undoLoggingMutation';
+import { useV2QuickLogMeta } from '@/features/logging/ui/useV2QuickLogMeta';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -273,6 +274,12 @@ export default function TonightScreen() {
   }, [v2TodayEvents, v2CaregiverSource]);
   const activeTimeline = featureFlags.loggingV2 ? v2TimelineEntries : tonightTimeline;
 
+  // v2 quick-log card metadata: reads active sessions from the logging store so
+  // recovered sessions (after app restart or background→foreground) are reflected.
+  // Always called (hook rules) — only applied when the flag is on.
+  const v2QuickLogMeta = useV2QuickLogMeta();
+  const activeQuickLogMeta = featureFlags.loggingV2 ? v2QuickLogMeta : quickLogMeta;
+
   // The whole screen body, parameterised by surface mode so it can be rendered
   // twice during a theme transition (base = current, reveal overlay = incoming)
   // with identical data and layout — only the colours differ.
@@ -315,7 +322,7 @@ export default function TonightScreen() {
           selected={activeTile}
           onSelect={handleSelect}
           onPump={() => setSheet('pump')}
-          meta={quickLogMeta}
+          meta={activeQuickLogMeta}
           surfaceMode={bodyMode}
         />
       </View>

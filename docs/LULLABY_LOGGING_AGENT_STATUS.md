@@ -23,13 +23,31 @@ Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
 - [x] 08. Implement Pump flow: side + timer + optional volume
 - [x] 09. Integrate all events into Today timeline
 - [x] 10. Add Undo behavior
-- [ ] 11. Add active session recovery after app restart
+- [x] 11. Add active session recovery after app restart
 - [ ] 12. Add validation and edge-case handling
 - [ ] 13. Add or update tests
 - [ ] 14. Run final verification
 - [ ] 15. Final cleanup and implementation summary
 
 ## Completed tasks
+
+### 11 — Add active session recovery after app restart
+
+**Files created:**
+- `src/features/logging/ui/useV2QuickLogMeta.ts` — React hook: reads `activeBreastFeed`, `activeSleep`, `activePump`, and `todayEvents` from `useLoggingStore()`; ticks every second while any active timer is running; produces `QuickLogMeta`-compatible strings that reflect recovered sessions after app restart
+
+**Files modified:**
+- `src/app/(tabs)/index.tsx` — imports `useV2QuickLogMeta`; computes `v2QuickLogMeta` (always called — hook rules); selects `activeQuickLogMeta = featureFlags.loggingV2 ? v2QuickLogMeta : quickLogMeta`; passes `activeQuickLogMeta` to `QuickLogRow`
+
+Key decisions:
+- The `LoggingStoreProvider` already hydrates from `getActiveSessions()` on mount (recovery infrastructure was in place from task 04). This task surfaces the recovered state in the QuickLogRow card secondary text.
+- `calcElapsedMs(startedAt)` is called without a `nowMs` arg so `Date.now()` stays inside the helper and doesn't violate the React purity lint rule.
+- The hook ticks only while a timer is running (no unnecessary interval overhead).
+- Legacy path (`featureFlags.loggingV2 === false`) is completely unaffected — `quickLogMeta` is still computed and used.
+
+Verification: `npm run lint` — clean (EXIT:0). `npm run check:local-interactions` — 60/60 passed.
+
+---
 
 ### 10 — Add Undo behavior
 
@@ -281,7 +299,7 @@ Verification: `npm run lint` — clean (EXIT:0).
 
 ## Current task
 
-Next: Task 11 — Add active session recovery after app restart.
+Next: Task 12 — Add validation and edge-case handling.
 
 ## Decisions made
 
@@ -299,8 +317,8 @@ Next: Task 11 — Add active session recovery after app restart.
 
 ## Last verification
 
-- `npm run lint` — ran cleanly after task 10 (EXIT:0).
-- `npm run check:local-interactions` — 60/60 passed after task 10.
+- `npm run lint` — ran cleanly after task 11 (EXIT:0).
+- `npm run check:local-interactions` — 60/60 passed after task 11.
 
 ## Final result
 
