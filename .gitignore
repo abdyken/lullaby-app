@@ -56,3 +56,4 @@ debug/
 .env.*
 !.env.example
 .gstack/
+.claude/settings.local.json
