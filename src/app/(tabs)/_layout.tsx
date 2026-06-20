@@ -50,11 +50,17 @@ export default function TabsLayout() {
               screenOptions={{
                 headerShown: false,
                 lazy: false,
-                animation: 'fade',
-                transitionSpec: {
-                  animation: 'timing',
-                  config: { duration: 180 },
-                },
+                // Instant page switch — NO cross-fade. A bottom-tabs
+                // `animation: 'fade'` renders the outgoing AND incoming screens at
+                // the same time with interpolated opacity, so full-bleed screen
+                // content visibly overlaps (ghosting) and the two semi-transparent
+                // opaque screens composite into a muddy dark rectangle mid-switch.
+                // 'none' (the navigator default) + `lazy: false` +
+                // `detachInactiveScreens={false}` keeps all three screens mounted
+                // and just toggles which is visible, so pages switch cleanly with
+                // no flash, ghosting, fallback frame, or first-open dependency.
+                // The tab-bar pill keeps its own (separate) Reanimated slide.
+                animation: 'none',
                 sceneStyle: { backgroundColor: background },
                 // Fully transparent + chrome-free ON PURPOSE: the visible bar is
                 // entirely the custom pill (base) + the full-window reveal overlay.
