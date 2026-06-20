@@ -23,7 +23,13 @@ import type {
   SleepEvent,
   UndoableMutation,
 } from '../domain/types';
-import { selectActiveBreastFeed, selectActivePump, selectActiveSleep } from './loggingSelectors';
+import {
+  isPumpVolumeDraft,
+  pumpEventToVolumeDraft,
+  selectActiveBreastFeed,
+  selectActivePump,
+  selectActiveSleep,
+} from './loggingSelectors';
 
 /** Logging feature state (plan §1.3). UI drafts stay separate from saved events. */
 export interface LoggingState {
@@ -67,20 +73,29 @@ export function applyTodayEvents(state: LoggingState, todayEvents: CareEvent[]):
 }
 
 /**
- * Derive the three active-session slots from a list of active sessions (typically
+ * Derive the active-session slots from a list of active sessions (typically
  * `repository.getActiveSessions`). Pump is matched to `subjectUserId` so a
  * co-caregiver's pump never lands in this device's slot (plan §4 session rules).
+ *
+ * A pump's timer being finished is encoded as an `active` event with `endedAt`
+ * set (so it stays in `getActiveSessions` and survives a restart). Such an event
+ * is surfaced as a `pumpVolumeDraft` while `activePump` still holds the full
+ * record so the provider can complete/cancel it (plan Phase 7.2). The draft is
+ * therefore derived from persisted data on every hydrate/reconcile — it is never
+ * lost on close or restart.
  */
 export function applyActiveSessions(
   state: LoggingState,
   activeSessions: CareEvent[],
   subjectUserId: string,
 ): LoggingState {
+  const activePump = selectActivePump(activeSessions, subjectUserId);
   return {
     ...state,
     activeBreastFeed: selectActiveBreastFeed(activeSessions),
     activeSleep: selectActiveSleep(activeSessions),
-    activePump: selectActivePump(activeSessions, subjectUserId),
+    activePump,
+    pumpVolumeDraft: isPumpVolumeDraft(activePump) ? pumpEventToVolumeDraft(activePump!) : null,
   };
 }
 

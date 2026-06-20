@@ -36,18 +36,30 @@ import { isLoggingV2Enabled } from '../config/featureFlags';
 import { createDeviceLoggingRepository } from '../data/loggingStorage';
 import type { LoggingRepository } from '../data/LoggingRepository';
 import type { LoggingError } from '../domain/errors';
-import type { BreastFeedEvent, BreastSide, DiaperKind, SleepEvent } from '../domain/types';
+import type {
+  BreastFeedEvent,
+  BreastSide,
+  DiaperKind,
+  PumpEvent,
+  PumpSide,
+  PumpVolumeDraft,
+  SleepEvent,
+} from '../domain/types';
 import { systemClock } from '../timer/clock';
 import { subscribeForeground } from '../timer/appStateReconcile';
 import {
   cancelBreastFeed,
+  cancelPump as runCancelPump,
   cancelSleep as runCancelSleep,
   finishBreastFeed,
+  finishPump as runFinishPump,
   finishSleep as runFinishSleep,
   saveBottleFeed,
   saveCompletedSleep as runSaveCompletedSleep,
   saveDiaper as runSaveDiaper,
+  savePump as runSavePump,
   startBreastFeed,
+  startPump as runStartPump,
   startSleep as runStartSleep,
   switchBreastSide,
   type LoggingActor,
@@ -75,6 +87,10 @@ type LoggingContextValue = {
   activeBreastFeed: BreastFeedEvent | null;
   /** The running sleep session for the child, or null. */
   activeSleep: SleepEvent | null;
+  /** The caregiver's pump session (running OR finished-awaiting-volume), or null. */
+  activePump: PumpEvent | null;
+  /** A finished pump awaiting its optional volume (plan §7.2); null otherwise. */
+  pumpVolumeDraft: PumpVolumeDraft | null;
   /** Recover/error state from the last action (plan §6); null when clear. */
   error: LoggingError | null;
   clearError: () => void;
@@ -101,6 +117,15 @@ type LoggingContextValue = {
 
   /** Log a diaper change (instant, two-tap). Returns false when validation rejected it. */
   saveDiaper: (kind: DiaperKind) => Promise<boolean>;
+
+  /** Start (or reopen) the caregiver's pump session on the given side. */
+  startPump: (side: PumpSide) => Promise<void>;
+  /** Finish the pump timer — moves the session into the volume draft (not completed). */
+  finishPump: () => Promise<void>;
+  /** Save the finished pump with its (optional) volumes. Returns false when rejected. */
+  savePump: (volumes: { leftVolumeMl: number | null; rightVolumeMl: number | null }) => Promise<boolean>;
+  /** Cancel the pump session (→ cancelled, never a logged pump). */
+  cancelPump: () => Promise<void>;
 };
 
 const LoggingContext = createContext<LoggingContextValue | null>(null);
@@ -339,6 +364,62 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
     [deps, refresh, runExclusive],
   );
 
+  // Pump — same validate-then-write / refresh-on-success / set-error-on-failure
+  // pattern as Sleep, scoped to the caregiver. `startPump` reopens the existing
+  // session (the use-case guards one active pump per caregiver). Finishing keeps
+  // the event active with an `endedAt` so the store surfaces it as the volume
+  // draft (and it survives restart); `savePump` is what finally completes it.
+  const startPump = useCallback(
+    async (side: PumpSide) => {
+      if (!deps) return;
+      await runExclusive(async () => {
+        const result = await runStartPump(deps, { side });
+        if (result.ok) await refresh();
+        else setState((prev) => withError(prev, result.error));
+      });
+    },
+    [deps, refresh, runExclusive],
+  );
+
+  const finishPump = useCallback(async () => {
+    const event = stateRef.current.activePump;
+    if (!deps || !event) return;
+    await runExclusive(async () => {
+      const result = await runFinishPump(deps, { event });
+      if (result.ok) await refresh();
+      else setState((prev) => withError(prev, result.error));
+    });
+  }, [deps, refresh, runExclusive]);
+
+  const savePump = useCallback(
+    async (volumes: { leftVolumeMl: number | null; rightVolumeMl: number | null }) => {
+      // The finished pump is held in activePump until savePump completes it.
+      const event = stateRef.current.activePump;
+      if (!deps || !event) return false;
+      let ok = false;
+      await runExclusive(async () => {
+        const result = await runSavePump(deps, { event, ...volumes });
+        if (result.ok) {
+          ok = true;
+          await refresh();
+        } else {
+          setState((prev) => withError(prev, result.error));
+        }
+      });
+      return ok;
+    },
+    [deps, refresh, runExclusive],
+  );
+
+  const cancelPump = useCallback(async () => {
+    const event = stateRef.current.activePump;
+    if (!deps || !event) return;
+    await runExclusive(async () => {
+      await runCancelPump(deps, { event });
+      await refresh();
+    });
+  }, [deps, refresh, runExclusive]);
+
   const clearError = useCallback(() => setState((prev) => clearErrorTransition(prev)), []);
 
   const value = useMemo<LoggingContextValue>(
@@ -348,6 +429,8 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       ready: enabled && actor !== null,
       activeBreastFeed: state.activeBreastFeed,
       activeSleep: state.activeSleep,
+      activePump: state.activePump,
+      pumpVolumeDraft: state.pumpVolumeDraft,
       error: state.error,
       clearError,
       startBreast,
@@ -360,6 +443,10 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       cancelSleep,
       saveCompletedSleep,
       saveDiaper,
+      startPump,
+      finishPump,
+      savePump,
+      cancelPump,
     }),
     [
       enabled,
@@ -367,6 +454,8 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       state.hydrated,
       state.activeBreastFeed,
       state.activeSleep,
+      state.activePump,
+      state.pumpVolumeDraft,
       state.error,
       clearError,
       startBreast,
@@ -379,6 +468,10 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       cancelSleep,
       saveCompletedSleep,
       saveDiaper,
+      startPump,
+      finishPump,
+      savePump,
+      cancelPump,
     ],
   );
 

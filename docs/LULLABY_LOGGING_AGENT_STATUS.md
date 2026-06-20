@@ -9,18 +9,27 @@ AUTOPILOT_STATUS: RUNNING
 
 ## Current phase
 
-Phase 2 (Diaper) — done. Diaper now runs end-to-end behind the `loggingV2` flag:
-the `saveDiaper` use-case (an INSTANT `completed` `DiaperEvent`, `occurredAt = now`,
-no timer, validated kind, idempotent by `clientEventId`), the provider `saveDiaper`
-action (same validate-then-write / refresh-on-success / set-error-on-failure
-pattern + mutation lock as the Feed bottle save), and the Diaper UI (`DiaperSheet` +
-`DiaperTypeButton`) whose four buttons — Wet / Dirty / Both / **Dry** — each save
-on a single tap and close the sheet, so a wet diaper is two taps: `Diaper → Wet`.
-This closes the audit gaps that the legacy diaper had no `dry` and took three taps.
-Wired into `(tabs)/index.tsx`: with the flag on the Diaper card opens `DiaperSheet`;
-with it off the legacy `LogSheet` diaper path is byte-for-byte unchanged. Undo +
-the toast (plan Phase 2 acceptance) land with the shared Undo in **task 10**. Next:
-status task 08 "Pump flow: side + timer + optional volume".
+Phase 7 (Pump) — done. Pump now runs end-to-end behind the `loggingV2` flag and is
+the **fourth and last** of the core flows. Pump belongs to the caregiver
+(`subjectUserId = caregiver`, `childId` kept as an optional family association so it
+still shows in the family timeline — plan §4.4). It is the only flow with a
+post-finish **volume draft**: four pure use-cases over `{ repo, clock, actor }` —
+`startPump` (active `PumpEvent` with side left/right/both; reopens the existing
+session instead of creating a second — one active pump per caregiver, plan Phase 4),
+`finishPump` (sets `endedAt` but keeps `status = 'active'`, so the finished session
+stays in `getActiveSessions` and the store turns it into a `pumpVolumeDraft` — that
+is what makes the draft survive sheet-close + restart for free, plan Phase 7.2),
+`savePump` (writes `leftVolumeMl`/`rightVolumeMl`, `status = completed`; "save without
+volume" is the same use-case with null volumes — the only way zero is allowed), and
+`cancelPump`. The total is derived by the `pumpTotalVolumeMl` selector, never stored
+(plan §7.3). The provider exposes `activePump`/`pumpVolumeDraft` + `startPump`/
+`finishPump`/`savePump`/`cancelPump` (same validate-then-write / refresh-on-success /
+error pattern + mutation lock as Sleep). The Pump UI (`PumpSheet` + `PumpIdle` side
+chooser + `PumpActive` timer + `PumpVolumeDraft` stepper) reuses `ChoicePill` /
+`PrimaryActionButton`. Wired into `(tabs)/index.tsx`: with the flag on the Pump card
+opens `PumpSheet`; with it off the legacy `LogSheet` pump path is byte-for-byte
+unchanged. Undo + the toast land with the shared Undo in **task 10**. Next:
+status task 09 "Integrate all events into Today timeline".
 
 ## Task queue
 
@@ -32,7 +41,7 @@ status task 08 "Pump flow: side + timer + optional volume".
 - [x] 05. Implement Feed flow: breast + bottle
 - [x] 06. Implement Sleep flow: start/stop session
 - [x] 07. Implement Diaper quick-log flow
-- [ ] 08. Implement Pump flow: side + timer + optional volume
+- [x] 08. Implement Pump flow: side + timer + optional volume
 - [ ] 09. Integrate all events into Today timeline
 - [ ] 10. Add Undo behavior
 - [ ] 11. Add active session recovery after app restart
@@ -213,42 +222,81 @@ status task 08 "Pump flow: side + timer + optional volume".
     kind; an unknown kind is rejected and persists nothing; a double save with one
     `clientEventId` lands a single event; a diaper is never an active session;
     a logged diaper survives a restart (offline-safe) → suite now **111/111**.
+- **08 — Pump flow: side + timer + optional volume (plan Phase 7, the fourth and
+  last flow; the most stateful).** Pump belongs to the caregiver, not the child
+  (`subjectUserId = caregiver`; `childId` kept as an optional family association so
+  it still appears in the family timeline — plan §4.4):
+  - `application/` — four pure use-cases over `{ repo, clock, actor }`: `startPump`
+    (active `PumpEvent` with `side` left/right/both, validates the side, reopens the
+    existing session instead of creating a second — one active pump per caregiver,
+    plan Phase 4); `finishPump` (sets `endedAt` but DELIBERATELY keeps `status =
+    'active'`, so the finished session stays in `getActiveSessions` — the store then
+    surfaces it as a `pumpVolumeDraft`, which is what makes the draft survive
+    sheet-close + restart with no extra persistence, plan Phase 7.2); `savePump`
+    (writes per-side volumes via `validatePumpVolumes`, `status = completed`;
+    "save without volume" is the same use-case with `null` volumes — the only way
+    zero is allowed, plan §7.3); `cancelPump` (→ cancelled, never a logged pump).
+    Exported from the barrel (Node-safe).
+  - `state/loggingSelectors.ts` — `isPumpVolumeDraft` (active pump with `endedAt`
+    set), `pumpEventToVolumeDraft` (the self-contained draft view), and
+    `pumpTotalVolumeMl` (the derived total — **never stored**, plan §7.3).
+  - `state/loggingStore.ts` — `applyActiveSessions` now derives `pumpVolumeDraft`
+    from a finished-but-active pump while `activePump` still holds the full record
+    (so the provider can complete/cancel it). The draft is therefore re-derived from
+    persisted data on every hydrate/reconcile — never lost on close or restart.
+  - `state/LoggingProvider.tsx` — added `activePump`/`pumpVolumeDraft` + the
+    `startPump`/`finishPump`/`savePump`/`cancelPump` bound actions (same
+    validate-then-write / refresh-on-success / set-error-on-failure pattern and
+    mutation lock as Sleep).
+  - `pump/` UI — `PumpSheet` (Modal shell + pump accent; three bodies that follow
+    `idle → running → volumeDraft`, draft taking priority so a finished pump always
+    reopens on the volume step), `PumpIdle` (Left/Right/Both chooser + "Start
+    pumping"), `PumpActive` (live `useElapsedTime` timer + side + "Finish pumping" +
+    separated Cancel), and `PumpVolumeDraft` (per-side ±5 ml steppers shown by side,
+    derived total, "Save pump · N ml" disabled at 0 so zero only goes through
+    "Save without volume" — a 0 side is sent as `null`, never 0).
+  - Wired into `(tabs)/index.tsx`: with the flag on the Pump card opens `PumpSheet`;
+    with it off the legacy `LogSheet` pump path is byte-for-byte unchanged.
+  - Extended the smoke test with 9 checks (AA1–AA9): start creates one
+    caregiver-scoped active pump (no endedAt, null volumes); a second start resumes
+    (no duplicate); finish keeps it active with a fixed duration and produces a
+    volume draft; Both + 50/60 ml completes with a derived 110 ml total; save without
+    volume stores null volumes + duration only; a single-side pump can't record the
+    other side (rejected, draft intact); the draft survives a restart; cancel
+    discards; a pump and an active sleep coexist → suite now **120/120**.
 
 ## Current task
 
-08. Implement the Pump flow: side + timer + optional volume (plan Phase 7, the
-last of the four flows and the most stateful). Pump belongs to the caregiver, not
-the child (`subjectUserId = caregiver`, `childId` optional — plan §4.4), and is the
-only flow with a post-finish **volume draft** step. Add the use-cases over
-`{ repo, clock, actor }`: `startPump` (active `PumpEvent` with `side` left/right/both;
-reopens the existing session instead of creating a second — one active pump per
-caregiver, plan Phase 4); `finishPump` (sets `endedAt`/duration but does NOT complete
-— moves the session into `pumpVolumeDraft`, which must survive sheet-close + restart,
-plan Phase 7.2); `savePump` (writes `leftVolumeMl`/`rightVolumeMl` per side, computes
-total in a selector not a stored field, `status = completed`); a `Save without volume`
-path (null volumes, duration-only, the only way zero is allowed); and `cancelPump`.
-Add the provider actions over the existing `activePump` + `pumpVolumeDraft` slots
-(both already in `loggingStore`), then the Pump UI (`PumpSheet` + `PumpIdle` side
-chooser + `PumpActive` timer + `PumpVolumeDraft` stepper) reusing `ChoicePill` /
-`PrimaryActionButton`. Wire into `(tabs)/index.tsx` behind the flag (the Pump card
-currently opens the legacy `LogSheet`). Validate with `validatePumpVolumes`; extend
-the smoke test with a pump series (start/resume, finish→draft, both sums L+R, save
-without volume, draft restores after hydration — plan §11.1). Undo is **task 10**.
+09. Integrate all events into the Today timeline (plan §7.1, §7.4, Phase 6.5,
+Phase 8). All four flows now WRITE to the v2 store (`lullaby/logging-v2/v1`) and
+appear in `LoggingState.todayEvents`, but the VISIBLE timeline + the quick-log card
+subtitles/active-ring still read the legacy `useLocalEvents` store, so v2 events are
+persisted but not yet rendered there. Task 09 wires the rendered UI to the v2 store:
+a `formatTimelineEvent(event: CareEvent)` formatter (title/subtitle/icon/tint by
+type — plan §7.4), the quick-log card subtitle selector (plan §7.1 examples:
+`Feeding · 12m · right`, `Sleeping · 42m`, `Pumping · 18m · both`, `Finished · add
+volume`, `4h 20m ago · 90 ml`), and the **single source of truth** for Sleep —
+unifying the Hero `Start sleep / Baby woke up` + the Quick Log card + the v2 sheet on
+one v2 session (plan Phase 6.5; today the Sleep card opens the v2 sheet while the Hero
+still drives the legacy orb session). Keep it behind the flag: with `loggingV2` off
+the legacy timeline/cards are byte-for-byte unchanged. Undo for v2 mutations is
+**task 10**; deeper restart-recovery acceptance is **task 11**.
 
-> Ordering note: the status queue lists Feed (05) before Diaper (07), whereas the
-> plan's §16 vertical slice suggests Diaper-first. The queue governs autopilot
-> order; Diaper (07) and Pump (08) follow Sleep. The session engine + provider are
-> in place, so each remaining flow is an application + UI increment.
+> Milestone: with Pump (08) done, **all four flows (Feed, Sleep, Diaper, Pump) are
+> live behind the `loggingV2` flag** — each an application + UI increment on the
+> shared session engine + provider. The session engine handles three concurrent
+> kinds (sleep + breast scoped per child, pump per caregiver) and one persistent
+> draft (pump volume).
 >
-> Scope boundary carried forward: the new Feed + Sleep events are written to the v2
-> store (`lullaby/logging-v2/v1`) and appear in the v2 `LoggingState.todayEvents`,
-> but the VISIBLE timeline + the quick-log card subtitle/active-ring still read the
-> legacy `useLocalEvents` store. Wiring the rendered timeline + quick-log cards to
-> the v2 store is **task 09** (integrate timeline). The **single source of truth**
-> for Sleep — unifying the Hero `Start sleep / Baby woke up` + the Quick Log card +
-> the sheet on one v2 session (plan Phase 6.5) — also lands in task 09: today the
-> Sleep card opens the v2 sheet, while the Hero still drives the legacy orb session,
-> so with the flag on the two are not yet the same session. Undo for v2 mutations is
+> Scope boundary carried forward: all four flows now WRITE to the v2 store
+> (`lullaby/logging-v2/v1`) and appear in the v2 `LoggingState.todayEvents`, but the
+> VISIBLE timeline + the quick-log card subtitle/active-ring still read the legacy
+> `useLocalEvents` store. Wiring the rendered timeline + quick-log cards to the v2
+> store is **task 09** (integrate timeline). The **single source of truth** for
+> Sleep — unifying the Hero `Start sleep / Baby woke up` + the Quick Log card + the
+> sheet on one v2 session (plan Phase 6.5) — also lands in task 09: today the Sleep
+> card opens the v2 sheet, while the Hero still drives the legacy orb session, so
+> with the flag on the two are not yet the same session. Undo for v2 mutations is
 > **task 10**; deeper restart-recovery acceptance is **task 11**.
 
 ## Decisions made
@@ -380,6 +428,36 @@ without volume, draft restores after hydration — plan §11.1). Undo is **task 
   to task 09 and Undo to task 10. The use-case + idempotency are in place, so task
   10 only adds the shared `UndoableMutation` snapshot + toast on top — no rework of
   the diaper write path. This keeps task 07 a clean application + UI increment.
+- **Task 08 encodes the pump "volume draft" as an `active` event with `endedAt`
+  set — not a new status value.** `CareEventStatus` is a closed four-value union
+  (`active`/`completed`/`cancelled`/`deleted`); rather than widen the whole model
+  for one flow, `finishPump` leaves the event `active` and just stamps `endedAt`.
+  Because `getActiveSessions` filters on `status === 'active'`, the finished pump
+  stays in the active read, so it is recovered on restart with **zero** extra
+  persistence — directly satisfying "the draft must survive sheet close and app
+  restart" (plan Phase 7.2). `applyActiveSessions` reads "active pump with an
+  `endedAt`" as the `pumpVolumeDraft`; `savePump` is the only thing that flips it to
+  `completed`. (`elapsedMs`/`sessionElapsedMs` already key off `endedAt` regardless
+  of status, so the draft shows a fixed, non-ticking duration.)
+- **`activePump` keeps holding the full record while a draft is pending; the draft
+  is a derived companion view.** This mirrors how `finishSleep`/`finishBreastFeed`
+  operate on `state.active*` — the provider's `savePump`/`cancelPump` read the full
+  event from `activePump`, while the UI switches to the volume step based on
+  `pumpVolumeDraft != null`. `selectIsAnySessionActive` therefore reports `true`
+  during a pending draft, which is correct (the pump workflow isn't finished) and is
+  unused on the running-app path today.
+- **Pump total is a selector (`pumpTotalVolumeMl`), never a stored field** (plan
+  §7.3 "calculate Total; do not store it"). "Save without volume" is the SAME
+  `savePump` use-case with `null` volumes (not 0) — `validatePumpVolumes` reserves a
+  positive number for a recorded volume and `null` for "not recorded", so the only
+  way to a zero-volume record is the explicit no-volume action. In the UI, a side
+  left at 0 is sent as `null`, and "Save pump · 0 ml" is disabled so zero can't slip
+  through the volume path.
+- **Pump's `childId` is set to the family child as an optional association, even
+  though pump belongs to the caregiver** (`subjectUserId`). The reads don't depend
+  on it (`getActiveSessions` scopes pump by `subjectUserId`; `getTodayEvents` shows
+  pump family-wide), so this just keeps the pump visible in the family timeline
+  without affecting session scoping (plan §4.4).
 
 ## Known issues (found during audit, to fix in later tasks)
 
@@ -387,27 +465,45 @@ without volume, draft restores after hydration — plan §11.1). Undo is **task 
   `endRunningSleep` (`src/data/mock.ts`) now finalizes at `endAt = now` (clamped
   ≥ `startAt`); `SLEEP_FINALIZE_MIN` removed. v2 `finishSleep` likewise uses
   `endedAt = now`.
-- The LIVE Feed + Sleep + Diaper flows are wired (tasks 05–07) behind the flag: the
-  provider runs `hydrateLoggingState` on mount and `subscribeForeground` →
-  `reconcileLoggingState` on foreground. Pump still uses the legacy `LogSheet`/
-  `savePump` path until its flow lands (08).
+- All four LIVE flows — Feed + Sleep + Diaper + Pump — are wired (tasks 05–08)
+  behind the flag: the provider runs `hydrateLoggingState` on mount and
+  `subscribeForeground` → `reconcileLoggingState` on foreground, so every active
+  session (and the pump volume draft) is recovered from timestamps after a restart.
 - The VISIBLE timeline + quick-log card subtitles/active-ring still read the legacy
-  `useLocalEvents` store, so v2 Feed + Sleep + Diaper events are persisted + in
-  `LoggingState` but not yet rendered there — **task 09** (integrate timeline) wires
-  the rendered UI to the v2 store, and unifies the Sleep Hero with the v2 session
-  (single source of truth, plan Phase 6.5).
+  `useLocalEvents` store, so v2 Feed + Sleep + Diaper + Pump events are persisted +
+  in `LoggingState` but not yet rendered there — **task 09** (integrate timeline)
+  wires the rendered UI to the v2 store, and unifies the Sleep Hero with the v2
+  session (single source of truth, plan Phase 6.5).
 - ~~Diaper has no `dry` and quick-log is 3 taps, not 2~~ **FIXED (task 07):** the v2
-  `DiaperSheet` adds `dry` and saves in two taps (`Diaper → Wet`). Pump drops `both`
-  and captures no volume — **task 08, next.** (Bottle volume/milk type ✓, Breast
-  timers/side segments ✓ as of task 05; Sleep start/stop + completed ✓ as of task 06;
-  Diaper wet/dirty/both/dry two-tap ✓ as of task 07.)
-- Undo is delete-newest only (no `UndoableMutation` snapshot / undo-finish) — the
-  v2 Feed + Sleep + Diaper flows do not show Undo/toast yet (the Diaper save closes
-  the sheet silently for now); **task 10** adds the shared Undo + `Diaper logged ·
-  wet` toast (plan Phase 2 acceptance).
+  `DiaperSheet` adds `dry` and saves in two taps (`Diaper → Wet`). ~~Pump drops
+  `both` and captures no volume~~ **FIXED (task 08):** the v2 `PumpSheet` supports
+  left/right/both, a timestamp-based timer, and an optional post-finish volume.
+  (Bottle volume/milk type ✓, Breast timers/side segments ✓ as of task 05; Sleep
+  start/stop + completed ✓ as of task 06; Diaper wet/dirty/both/dry two-tap ✓ as of
+  task 07; Pump side/timer/optional volume ✓ as of task 08 — all four audit gaps
+  closed.)
+- Undo is delete-newest only (no `UndoableMutation` snapshot / undo-finish) — none
+  of the v2 flows (Feed, Sleep, Diaper, Pump) show Undo/toast yet (a successful save
+  closes the sheet silently for now); **task 10** adds the shared Undo + the toast
+  (e.g. `Diaper logged · wet`, `Pump saved · 110 ml`, plan §8).
 
 ## Last verification
 
+- 2026-06-21 (task 08) — `npx tsc --noEmit` → exit 0. `npm run
+  check:local-interactions` → **all 120 checks pass** (111 prior + 9 new, AA1–AA9,
+  for the Pump use-cases: start creates one caregiver-scoped active pump with no
+  endedAt and null volumes; a second start resumes with no duplicate; finish sets
+  endedAt + a fixed duration but keeps the session active and yields a
+  `pumpVolumeDraft`; Both + 50/60 ml completes with a derived 110 ml total
+  (`pumpTotalVolumeMl`, not stored); save without volume stores null volumes +
+  duration only; a single-side pump can't record the other side (rejected,
+  `invalid_pump_volumes`, draft intact); the volume draft survives a restart via
+  hydration; cancel discards; a pump and an active sleep coexist). `npm run lint`
+  (`expo lint`) → exit 0, clean. `npm test` still not available (no runner; the
+  smoke test is the substitute). MVP behavior is unchanged with the flag off: the
+  new `PumpSheet` is only reachable when `loggingV2` is on (`(tabs)/index.tsx` gates
+  the Pump card on the flag — `loggingV2 ? setPumpV2Open(true) : setSheet('pump')`),
+  and the legacy `LogSheet` pump path is otherwise byte-for-byte untouched.
 - 2026-06-21 (task 07) — `npx tsc --noEmit` → exit 0. `npm run
   check:local-interactions` → **all 111 checks pass** (105 prior + 6 new, Z1–Z6,
   for the Diaper use-case: "wet" creates one completed timer-less diaper in the

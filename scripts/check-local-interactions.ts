@@ -100,6 +100,7 @@ import {
   withError,
 } from '../src/features/logging/state/loggingStore';
 import {
+  pumpTotalVolumeMl,
   selectActiveBreastFeed,
   selectActivePump,
   selectActiveSleep,
@@ -114,13 +115,17 @@ import { loggingError } from '../src/features/logging/domain/errors';
 // over an in-memory repository + a fake clock.
 import {
   cancelBreastFeed,
+  cancelPump,
   cancelSleep,
   finishBreastFeed,
+  finishPump,
   finishSleep,
   saveBottleFeed,
   saveCompletedSleep,
   saveDiaper,
+  savePump,
   startBreastFeed,
+  startPump,
   startSleep,
   switchBreastSide,
   type LoggingActor,
@@ -1604,6 +1609,139 @@ async function runAsyncChecks(): Promise<void> {
     const restored = state.todayEvents.filter(isDiaperEvent);
     assert.equal(restored.length, 1);
     assert.equal(restored[0].details.kind, 'dry');
+  });
+
+  // AA. Pump use-cases (plan Phase 7 / §11.1, task 08). The most stateful flow:
+  // a CAREGIVER-scoped session whose finished timer becomes a persisted volume
+  // draft (an `active` event with `endedAt` set) that survives sheet close +
+  // restart, then completes with an OPTIONAL per-side volume. Same in-memory repo
+  // + fake clock + actor/scope as above.
+  const activePumpOf = async (repo: ReturnType<typeof createLoggingRepository>) =>
+    selectActivePump(await repo.getActiveSessions(feedScope), 'cg-mom');
+
+  await checkAsync('AA1. startPump(both) creates one active pump scoped to the caregiver, with no endedAt', async () => {
+    const { repo, deps } = newFeedDeps();
+    const r = await startPump(deps, { side: 'both' });
+    assert.ok(r.ok);
+    const pump = await activePumpOf(repo);
+    assert.ok(pump && isPumpEvent(pump) && pump.status === 'active');
+    assert.equal(pump.subjectUserId, 'cg-mom'); // pump belongs to the caregiver (plan §4.4)
+    assert.equal(pump.details.side, 'both');
+    assert.equal(pump.endedAt, null); // running — not yet a draft
+    assert.equal(pump.details.leftVolumeMl, null);
+    assert.equal(pump.details.rightVolumeMl, null);
+  });
+
+  await checkAsync('AA2. a second startPump returns the existing session and never creates a duplicate', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'left' })).ok);
+    const r2 = await startPump(deps, { side: 'right' });
+    assert.ok(r2.ok && r2.resumed === true);
+    if (r2.ok) assert.equal(r2.event.details.side, 'left'); // the original, not a new right one
+    const active = await repo.getActiveSessions(feedScope);
+    assert.equal(active.filter(isPumpEvent).length, 1);
+  });
+
+  await checkAsync('AA3. finishPump sets endedAt + a fixed duration but keeps the session active (a volume draft, not completed)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'both' })).ok);
+    clock.advance(18 * 60_000);
+    const open = await activePumpOf(repo);
+    assert.ok(open);
+    const fin = await finishPump(deps, { event: open });
+    assert.ok(fin.ok);
+    if (fin.ok) {
+      assert.equal(fin.event.status, 'active'); // NOT completed yet (plan Phase 7.2)
+      assert.notEqual(fin.event.endedAt, null);
+      assert.equal(sessionElapsedMs(fin.event, clock.now()), 18 * 60_000); // fixed once finished
+    }
+    // The store turns the finished-but-active pump into a volume draft.
+    const state = await hydrateLoggingState(repo, feedScope, clock);
+    assert.ok(state.pumpVolumeDraft);
+    assert.equal(state.pumpVolumeDraft?.side, 'both');
+    assert.ok(state.activePump); // full event still held so the provider can complete it
+  });
+
+  await checkAsync('AA4. Both + savePump 50/60 ml completes the pump; the 110 ml total is derived in a selector', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'both' })).ok);
+    clock.advance(10 * 60_000);
+    await finishPump(deps, { event: (await activePumpOf(repo))! });
+    const draftEvent = (await activePumpOf(repo))!;
+    const r = await savePump(deps, { event: draftEvent, leftVolumeMl: 50, rightVolumeMl: 60 });
+    assert.ok(r.ok);
+    if (r.ok) {
+      assert.equal(r.event.status, 'completed');
+      assert.equal(r.event.details.leftVolumeMl, 50);
+      assert.equal(r.event.details.rightVolumeMl, 60);
+      assert.equal(pumpTotalVolumeMl(r.event.details), 110); // derived, not stored (plan §7.3)
+    }
+    assert.equal(await activePumpOf(repo), null); // no longer active or a draft
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.ok(today.some((e) => isPumpEvent(e) && e.status === 'completed'));
+  });
+
+  await checkAsync('AA5. Save without volume stores null volumes and a valid duration-only record', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'left' })).ok);
+    clock.advance(12 * 60_000);
+    await finishPump(deps, { event: (await activePumpOf(repo))! });
+    const draftEvent = (await activePumpOf(repo))!;
+    const r = await savePump(deps, { event: draftEvent, leftVolumeMl: null, rightVolumeMl: null });
+    assert.ok(r.ok);
+    if (r.ok) {
+      assert.equal(r.event.status, 'completed');
+      assert.equal(r.event.details.leftVolumeMl, null);
+      assert.equal(r.event.details.rightVolumeMl, null);
+      assert.equal(pumpTotalVolumeMl(r.event.details), 0);
+      assert.equal(sessionElapsedMs(r.event, clock.now()), 12 * 60_000); // duration preserved
+    }
+  });
+
+  await checkAsync('AA6. a single-side pump cannot record the other side’s volume (rejected, draft unchanged)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'left' })).ok);
+    clock.advance(5 * 60_000);
+    await finishPump(deps, { event: (await activePumpOf(repo))! });
+    const draftEvent = (await activePumpOf(repo))!;
+    const r = await savePump(deps, { event: draftEvent, leftVolumeMl: 40, rightVolumeMl: 50 });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.error.code, 'invalid_pump_volumes');
+    const stillDraft = await activePumpOf(repo);
+    assert.ok(stillDraft && stillDraft.status === 'active'); // unchanged (still a draft)
+  });
+
+  await checkAsync('AA7. the finished volume draft survives a restart (hydration restores it from the persisted session)', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    assert.ok((await startPump({ repo, clock, actor }, { side: 'both' })).ok);
+    clock.advance(18 * 60_000);
+    await finishPump({ repo, clock, actor }, { event: (await activePumpOf(repo))! });
+    // "Restart": a fresh repository over the same persisted snapshot.
+    const repo2 = createLoggingRepository(persistence, clock);
+    const state = await hydrateLoggingState(repo2, feedScope, clock);
+    assert.ok(state.pumpVolumeDraft); // draft not lost on restart (plan Phase 7.2 acceptance)
+    assert.equal(state.pumpVolumeDraft?.side, 'both');
+    assert.equal(sessionElapsedMs(state.activePump!, clock.now()), 18 * 60_000);
+  });
+
+  await checkAsync('AA8. cancelPump discards the session — never active, never in the timeline', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'right' })).ok);
+    await cancelPump(deps, { event: (await activePumpOf(repo))! });
+    assert.equal(await activePumpOf(repo), null);
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.ok(!today.some((e) => isPumpEvent(e)));
+  });
+
+  await checkAsync('AA9. a pump does not block an active sleep — both sessions coexist (plan Phase 7 acceptance)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    assert.ok((await startPump(deps, { side: 'both' })).ok);
+    const state = await hydrateLoggingState(repo, feedScope, clock);
+    assert.ok(state.activeSleep);
+    assert.ok(state.activePump);
   });
 }
 
