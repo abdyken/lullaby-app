@@ -114,9 +114,13 @@ import { loggingError } from '../src/features/logging/domain/errors';
 // over an in-memory repository + a fake clock.
 import {
   cancelBreastFeed,
+  cancelSleep,
   finishBreastFeed,
+  finishSleep,
   saveBottleFeed,
+  saveCompletedSleep,
   startBreastFeed,
+  startSleep,
   switchBreastSide,
   type LoggingActor,
 } from '../src/features/logging/application';
@@ -470,11 +474,13 @@ check('N1. recap counts feeds/diapers and flags the seed’s running sleep', () 
 
 check('N2. after Wake baby the recap reports the longest completed sleep', () => {
   let s = initTonightState(seedEvents);
-  s = handlePrimaryAction(s, NOW); // ends the running sleep (72m finalize)
+  s = handlePrimaryAction(s, NOW); // ends the running sleep at NOW (real elapsed)
   const recap = buildNightRecap(s.events);
   assert.equal(recap.sleepRunning, false);
-  assert.equal(recap.longestSleepMin, 72);
-  assert.match(recapSummaryLine(recap) ?? '', /longest sleep 1h 12m/);
+  // The seed sleep began 68m before NOW; finishing at NOW logs the real 68m, not
+  // the old hardcoded 72m "+SLEEP_FINALIZE_MIN" finalize (the fixed audit bug).
+  assert.equal(recap.longestSleepMin, 68);
+  assert.match(recapSummaryLine(recap) ?? '', /longest sleep 1h 08m/);
 });
 
 check('N3. an empty event list yields an empty recap and a null summary line', () => {
@@ -1416,6 +1422,117 @@ async function runAsyncChecks(): Promise<void> {
     assert.equal(await activeBreast(repo), null);
     const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
     assert.ok(!today.some((e) => isBreastFeed(e)));
+  });
+
+  // Y. Sleep use-cases (plan Phase 6, task 06). Same in-memory repo + fake clock +
+  // actor/scope as the Feed checks above. A sleep is one active session per child,
+  // with durations derived from timestamps — never a hardcoded finalize.
+  const activeSleepOf = async (repo: ReturnType<typeof createLoggingRepository>) =>
+    selectActiveSleep(await repo.getActiveSessions(feedScope));
+
+  await checkAsync('Y1. startSleep creates one active sleep with startedAt set and no endedAt', async () => {
+    const { repo, deps } = newFeedDeps();
+    const r = await startSleep(deps, {});
+    assert.ok(r.ok);
+    const sleep = await activeSleepOf(repo);
+    assert.ok(sleep && sleep.status === 'active');
+    assert.notEqual(sleep.startedAt, null);
+    assert.equal(sleep.endedAt, null);
+  });
+
+  await checkAsync('Y2. Start now → finish after 40m gives a completed 40-minute sleep in the timeline', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    clock.advance(40 * 60_000);
+    const open = await activeSleepOf(repo);
+    assert.ok(open);
+    const fin = await finishSleep(deps, { event: open });
+    assert.ok(fin.ok);
+    if (fin.ok) {
+      assert.equal(fin.event.status, 'completed');
+      assert.notEqual(fin.event.endedAt, null);
+      assert.equal(sessionElapsedMs(fin.event, clock.now()), 40 * 60_000);
+    }
+    assert.equal(await activeSleepOf(repo), null);
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.ok(today.some((e) => isSleepEvent(e) && e.status === 'completed'));
+  });
+
+  await checkAsync('Y3. Started 5m earlier → finish after 20m totals 25 minutes', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    const startedAt = new Date(NOW - 5 * 60_000).toISOString();
+    assert.ok((await startSleep(deps, { startedAt })).ok);
+    clock.advance(20 * 60_000);
+    const open = await activeSleepOf(repo);
+    assert.ok(open);
+    const fin = await finishSleep(deps, { event: open });
+    assert.ok(fin.ok);
+    if (fin.ok) assert.equal(sessionElapsedMs(fin.event, clock.now()), 25 * 60_000);
+  });
+
+  await checkAsync('Y4. a second startSleep returns the existing session and never creates a duplicate', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    const r2 = await startSleep(deps, {});
+    assert.ok(r2.ok && r2.resumed === true);
+    const active = await repo.getActiveSessions(feedScope);
+    assert.equal(active.filter(isSleepEvent).length, 1);
+  });
+
+  await checkAsync('Y5. finishSleep with endedAt before startedAt is rejected and persists nothing', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok); // startedAt = NOW
+    const open = await activeSleepOf(repo);
+    assert.ok(open);
+    const r = await finishSleep(deps, { event: open, at: new Date(NOW - 60_000).toISOString() });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.error.code, 'invalid_session_range');
+    const stillActive = await activeSleepOf(repo);
+    assert.ok(stillActive && stillActive.status === 'active'); // unchanged
+  });
+
+  await checkAsync('Y6. cancelSleep discards the session — never active, never in the timeline', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    await cancelSleep(deps, { event: (await activeSleepOf(repo))! });
+    assert.equal(await activeSleepOf(repo), null);
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.ok(!today.some((e) => isSleepEvent(e)));
+  });
+
+  await checkAsync('Y7. hydration restores the active sleep after a restart', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    assert.ok((await startSleep({ repo, clock, actor }, {})).ok);
+    clock.advance(10 * 60_000);
+    // "Restart": a fresh repository over the same persisted snapshot.
+    const repo2 = createLoggingRepository(persistence, clock);
+    const state = await hydrateLoggingState(repo2, feedScope, clock);
+    assert.ok(state.activeSleep);
+    assert.equal(state.activeSleep?.status, 'active');
+  });
+
+  await checkAsync('Y8. saveCompletedSleep logs a completed sleep without a timer; a future start is rejected', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    const r = await saveCompletedSleep(deps, {
+      startedAt: new Date(NOW - 30 * 60_000).toISOString(),
+      endedAt: new Date(NOW).toISOString(),
+    });
+    assert.ok(r.ok);
+    if (r.ok) {
+      assert.equal(r.event.status, 'completed');
+      assert.equal(sessionElapsedMs(r.event, clock.now()), 30 * 60_000);
+    }
+    assert.equal(await activeSleepOf(repo), null); // never an active session
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.ok(today.some((e) => isSleepEvent(e) && e.status === 'completed'));
+    const bad = await saveCompletedSleep(deps, {
+      startedAt: new Date(NOW + 60 * 60_000).toISOString(),
+      endedAt: new Date(NOW + 90 * 60_000).toISOString(),
+    });
+    assert.equal(bad.ok, false);
+    if (!bad.ok) assert.equal(bad.error.code, 'started_in_future');
   });
 }
 

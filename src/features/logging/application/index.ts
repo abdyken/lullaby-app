@@ -6,8 +6,8 @@
  * barrel and to import from the Node smoke test. The React provider
  * (`state/LoggingProvider`) supplies the real device repo + system clock.
  *
- * Feed is implemented here (task 05); Sleep / Diaper / Pump use-cases land with
- * their flows in later tasks.
+ * Feed (task 05) and Sleep (task 06) are implemented here; Diaper / Pump
+ * use-cases land with their flows in later tasks.
  */
 export * from './types';
 export * from './saveBottleFeed';
@@ -15,3 +15,7 @@ export * from './startBreastFeed';
 export * from './switchBreastSide';
 export * from './finishBreastFeed';
 export * from './cancelBreastFeed';
+export * from './startSleep';
+export * from './finishSleep';
+export * from './cancelSleep';
+export * from './saveCompletedSleep';

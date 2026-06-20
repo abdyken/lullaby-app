@@ -210,8 +210,6 @@ export function tonightEventCount(): number {
 
 /** Don't append another event of the same kind within this window (demo-safe). */
 const DUPLICATE_WINDOW_MS = 45_000;
-/** Canned sleep duration finalized on "Wake baby" (matches the orb's 1h 12m). */
-const SLEEP_FINALIZE_MIN = 72;
 
 let localCounter = 0;
 function nextId(type: LogEventType, now: number): string {
@@ -347,19 +345,22 @@ export function createNoteEvent(now: number = Date.now(), details?: NoteDetails)
 }
 
 /**
- * Finalize the running sleep ("Wake baby"). Sets endAt so the row stops reading
- * "Sleep running" and shows a clean "Sleep · 1h 12m". Returns a new list (no
- * mutation); a no-op if nothing is running.
+ * Finalize the running sleep ("Wake baby"). Sets `endAt = now` so the logged
+ * duration is the REAL elapsed time (matching the orb's live timer), not a canned
+ * value — the previous hardcoded "+72 minutes" was the audit's highest-priority
+ * behavioral bug (it logged 1h 12m for every sleep regardless of how long the
+ * baby actually slept). `now` is clamped to ≥ `startAt` so a backwards device
+ * clock can never produce `endAt < startAt`. Returns a new list (no mutation); a
+ * no-op if nothing is running.
  */
-export function endRunningSleep(list: LogEvent[]): LogEvent[] {
+export function endRunningSleep(list: LogEvent[], now: number = Date.now()): LogEvent[] {
   let ended = false;
   return list.map((e) => {
     if (!ended && e.type === 'sleep' && e.endAt === null) {
       ended = true;
-      return {
-        ...e,
-        endAt: new Date(new Date(e.startAt).getTime() + SLEEP_FINALIZE_MIN * 60_000).toISOString(),
-      };
+      const startMs = new Date(e.startAt).getTime();
+      const endMs = Math.max(now, Number.isNaN(startMs) ? now : startMs);
+      return { ...e, endAt: new Date(endMs).toISOString() };
     }
     return e;
   });
