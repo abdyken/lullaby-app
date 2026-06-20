@@ -12,3 +12,13 @@ export * from './domain/errors';
 export * from './domain/ids';
 export * from './domain/rules';
 export * from './timer/clock';
+
+// Feature flag + repository/service layer (plan §1.2, §2.1, §5).
+export * from './config/featureFlags';
+export * from './data/LoggingRepository';
+export * from './data/LoggingRepositoryImpl';
+export * from './data/LegacyLoggingMapper';
+export * from './data/loggingPersistence';
+// NOTE: './data/loggingStorage' is intentionally NOT re-exported here — it imports
+// AsyncStorage (React Native). Import it directly where a device-backed repository
+// is needed, so this barrel stays runnable under plain Node (the smoke test).

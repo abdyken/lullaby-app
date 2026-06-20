@@ -9,16 +9,19 @@ AUTOPILOT_STATUS: RUNNING
 
 ## Current phase
 
-Phase 1.1 — Domain foundation complete (CareEvent model + Clock + ids +
-validators). Next: Phase 1.2 repository (`LoggingRepository` interface + impl
-over the existing local/Supabase boundary) and the `loggingV2` feature flag.
+Phase 1.2 — Repository/service layer complete (`LoggingRepository` interface +
+`LoggingRepositoryImpl` over an injectable persistence port, `LegacyLoggingMapper`,
+and the `loggingV2` feature flag). Next: Phase 1.3 store (`loggingStore` with the
+`activeSleep`/`activeBreastFeed`/`activePump` slots, hydration, foreground
+reconcile) and the timestamp-based timer helpers (`useElapsedTime`/`sessionMath`)
+— status task 04 "active session model".
 
 ## Task queue
 
 - [x] 00. Audit existing MVP structure
 - [x] 01. Identify current navigation, state management, storage, and logging code
 - [x] 02. Create or adapt shared logging event TypeScript models
-- [ ] 03. Create logging repository/service layer
+- [x] 03. Create logging repository/service layer
 - [ ] 04. Add active session model for timestamp-based timers
 - [ ] 05. Implement Feed flow: breast + bottle
 - [ ] 06. Implement Sleep flow: start/stop session
@@ -62,15 +65,39 @@ over the existing local/Supabase boundary) and the `loggingV2` feature flag.
   - `index.ts` — public-API barrel (plan §2.3).
   - Extended the smoke test with 10 checks (U1–U10) covering the clock, ids,
     every validator branch, and guard narrowing → suite now 70/70.
+- **03 — Repository/service layer (Phase 1.2).** Added the `loggingV2` feature
+  flag and the data layer, still additive (nothing wired into the running app):
+  - `config/featureFlags.ts` — `isLoggingV2Enabled()` (runtime override →
+    `EXPO_PUBLIC_LOGGING_V2` env → `false` default), `setLoggingV2Enabled`,
+    `resolveLoggingFlags`, `resetLoggingFlags`.
+  - `data/LoggingRepository.ts` — the plan §5 interface (`getTodayEvents`,
+    `getActiveSessions`, `createEvent`, `updateEvent`, `softDeleteEvent`,
+    `enqueueSync`) + `TodayEventsQuery`/`ActiveSessionsQuery`.
+  - `data/loggingPersistence.ts` — pure (Node-safe) `LoggingPersistencePort`,
+    `LoggingSnapshot`, serialize/parse with per-row structural validation,
+    `LOGGING_STORAGE_KEY = lullaby/logging-v2/v1`, and an in-memory port for tests.
+  - `data/LoggingRepositoryImpl.ts` — `createLoggingRepository(port, clock)`:
+    idempotent create by `clientEventId`, `version`/`updatedAt` stamping on
+    update, soft-delete, today-window read (same local day, newest first, excl.
+    deleted/cancelled), active-session read (sleep/breast by child, pump by
+    caregiver). No ticking counter persisted (plan §5).
+  - `data/LegacyLoggingMapper.ts` — `legacyEventToCareEvent` /  `mapLegacyEvents`
+    (forward, per audit §10; notes → null) + best-effort `careEventToLegacyEvent`
+    reverse skeleton for the eventual migration write-path.
+  - `data/loggingStorage.ts` — the device-only AsyncStorage port +
+    `createDeviceLoggingRepository()`; kept OUT of the barrel so `index.ts` stays
+    Node-runnable.
+  - Extended the smoke test with 9 checks (V1–V9) → suite now **79/79**.
 
 ## Current task
 
-03. Create the logging repository/service layer (plan Phase 1.2) — define the
-`LoggingRepository` interface (§5) and a `LoggingRepositoryImpl` that adapts the
-existing local AsyncStorage + Supabase `EventRepository` boundary, mapping
-`CareEvent` ↔ rows via a `LegacyLoggingMapper` skeleton. Introduce the
-`loggingV2` feature flag here (deferred from task 02 on purpose — see Decisions).
-Implement create / update / soft-delete, read-today, and read-active-sessions.
+04. Add the active-session model + timestamp-based timer helpers (plan Phase 1.3
+store + §6 / Phase 4 session engine). Introduce the logging store/state with
+distinct `activeSleep` / `activeBreastFeed` / `activePump` slots (the audit's
+central gap: one `orbView` cannot model concurrent sessions), hydrate it from the
+repository on launch, reconcile on foreground, and add the display-only
+`useElapsedTime` hook + `sessionMath` that recompute elapsed time as
+`now - startedAt` (never a persisted counter). Build on the task-03 repository.
 
 ## Decisions made
 
@@ -93,6 +120,29 @@ Implement create / update / soft-delete, read-today, and read-active-sessions.
   crashing on bad input.
 - Added small sanity caps (`BOTTLE_MAX_ML = 4000`, `PUMP_MAX_ML = 2000`) as
   garbage filters, not product limits, alongside the plan's explicit "> 0" rules.
+- **Task 03 stores v2 events under their OWN key** (`lullaby/logging-v2/v1`)
+  through an injectable `LoggingPersistencePort`, NOT inside the legacy
+  `lullaby/local-events/v1` store. Writing `CareEvent`s into the legacy store
+  would break its strict `LogEvent` validation and is the destructive move the
+  plan forbids until migration is verified (§2.4). "Connect the existing local
+  storage/API" is satisfied by (a) reusing the same AsyncStorage mechanism with
+  the same defensive load/validate/silent-fail discipline as `localStorage.ts`,
+  and (b) the `LegacyLoggingMapper` adapting existing `LogEvent` data into
+  `CareEvent` so the v2 timeline can read old rows.
+- **Did NOT wire the v2 repository into the live Supabase path.** That needs the
+  `version`/`clientEventId`/`subjectUserId` columns and conflict handling the plan
+  defers to PR 9; doing it now would risk the running MVP. The repository hides
+  storage behind the port so the Supabase backing can be added later without
+  changing the contract.
+- **The repository owns data-layer concerns:** idempotent create by
+  `clientEventId` (retry-safe, plan §9), `version` bump + `updatedAt` stamp on
+  update/soft-delete (via the injected `Clock`), and soft-delete instead of hard
+  remove (plan §8). Business validators/use-cases stay in the application layer.
+- **`familyId` mirrors the baby scope** in the mapper for now (audit §13 open
+  question) via an overridable `resolveFamilyId` hook.
+- **The barrel (`index.ts`) stays Node-runnable:** it re-exports the RN-free data
+  layer + flag but NOT `loggingStorage.ts` (AsyncStorage). Device callers import
+  that file directly, mirroring how `localRepository` imports `localStorage`.
 
 ## Known issues (found during audit, to fix in later tasks)
 
@@ -110,6 +160,13 @@ Implement create / update / soft-delete, read-today, and read-active-sessions.
 
 ## Last verification
 
+- 2026-06-21 (task 03) — `npx tsc --noEmit` → exit 0. `npm run
+  check:local-interactions` → **all 79 checks pass** (70 prior + 9 new, V1–V9,
+  for the repository/mapper/persistence/flag). `npm run lint` (`expo lint`) →
+  exit 0, clean. `npm test` still not available (no runner; the extended smoke
+  test is the substitute). The new data layer is additive and unreferenced by the
+  app (barrel stays Node-safe; device storage imported directly), so MVP behavior
+  is unchanged.
 - 2026-06-21 (task 02) — `npx tsc --noEmit` → exit 0 (no `typecheck` script;
   `tsc` used directly). `npm run check:local-interactions` → **all 70 checks
   pass** (60 legacy + 10 new for the logging v2 foundation). `npm run lint`
