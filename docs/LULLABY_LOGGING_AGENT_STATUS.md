@@ -1,6 +1,6 @@
 # Lullaby Logging Agent Status
 
-AUTOPILOT_STATUS: RUNNING
+AUTOPILOT_STATUS: DONE
 
 ## Source of truth
 
@@ -8,7 +8,7 @@ AUTOPILOT_STATUS: RUNNING
 
 ## Current phase
 
-Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
+All phases complete.
 
 ## Task queue
 
@@ -27,9 +27,59 @@ Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
 - [x] 12. Add validation and edge-case handling
 - [x] 13. Add or update tests
 - [x] 14. Run final verification
-- [ ] 15. Final cleanup and implementation summary
+- [x] 15. Final cleanup and implementation summary
 
 ## Completed tasks
+
+### 15 — Final cleanup and implementation summary
+
+**Cleanup findings:**
+- No debug code (`console.*`) in any logging feature file.
+- No TODO/FIXME comments remaining.
+- No unused imports in `src/features/logging/` or the integration point `src/app/(tabs)/index.tsx`.
+- Lint, `check:local-interactions` (60/60), and `check:logging-v2` (44/44) all pass cleanly.
+- Feature flag `featureFlags.loggingV2` correctly defaults to `false` — legacy MVP path fully unaffected.
+
+**Implementation summary:**
+
+The Lullaby v2 logging system is implemented across 33 new files within `src/features/logging/` and targeted edits to 4 existing files (`index.tsx`, `_layout.tsx`, `featureFlags.ts`, `package.json`). The legacy MVP is completely preserved behind the `loggingV2: false` feature flag.
+
+**Architecture layers (domain → application → data/state → UI):**
+
+| Layer | Files | Role |
+|---|---|---|
+| Domain | `domain/types.ts` | Discriminated `CareEvent` union, 5 validators, `Clock` interface |
+| Application | `application/*.ts` (12 files) | Pure builders: start/switch/finish breast, bottle save, start/finish sleep, diaper save, start/finish/save pump, undo |
+| Data | `data/LoggingRepository.ts`, `LoggingRepositoryImpl.ts` | Interface + AsyncStorage impl; separate `lullaby/logging-v2/events` key; idempotent on `clientEventId`; soft-delete pattern |
+| State | `state/loggingStore.tsx` | React context + useReducer; hydrates on mount, reconciles on AppState foreground; `activeBreastFeed`, `activeSleep`, `activePump`, `pumpVolumeDraft`, `lastMutation` |
+| Timer | `timer/sessionMath.ts`, `timer/useElapsedTime.ts` | Pure timestamp math + 1-per-second tick hook; no stored counters |
+| UI shared | `ui/careEventFormatter.ts`, `ui/LoggingToast.tsx`, `ui/useV2QuickLogMeta.ts` | Timeline formatter, Undo toast (4 s auto-dismiss), QuickLogRow meta hook |
+| Feed | `feed/FeedSheet.tsx`, `BreastFeedIdle`, `BreastFeedActive`, `BottleFeedForm` | Breast/Bottle tabs; active session detection; side-switch debounce |
+| Sleep | `sleep/SleepSheet.tsx`, `SleepIdle`, `SleepActive` | Start now/5-min-earlier; sheet close preserves session |
+| Diaper | `diaper/DiaperSheet.tsx` | Two-tap quick-log; Wet/Dirty/Mixed/Dry |
+| Pump | `pump/PumpSheet.tsx`, `PumpIdle`, `PumpActive`, `PumpVolumeDraft` | Side selection; timer; volume-draft state; save with/without volume |
+
+**Product requirements met:**
+
+- Feed: breast (left/right timers, side switch) + bottle (presets, stepper, milk type). ✓
+- Sleep: timestamp-based session, survives restart, `startedAt` / `endedAt` model. ✓
+- Diaper: two-tap (open sheet → tap type → done), all four kinds including `dry`. ✓
+- Pump: left/right/both side selection, timer session, optional volume per side. ✓
+- Timeline: all four event types rendered from a single `CareEvent[]` array. ✓
+- Undo: toast with 4 s auto-dismiss, 10 s expiry guard, create/finish/delete support. ✓
+- Active session recovery: app restart restores breast/sleep/pump sessions from storage. ✓
+- Validation: double-press guards on all async paths; validators throw on invalid data. ✓
+- Tests: 44 pure-function checks (`npm run check:logging-v2`), 60 legacy checks still pass. ✓
+
+**Next steps for production rollout:**
+1. Flip `featureFlags.loggingV2` to `true` for a test account.
+2. Wire `LoggingRepositoryImpl` to the Supabase repository for remote sync (the `enqueueSync` stub is ready).
+3. Add a full time-picker to `SleepIdle` (the `buildStartSleepEvent(startedAt)` API already accepts arbitrary timestamps).
+4. Connect `careEventFormatter` labels to a proper i18n layer once the app has one.
+
+Verification: `npm run lint` — clean (EXIT:0). `npm run check:local-interactions` — 60/60 passed. `npm run check:logging-v2` — 44/44 passed.
+
+---
 
 ### 14 — Run final verification
 
@@ -348,7 +398,7 @@ Verification: `npm run lint` — clean (EXIT:0).
 
 ## Current task
 
-Next: Task 15 — Final cleanup and implementation summary.
+All tasks complete. AUTOPILOT_STATUS: DONE.
 
 ## Decisions made
 
@@ -366,10 +416,10 @@ Next: Task 15 — Final cleanup and implementation summary.
 
 ## Last verification
 
-- `npm run lint` — ran cleanly after task 14 (EXIT:0).
-- `npm run check:local-interactions` — 60/60 passed after task 14.
-- `npm run check:logging-v2` — 44/44 passed after task 14.
+- `npm run lint` — ran cleanly after task 15 (EXIT:0).
+- `npm run check:local-interactions` — 60/60 passed after task 15.
+- `npm run check:logging-v2` — 44/44 passed after task 15.
 
 ## Final result
 
-Not finished.
+Complete. All 16 tasks (00–15) finished. The Lullaby v2 logging system is fully implemented, verified, and gated behind `featureFlags.loggingV2`. Enable the flag to activate the new flows.
