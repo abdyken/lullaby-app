@@ -9,10 +9,16 @@ AUTOPILOT_STATUS: RUNNING
 
 ## Current phase
 
-Phase 8 (timeline integration) — done. The Today screen now RENDERS from the v2
-store behind the `loggingV2` flag, so the four flows (Feed, Sleep, Diaper, Pump)
-that already WROTE to `lullaby/logging-v2/v1` are finally visible. Three pieces, all
-purely descriptive (no business logic in a formatter, plan §8):
+Phase 8 (timeline + Undo) — done. The Today screen RENDERS from the v2 store behind
+the `loggingV2` flag (task 09), and as of **task 10** every completing/instant save
+records a shared single-Undo and shows the calm "{event} logged · Undo" toast
+(`LoggingToast`): Undo soft-deletes a created event or restores the previous active
+snapshot on undo-finish (refused on a fresh same-kind conflict), and enters the sync
+queue (plan §8). Up next is **task 11** — proving the end-to-end active-session
+restart-recovery acceptance on top of the already-wired hydrate/reconcile substrate.
+
+The timeline integration (task 09) is three purely descriptive pieces (no business
+logic in a formatter, plan §8):
 1. `formatTimelineEvent(event, now)` (plan §7.4) — a single formatter that turns any
    `CareEvent` into `{ title, subtitle, icon, tint }`: "Breastfeeding · 12m · right",
    "Sleep · 40m", "Diaper · wet", "Pump · 110 ml · both", and the draft
@@ -47,7 +53,7 @@ now exposes `todayEvents`. With the flag OFF every widget reads the legacy
 - [x] 07. Implement Diaper quick-log flow
 - [x] 08. Implement Pump flow: side + timer + optional volume
 - [x] 09. Integrate all events into Today timeline
-- [ ] 10. Add Undo behavior
+- [x] 10. Add Undo behavior
 - [ ] 11. Add active session recovery after app restart
 - [ ] 12. Add validation and edge-case handling
 - [ ] 13. Add or update tests
@@ -310,34 +316,80 @@ now exposes `todayEvents`. With the flag OFF every widget reads the legacy
     volume" + last-pump "5m ago · 90 ml", idle "Tap to …" prompts, and the "Awake for"
     line; `buildV2TonightStatus` sleeping/awake + last feed/diaper → suite now
     **127/127**.
+- **10 — Undo behavior (plan §8, Phase 2/3/5/6 "Show Undo", §16). The shared
+  single-Undo + the calm save toast for every v2 flow.** Before this, each flow
+  closed its sheet silently on success; now a completing/instant save records one
+  `UndoableMutation` and surfaces a tappable "{event} logged · Undo" toast:
+  - `application/undoLoggingMutation.ts` (Node-safe, in the barrel) — two pure
+    pieces: `buildUndoableMutation({ kind, eventId, previousSnapshot, clock })`
+    mints a fresh `mutationId` (so a new action replaces the previous Undo context)
+    + an `expiresAt` from the clock; `undoLoggingMutation(deps, mutation)` applies
+    the inverse — `create` → `softDeleteEvent` the created event; `finish`/`update`
+    → `updateEvent(previousSnapshot)` to restore the active session, **refused with
+    `undo_conflict` if another active session of the same kind/scope appeared**
+    (plan §8 "if no new conflict appeared"). Undo also `enqueueSync`s the id (plan §8).
+  - `domain/errors.ts` — added `undo_conflict` + `undo_unavailable` to the closed
+    `LoggingErrorCode` union (no widening elsewhere).
+  - `state/timelineSelectors.ts` — `formatLoggingToast(event, now)` (pure): builds
+    the toast line FROM the saved event so it matches the timeline copy —
+    "Diaper logged · wet", "Feed logged · 120 ml", "Sleep logged · 40m",
+    "Pump saved · 110 ml" (or its duration when no volume). The " · Undo" affordance
+    is added by the toast component, not the selector.
+  - `state/LoggingProvider.tsx` — owns the toast (`{ id, message }` + a seq id and a
+    3.2s auto-dismiss, mirroring `LocalEventProvider`) and a `recordMutation(kind,
+    event, previousSnapshot)` helper called ON SUCCESS, AFTER `refresh()` (reconcile
+    preserves `lastMutation`, so the new mutation lands on top): wired into
+    `saveBottle`/`saveDiaper`/`saveCompletedSleep` (`create`, no snapshot) and
+    `finishBreast`/`finishSleep`/`savePump` (`finish`, snapshot = the pre-finish
+    active event). New `undo()` bound action runs the use-case under the shared
+    mutation lock, `hapticUndo`s, refreshes, then clears `lastMutation` + the toast.
+    Exposes `toast`/`undo`/`dismissToast`. Start/switch/cancel get no toast (a cancel
+    is a discard, a start opens the active UI — neither is a "logged" event).
+  - `ui/LoggingToast.tsx` (new) — the flag-on counterpart to `AppToast`: identical
+    calm pill, but reads `useLogging()` and its Undo runs the shared single-Undo.
+    Self-gates on `enabled && toast`, mounted in `(tabs)/_layout.tsx` beside
+    `AppToast`. With the flag on, only the v2 sheets save on the Today screen, so the
+    two toasts never fire together; with it off the provider does no I/O and never
+    sets a toast (legacy `AppToast` stays the flag-off path).
+  - Extended the smoke test with 7 checks (CC1–CC7): undo a created diaper
+    (soft-delete + sync-queue + gone from timeline) and bottle; undo finishing a
+    sleep restores the active session; undo saving a pump restores the volume draft;
+    undo-finish refused with `undo_conflict` when a fresh session appeared;
+    `formatLoggingToast` copy for diaper/bottle/sleep/pump; `buildUndoableMutation`
+    fresh id + future expiry + null create snapshot → suite now **134/134**.
 
 ## Current task
 
-10. Add Undo behavior (plan §8, Phase 2/3/5/6 "Show Undo", §16). Every v2 flow
-currently closes its sheet silently on success — there is no `UndoableMutation`
-snapshot and no toast yet. Task 10 adds the shared single-Undo: record a
-`lastMutation` (`{ kind, eventId, previousSnapshot }`) on each create/finish, surface
-the calm "{event} logged · Undo" toast (reuse the existing `AppToast` pattern, e.g.
-`Diaper logged · wet`, `Pump saved · 110 ml`), and wire Undo to soft-delete a created
-event / restore the previous active snapshot on undo-finish (plan §8: "Undo finish →
-restore previous active snapshot if no new conflict appeared"). A new action replaces
-the previous Undo context. Undo also enters the (future) sync queue. Keep it behind
-the flag; the legacy `LocalEventProvider` toast/Undo stays the flag-off path.
+11. Add active session recovery after app restart (plan §6 AppState, Phase 4
+acceptance, §11.2 integration). The substrate already exists and is unit-covered:
+`hydrateLoggingState` restores every active session (sleep / breast / pump) and the
+pump volume draft purely from stored `startedAt`/`endedAt` on launch, and
+`reconcileLoggingState` (wired to `subscribeForeground` in `LoggingProvider`)
+re-reads on foreground and recomputes durations from timestamps — there is no
+persisted counter. Task 11 hardens and proves the END-TO-END recovery acceptance:
+a session started then force-closed reopens with the correct elapsed time; the same
+session shows consistently across the Hero / Quick Log card / sheet after relaunch;
+a backwards device clock surfaces the `started_in_future` recover state rather than a
+negative duration; and the pump volume draft reopens on its volume step after a
+restart. Likely additive (focused integration-style checks + any small gaps found),
+behind the flag; the legacy path stays untouched.
 
-> Milestone: with timeline integration (09) done, **all four flows are now visible
-> end-to-end behind the flag** — they write to the v2 store AND render on the Today
-> screen (orb / quick-log cards / status strip / timeline), and Sleep is driven from
-> one v2 session across the Hero, the card, and the sheet (single source of truth,
-> plan Phase 6.5). The presentational components were untouched (the screen swaps the
-> data source via `useV2TodayView`); the only component edit was an additive optional
-> `items` prop on `TonightStatus`.
+> Milestone: with Undo (10) done, **every v2 flow is now complete end-to-end behind
+> the flag** — Feed / Sleep / Diaper / Pump write to the v2 store, render on the Today
+> screen (orb / quick-log cards / status strip / timeline), Sleep is one v2 session
+> across the Hero + card + sheet (single source of truth, plan Phase 6.5), and each
+> completing/instant save now shows the calm "{event} logged · Undo" toast wired to
+> the shared single-Undo (create → soft-delete; finish → restore the active snapshot,
+> refused on a fresh conflict). The presentational pieces stayed untouched: the new
+> `LoggingToast` mirrors the legacy `AppToast` and self-gates on the flag.
 >
 > Scope boundary carried forward: the current-state cluster (orb, status, quick-log
-> cards, timeline) reads the v2 store under the flag, but **HandoffCard still reads
-> the legacy `useLocalEvents` store** — it is the partner-handoff/sync wedge (plan
-> Phase 9), out of the "integrate timeline" scope, and degrades to the local seed
-> handoff under the flag. The visible save-confirmation **toast + Undo** for v2
-> mutations is **task 10**; deeper restart-recovery acceptance is **task 11**.
+> cards, timeline, toast/Undo) reads/writes the v2 store under the flag, but
+> **HandoffCard still reads the legacy `useLocalEvents` store** — it is the
+> partner-handoff/sync wedge (plan Phase 9), out of scope, and degrades to the local
+> seed handoff under the flag. Editing existing events (plan Phase 8 "Edit") and
+> caregiver sync (Phase 9) remain later work; deeper restart-recovery acceptance is
+> **task 11** (in progress).
 
 ## Decisions made
 
@@ -526,6 +578,31 @@ the flag; the legacy `LocalEventProvider` toast/Undo stays the flag-off path.
   hides it the same way (a regular function's `now = Date.now()` default, e.g.
   `getOrbView`). A frozen `now` (during a theme reveal) is passed straight through, so
   the v2 time-based labels hold still mid-reveal exactly like the legacy ones.
+- **Task 10 scopes Undo to COMPLETING/INSTANT saves, not session starts.** A toast +
+  `UndoableMutation` is recorded on `saveBottle`/`saveDiaper`/`saveCompletedSleep`
+  (`create`) and `finishBreast`/`finishSleep`/`savePump` (`finish`). Starting,
+  switching sides, and cancelling get no toast: a start just opens the active UI (the
+  card/Hero already reflect it), a switch is mid-session, and a cancel is an explicit
+  discard — none is a "logged" event, and the plan's Undo kinds are create/finish
+  (plan §8). This keeps the single live Undo unambiguous (one toast ⇄ one reversible
+  log) and matches the plan's "Undo finish → restore the active snapshot".
+- **Undo-finish encodes the conflict guard, not silent overwrite (plan §8).**
+  `undoLoggingMutation` re-reads active sessions before restoring an active snapshot;
+  if a different active session of the same kind/scope appeared it returns
+  `undo_conflict` instead of creating a second active session. In single-caregiver
+  local mode this can't fire (the shared mutation lock + single-Undo serialize
+  actions), but the guard is correct for the eventual multi-caregiver sync (Phase 9).
+- **`recordMutation` runs AFTER `refresh()`, on success only.** A failed use-case
+  changed nothing, so no toast/Undo is recorded (the error state is set instead).
+  `reconcileLoggingState` preserves `lastMutation`, so recording after the refresh
+  lands the new mutation on top of the freshly-read state; `undo()` likewise clears
+  `lastMutation` AFTER its refresh, for the same reason.
+- **The v2 toast is a separate component (`LoggingToast`), not a reuse of `AppToast`.**
+  `AppToast` is bound to `useLocalEvents()` (the legacy store); rather than thread two
+  stores through one component, `LoggingToast` mirrors its exact pill styling but
+  reads `useLogging()`. Both mount in `(tabs)/_layout.tsx`; each self-gates on its own
+  store, and with the flag on only the v2 sheets save on the Today screen, so they
+  never show together. This keeps the flag-off path byte-for-byte legacy.
 
 ## Known issues (found during audit, to fix in later tasks)
 
@@ -551,13 +628,33 @@ the flag; the legacy `LocalEventProvider` toast/Undo stays the flag-off path.
   start/stop + completed ✓ as of task 06; Diaper wet/dirty/both/dry two-tap ✓ as of
   task 07; Pump side/timer/optional volume ✓ as of task 08 — all four audit gaps
   closed.)
-- Undo is delete-newest only (no `UndoableMutation` snapshot / undo-finish) — none
-  of the v2 flows (Feed, Sleep, Diaper, Pump) show Undo/toast yet (a successful save
-  closes the sheet silently for now); **task 10** adds the shared Undo + the toast
-  (e.g. `Diaper logged · wet`, `Pump saved · 110 ml`, plan §8).
+- ~~Undo is delete-newest only / no v2 toast~~ **FIXED (task 10):** every v2 flow now
+  records an `UndoableMutation` on a completing/instant save and shows the calm
+  "{event} logged · Undo" toast (`LoggingToast`, e.g. `Diaper logged · wet`,
+  `Pump saved · 110 ml`). Undo soft-deletes a created event or restores the previous
+  active snapshot on undo-finish (refused with `undo_conflict` if a fresh session of
+  the same kind appeared), and enters the sync queue (plan §8). Remaining Undo work
+  (not blocking the four flows): `update` undo is supported by the use-case but no v2
+  edit UI exists yet (plan Phase 8 "Edit" is later work).
 
 ## Last verification
 
+- 2026-06-21 (task 10) — `npx tsc --noEmit` → exit 0. `npm run
+  check:local-interactions` → **all 134 checks pass** (127 prior + 7 new, CC1–CC7,
+  for the Undo use-case + toast formatter: undo a created diaper soft-deletes it,
+  enqueues sync, and drops it from the timeline; undo a created bottle removes it;
+  undo finishing a sleep restores the active session (status active, no endedAt);
+  undo saving a pump restores the volume draft (active pump with endedAt); undo-finish
+  is refused with `undo_conflict` when a fresh active session of the same kind
+  appeared; `formatLoggingToast` reads the saved event for diaper/bottle/sleep/pump
+  ("Diaper logged · wet", "Feed logged · 120 ml", "Sleep logged · 40m",
+  "Pump saved · 110 ml"); `buildUndoableMutation` mints a fresh `mutationId` + a
+  future `expiresAt` and a `create` carries no snapshot). `npm run lint` (`expo lint`)
+  → exit 0, clean. `npm test` still not available (no runner; the smoke test is the
+  substitute). MVP behavior is unchanged with the flag off: `LoggingToast` self-gates
+  on `enabled && toast`, the provider does no I/O and never sets a toast while
+  `loggingV2` is off, and the legacy `AppToast`/`LocalEventProvider` Undo stays the
+  flag-off path.
 - 2026-06-21 (task 09) — `npx tsc --noEmit` → exit 0. `npm run
   check:local-interactions` → **all 127 checks pass** (120 prior + 7 new, BB1–BB7,
   for the timeline + quick-log selectors: `formatTimelineEvent` renders instant

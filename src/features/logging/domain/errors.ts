@@ -13,7 +13,11 @@ export type LoggingErrorCode =
   | 'started_in_future'
   | 'invalid_breast_segments'
   | 'invalid_pump_volumes'
-  | 'invalid_diaper_kind';
+  | 'invalid_diaper_kind'
+  /** Undo-finish refused: another active session of the same kind appeared (plan §8). */
+  | 'undo_conflict'
+  /** Undo requested with nothing to restore (no previous snapshot). */
+  | 'undo_unavailable';
 
 export interface LoggingError {
   code: LoggingErrorCode;

@@ -24,6 +24,7 @@ import { AuthGate } from '@/components/auth/AuthGate';
 import { LullabyTabBar } from '@/components/LullabyTabBar';
 import { TabBarRevealOverlay } from '@/components/TabBarRevealOverlay';
 import { LoggingProvider } from '@/features/logging/state/LoggingProvider';
+import { LoggingToast } from '@/features/logging/ui/LoggingToast';
 import { AuthProvider } from '@/state/AuthProvider';
 import { LocalEventProvider } from '@/state/LocalEventProvider';
 import { useTheme } from '@/state/ThemeProvider';
@@ -84,6 +85,9 @@ export default function TabsLayout() {
               <Tabs.Screen name="reassure" options={{ title: 'Reassure' }} />
             </Tabs>
             <AppToast />
+            {/* Logging v2 "saved · Undo" toast — inert unless the flag is on and a
+                v2 mutation just landed; never collides with the legacy AppToast. */}
+            <LoggingToast />
             {/* Next-theme tab bar, revealed by the shared circle, above everything. */}
             <TabBarRevealOverlay />
             </View>

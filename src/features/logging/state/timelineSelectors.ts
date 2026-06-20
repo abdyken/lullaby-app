@@ -173,6 +173,31 @@ export function formatTimelineEvent(event: CareEvent, now: number): TimelineEven
   return { title: 'Logged', subtitle: '', icon: (event as CareEvent).type, tint };
 }
 
+/* ------------------------------ undo toast §8 ------------------------------ */
+
+/**
+ * The calm save-confirmation line for the Undo toast (plan §8, Phase 2/3/5/6
+ * "Show Undo"). Built from the SAVED event so it matches the timeline copy:
+ * "Diaper logged · wet", "Feed logged · 120 ml", "Sleep logged · 40m",
+ * "Pump saved · 110 ml" (or its duration when no volume was recorded). The
+ * trailing " · Undo" affordance is added by the toast component, not here.
+ */
+export function formatLoggingToast(event: CareEvent, now: number): string {
+  if (isDiaperEvent(event)) return `Diaper logged · ${diaperWord(event.details.kind)}`;
+  if (isBottleFeed(event)) return `Feed logged · ${event.details.amountMl} ml`;
+  if (isBreastFeed(event)) {
+    const { totalLeftMs, totalRightMs } = breastSegmentTotals(event.details.segments, now);
+    return `Feed logged · ${formatCompactDuration(totalLeftMs + totalRightMs)}`;
+  }
+  if (isSleepEvent(event)) return `Sleep logged · ${formatCompactDuration(sessionElapsedMs(event, now))}`;
+  if (isPumpEvent(event)) {
+    const total = pumpTotalVolumeMl(event.details);
+    const detail = total > 0 ? `${total} ml` : formatCompactDuration(sessionElapsedMs(event, now));
+    return `Pump saved · ${detail}`;
+  }
+  return 'Logged';
+}
+
 /* --------------------------- quick-log cards §7.1 -------------------------- */
 
 /** Everything the quick-log subtitle selector needs from the live store. */
