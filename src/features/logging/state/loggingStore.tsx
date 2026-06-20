@@ -81,6 +81,7 @@ type LoggingAction =
   | { type: 'SESSION_STARTED'; event: CareEvent }
   | { type: 'SESSION_UPDATED'; event: CareEvent }
   | { type: 'SESSION_ENDED'; event: CareEvent }
+  | { type: 'SESSION_RESTORED'; event: CareEvent }
   | { type: 'SESSION_CANCELLED'; eventId: string }
   | { type: 'EVENT_CREATED'; event: CareEvent }
   | { type: 'EVENT_DELETED'; eventId: string }
@@ -178,6 +179,18 @@ function reducer(state: LoggingState, action: LoggingAction): LoggingState {
       return next;
     }
 
+    case 'SESSION_RESTORED': {
+      const field = activeFieldFor(action.event);
+      const todayEvents = state.todayEvents.map((e) =>
+        e.id === action.event.id ? action.event : e,
+      );
+      const next: LoggingState = { ...state, todayEvents };
+      if (field === 'activeBreastFeed') next.activeBreastFeed = action.event as BreastFeedEvent;
+      else if (field === 'activeSleep') next.activeSleep = action.event as SleepEvent;
+      else if (field === 'activePump') next.activePump = action.event as PumpEvent;
+      return next;
+    }
+
     case 'SESSION_CANCELLED': {
       const todayEvents = state.todayEvents.filter((e) => e.id !== action.eventId);
       const next = { ...state, todayEvents };
@@ -230,6 +243,12 @@ export type LoggingStoreContextValue = LoggingState & {
    * Clears the corresponding active field.
    */
   finishSession(event: CareEvent): Promise<void>;
+
+  /**
+   * Restore a previously completed/updated session back to its prior snapshot.
+   * Used by Undo to revert a finish or update action.
+   */
+  restoreSession(event: CareEvent): Promise<void>;
 
   /**
    * Mark an active session as cancelled (status = 'cancelled').
@@ -393,6 +412,18 @@ export function LoggingStoreProvider({
     }
   }, []);
 
+  const restoreSession = useCallback(async (event: CareEvent) => {
+    try {
+      await repoRef.current.updateEvent(event);
+      await repoRef.current.enqueueSync(event.id);
+      dispatch({ type: 'SESSION_RESTORED', event });
+      dispatch({ type: 'ERROR_SET', error: null });
+    } catch (err) {
+      dispatch({ type: 'ERROR_SET', error: String(err) });
+      throw err;
+    }
+  }, []);
+
   const cancelSession = useCallback(async (eventId: string) => {
     try {
       // Load the event, mark as cancelled, persist.
@@ -447,6 +478,7 @@ export function LoggingStoreProvider({
     startSession,
     updateSession,
     finishSession,
+    restoreSession,
     cancelSession,
     createEvent,
     softDeleteEvent,

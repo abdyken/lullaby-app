@@ -55,6 +55,8 @@ import { DiaperSheet } from '@/features/logging/diaper/DiaperSheet';
 import { PumpSheet } from '@/features/logging/pump/PumpSheet';
 import { useLoggingStore } from '@/features/logging/state/loggingStore';
 import { careEventsToTimeline } from '@/features/logging/ui/careEventFormatter';
+import { LoggingToast } from '@/features/logging/ui/LoggingToast';
+import { undoLoggingMutation } from '@/features/logging/application/undoLoggingMutation';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -258,7 +260,8 @@ export default function TonightScreen() {
   // v2 timeline: convert CareEvent[] from the logging store to TimelineEntry[].
   // Only consumed when featureFlags.loggingV2 is true; the hook itself is always
   // called (hooks must not be conditional) but is a no-op when the flag is off.
-  const { todayEvents: v2TodayEvents } = useLoggingStore();
+  const loggingStore = useLoggingStore();
+  const { todayEvents: v2TodayEvents, lastMutation } = loggingStore;
   // Use remoteCaregivers (stable auth state) rather than the derived `caregivers`
   // conditional to avoid a new array reference on every render.
   const v2CaregiverSource = isSupabase ? remoteCaregivers : seedCaregivers;
@@ -385,6 +388,14 @@ export default function TonightScreen() {
       ) : null}
 
       {accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} />}
+
+      {featureFlags.loggingV2 && (
+        <LoggingToast
+          mutation={lastMutation}
+          onUndo={() => void undoLoggingMutation(lastMutation!, loggingStore)}
+          onDismiss={() => loggingStore.setLastMutation(null)}
+        />
+      )}
 
       {/* Flip the status bar to the incoming theme as the reveal starts (the
           top edge is covered almost immediately). On commit this unmounts and

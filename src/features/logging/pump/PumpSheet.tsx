@@ -23,6 +23,7 @@ import { useLoggingStore } from '../state/loggingStore';
 import { buildStartPumpEvent } from '../application/startPump';
 import { buildFinishPumpTimer } from '../application/finishPump';
 import { buildSavePumpEvent, buildSavePumpWithoutVolume } from '../application/savePump';
+import { makeId } from '../application/makeId';
 import { PumpIdle } from './PumpIdle';
 import { PumpActive } from './PumpActive';
 import { PumpVolumeDraft as PumpVolumeDraftView } from './PumpVolumeDraft';
@@ -114,26 +115,45 @@ export function PumpSheet({ familyId, childId, userId, onClose }: Props) {
   // ── Save with volume ──────────────────────────────────────────────────────
   const handleSaveVolume = async (leftMl: number, rightMl: number) => {
     if (!store.activePump) return;
+    const snapshot = store.activePump;
     const savedAt = systemClock.nowIso();
     const draft: PumpVolumeDraft = {
-      eventId: store.activePump.id,
-      side: store.activePump.details.side,
+      eventId: snapshot.id,
+      side: snapshot.details.side,
       leftVolumeMl: leftMl,
       rightVolumeMl: rightMl,
     };
-    const completed = buildSavePumpEvent({ event: store.activePump, draft, savedAt });
+    const completed = buildSavePumpEvent({ event: snapshot, draft, savedAt });
     await store.finishSession(completed);
     store.setPumpVolumeDraft(null);
+    const totalMl = leftMl + rightMl;
+    store.setLastMutation({
+      mutationId: makeId(),
+      kind: 'finish',
+      eventId: completed.id,
+      previousSnapshot: snapshot,
+      expiresAt: new Date(Date.now() + 10000).toISOString(),
+      label: `Pump · ${totalMl} ml saved`,
+    });
     onClose();
   };
 
   // ── Save without volume ───────────────────────────────────────────────────
   const handleSaveWithoutVolume = async () => {
     if (!store.activePump) return;
+    const snapshot = store.activePump;
     const savedAt = systemClock.nowIso();
-    const completed = buildSavePumpWithoutVolume({ event: store.activePump, savedAt });
+    const completed = buildSavePumpWithoutVolume({ event: snapshot, savedAt });
     await store.finishSession(completed);
     store.setPumpVolumeDraft(null);
+    store.setLastMutation({
+      mutationId: makeId(),
+      kind: 'finish',
+      eventId: completed.id,
+      previousSnapshot: snapshot,
+      expiresAt: new Date(Date.now() + 10000).toISOString(),
+      label: 'Pump saved',
+    });
     onClose();
   };
 
