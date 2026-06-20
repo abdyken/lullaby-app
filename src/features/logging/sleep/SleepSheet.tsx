@@ -16,6 +16,7 @@ import { systemClock } from '../domain/types';
 import { useLoggingStore } from '../state/loggingStore';
 import { buildStartSleepEvent } from '../application/startSleep';
 import { buildFinishSleepEvent } from '../application/finishSleep';
+import { makeId } from '../application/makeId';
 import { SleepIdle } from './SleepIdle';
 import { SleepActive } from './SleepActive';
 
@@ -50,11 +51,20 @@ export function SleepSheet({ familyId, childId, userId, onClose }: Props) {
   // ── Finish sleep ───────────────────────────────────────────────────────────
   const handleFinish = async () => {
     if (!store.activeSleep) return;
+    const snapshot = store.activeSleep;
     const finished = buildFinishSleepEvent({
-      event: store.activeSleep,
+      event: snapshot,
       endedAt: systemClock.nowIso(),
     });
     await store.finishSession(finished);
+    store.setLastMutation({
+      mutationId: makeId(),
+      kind: 'finish',
+      eventId: finished.id,
+      previousSnapshot: snapshot,
+      expiresAt: new Date(Date.now() + 10000).toISOString(),
+      label: 'Sleep finished',
+    });
     onClose();
   };
 

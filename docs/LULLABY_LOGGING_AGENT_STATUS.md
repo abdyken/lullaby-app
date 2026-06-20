@@ -22,7 +22,7 @@ Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
 - [x] 07. Implement Diaper quick-log flow
 - [x] 08. Implement Pump flow: side + timer + optional volume
 - [x] 09. Integrate all events into Today timeline
-- [ ] 10. Add Undo behavior
+- [x] 10. Add Undo behavior
 - [ ] 11. Add active session recovery after app restart
 - [ ] 12. Add validation and edge-case handling
 - [ ] 13. Add or update tests
@@ -30,6 +30,32 @@ Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
 - [ ] 15. Final cleanup and implementation summary
 
 ## Completed tasks
+
+### 10 — Add Undo behavior
+
+**Files modified:**
+- `src/features/logging/domain/types.ts` — added `label: string` to `UndoableMutation` (user-facing toast text)
+- `src/features/logging/state/loggingStore.tsx` — added `SESSION_RESTORED` action + reducer case; added `restoreSession(event)` action that calls `updateEvent` on the repo and re-sets the active session field in memory
+- `src/features/logging/diaper/DiaperSheet.tsx` — after `createEvent`, calls `setLastMutation({kind:'create', ...})`
+- `src/features/logging/feed/FeedSheet.tsx` — after bottle `createEvent` and breast `finishSession`, calls `setLastMutation`; captures pre-finish snapshot for `previousSnapshot`
+- `src/features/logging/sleep/SleepSheet.tsx` — after `finishSession`, calls `setLastMutation({kind:'finish', previousSnapshot: snapshot})`
+- `src/features/logging/pump/PumpSheet.tsx` — after save-with-volume and save-without-volume, calls `setLastMutation({kind:'finish', ...})`
+- `src/app/(tabs)/index.tsx` — imports `LoggingToast` + `undoLoggingMutation`; renders `LoggingToast` when `featureFlags.loggingV2 && lastMutation !== null`
+
+**Files created:**
+- `src/features/logging/application/undoLoggingMutation.ts` — use case: `create/delete` → `softDeleteEvent`; `finish/update` → `restoreSession(previousSnapshot)`; always clears `lastMutation` afterwards; checks `expiresAt` to guard stale undo
+- `src/features/logging/ui/LoggingToast.tsx` — floating toast at `bottom: tabBarOffset + 8`; fades in/out with `Animated.Value` (via `useState` to satisfy lint); auto-dismisses after 4 seconds via `setTimeout`; "Undo" button calls `undoLoggingMutation`
+
+Key decisions:
+- `expiresAt = now + 10 seconds` — generous window but checked before executing undo.
+- Toast auto-dismisses at 4 seconds (calls `onDismiss` → `setLastMutation(null)`).
+- A new mutation always replaces the previous one (reducer's `LAST_MUTATION_SET`).
+- `restoreSession` uses `updateEvent` (same as an update) but dispatches `SESSION_RESTORED` which re-populates the active field in the reducer.
+- `Animated.Value` is held in `useState(() => new Animated.Value(0))` to avoid the `react-hooks/refs` lint rule about accessing `.current` during render.
+
+Verification: `npm run lint` — clean (EXIT:0). `npm run check:local-interactions` — 60/60 passed.
+
+---
 
 ### 09 — Integrate all events into Today timeline
 
@@ -255,7 +281,7 @@ Verification: `npm run lint` — clean (EXIT:0).
 
 ## Current task
 
-Next: Task 10 — Add Undo behavior.
+Next: Task 11 — Add active session recovery after app restart.
 
 ## Decisions made
 
@@ -273,8 +299,8 @@ Next: Task 10 — Add Undo behavior.
 
 ## Last verification
 
-- `npm run lint` — ran cleanly after task 09 (EXIT:0).
-- `npm run check:local-interactions` — 60/60 passed after task 09.
+- `npm run lint` — ran cleanly after task 10 (EXIT:0).
+- `npm run check:local-interactions` — 60/60 passed after task 10.
 
 ## Final result
 

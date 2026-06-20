@@ -21,6 +21,7 @@ import { buildStartBreastFeedEvent } from '../application/startBreastFeed';
 import { buildSwitchBreastSideEvent } from '../application/switchBreastSide';
 import { buildFinishBreastFeedEvent } from '../application/finishBreastFeed';
 import { buildSaveBottleFeedEvent } from '../application/saveBottleFeed';
+import { makeId } from '../application/makeId';
 import { BreastFeedIdle } from './BreastFeedIdle';
 import { BreastFeedActive } from './BreastFeedActive';
 import { BottleFeedForm } from './BottleFeedForm';
@@ -71,11 +72,20 @@ export function FeedSheet({ familyId, childId, userId, onClose }: Props) {
   // ── Breast: finish ───────────────────────────────────────────────────────
   const handleBreastFinish = async () => {
     if (!store.activeBreastFeed) return;
+    const snapshot = store.activeBreastFeed;
     const finished = buildFinishBreastFeedEvent({
-      event: store.activeBreastFeed,
+      event: snapshot,
       endedAt: systemClock.nowIso(),
     });
     await store.finishSession(finished);
+    store.setLastMutation({
+      mutationId: makeId(),
+      kind: 'finish',
+      eventId: finished.id,
+      previousSnapshot: snapshot,
+      expiresAt: new Date(Date.now() + 10000).toISOString(),
+      label: 'Breastfeeding finished',
+    });
     onClose();
   };
 
@@ -97,6 +107,14 @@ export function FeedSheet({ familyId, childId, userId, onClose }: Props) {
       occurredAt: systemClock.nowIso(),
     });
     await store.createEvent(event);
+    store.setLastMutation({
+      mutationId: makeId(),
+      kind: 'create',
+      eventId: event.id,
+      previousSnapshot: null,
+      expiresAt: new Date(Date.now() + 10000).toISOString(),
+      label: `Bottle · ${amountMl} ml saved`,
+    });
     onClose();
   };
 

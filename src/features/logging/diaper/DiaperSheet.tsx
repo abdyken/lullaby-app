@@ -16,8 +16,16 @@ import { colors, fonts, radii, shadows } from '@/theme';
 import { systemClock } from '../domain/types';
 import { useLoggingStore } from '../state/loggingStore';
 import { buildSaveDiaperEvent } from '../application/saveDiaper';
+import { makeId } from '../application/makeId';
 
 type DiaperKind = 'wet' | 'dirty' | 'both' | 'dry';
+
+const DIAPER_LABELS: Record<DiaperKind, string> = {
+  wet: 'Wet diaper logged',
+  dirty: 'Dirty diaper logged',
+  both: 'Mixed diaper logged',
+  dry: 'Dry diaper logged',
+};
 
 const DIAPER_OPTIONS: { kind: DiaperKind; label: string; emoji: string }[] = [
   { kind: 'wet', label: 'Wet', emoji: '💧' },
@@ -52,6 +60,14 @@ export function DiaperSheet({ familyId, childId, userId, onClose }: Props) {
         occurredAt: systemClock.nowIso(),
       });
       await store.createEvent(event);
+      store.setLastMutation({
+        mutationId: makeId(),
+        kind: 'create',
+        eventId: event.id,
+        previousSnapshot: null,
+        expiresAt: new Date(Date.now() + 10000).toISOString(),
+        label: DIAPER_LABELS[kind],
+      });
       onClose();
     } finally {
       savingRef.current = false;

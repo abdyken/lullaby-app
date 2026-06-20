@@ -149,6 +149,8 @@ export interface UndoableMutation {
   eventId: string;
   previousSnapshot: CareEvent | null;
   expiresAt: ISODateTime;
+  /** User-facing label shown in the Undo toast, e.g. "Wet diaper logged". */
+  label: string;
 }
 
 // ─── Pump volume draft (survives sheet close / restart) ───────────────────────
