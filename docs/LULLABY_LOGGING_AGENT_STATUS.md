@@ -9,12 +9,15 @@ AUTOPILOT_STATUS: RUNNING
 
 ## Current phase
 
-Phase 1.2 — Repository/service layer complete (`LoggingRepository` interface +
-`LoggingRepositoryImpl` over an injectable persistence port, `LegacyLoggingMapper`,
-and the `loggingV2` feature flag). Next: Phase 1.3 store (`loggingStore` with the
-`activeSleep`/`activeBreastFeed`/`activePump` slots, hydration, foreground
-reconcile) and the timestamp-based timer helpers (`useElapsedTime`/`sessionMath`)
-— status task 04 "active session model".
+Phase 1.3 — Store/state + timer helpers complete. The active-session model now
+has distinct `activeSleep`/`activeBreastFeed`/`activePump` slots (`loggingStore`),
+session selectors, `hydrateLoggingState` (launch) + `reconcileLoggingState`
+(foreground), and the timestamp-based timer helpers (`sessionMath` +
+`useElapsedTime`). The Phase 1 foundation (plan §13 PR 1–2 + the Phase 4
+session-engine STATE) is in place; the React provider, the live `AppState`
+subscription, and the start/finish/cancel use-cases land with the flows. Next:
+status task 05 "Feed flow: breast + bottle" — the first UI + application layer on
+top of the repository + store + session model, behind the `loggingV2` flag.
 
 ## Task queue
 
@@ -22,7 +25,7 @@ reconcile) and the timestamp-based timer helpers (`useElapsedTime`/`sessionMath`
 - [x] 01. Identify current navigation, state management, storage, and logging code
 - [x] 02. Create or adapt shared logging event TypeScript models
 - [x] 03. Create logging repository/service layer
-- [ ] 04. Add active session model for timestamp-based timers
+- [x] 04. Add active session model for timestamp-based timers
 - [ ] 05. Implement Feed flow: breast + bottle
 - [ ] 06. Implement Sleep flow: start/stop session
 - [ ] 07. Implement Diaper quick-log flow
@@ -88,16 +91,53 @@ reconcile) and the timestamp-based timer helpers (`useElapsedTime`/`sessionMath`
     `createDeviceLoggingRepository()`; kept OUT of the barrel so `index.ts` stays
     Node-runnable.
   - Extended the smoke test with 9 checks (V1–V9) → suite now **79/79**.
+- **04 — Active-session model + timestamp-based timers (Phase 1.3 store + §6 /
+  Phase 4 session-engine state).** Added the state/selectors/hydration layer and
+  the timer helpers, still additive (nothing wired into the running app yet):
+  - `timer/sessionMath.ts` — pure, clock-free duration math: `elapsedMs`
+    (running → `now`, completed → `endedAt`, clamps a backwards clock to 0),
+    `isReversedRange` (clock-change detector), `sessionElapsedMs`,
+    `breastSegmentTotals` (per-side; the open segment counts up to `now`), and
+    `formatClock`/`formatCompactDuration`. No persisted counter anywhere.
+  - `timer/useElapsedTime.ts` — display-only React hook: derives elapsed during
+    render from `startedAt`, ticking once/sec while active (no stored counter, no
+    setState-in-effect). React-only → imported directly, kept out of the barrel.
+  - `timer/appStateReconcile.ts` — thin `subscribeForeground` over RN `AppState`
+    (the seam the provider calls on foreground). RN-only → out of the barrel.
+  - `state/loggingStore.ts` — the plan §1.3 `LoggingState` with distinct
+    `activeSleep`/`activeBreastFeed`/`activePump` slots (the audit's central gap:
+    one `orbView` cannot model concurrent sessions) + pure transitions
+    (`applyTodayEvents`, `applyActiveSessions`, `withError`, `clearError`,
+    `withPumpVolumeDraft`, `withLastMutation`, `setHydrated`).
+  - `state/loggingSelectors.ts` — active-session selectors (pump scoped to the
+    caregiver, not the child) + `selectIsAnySessionActive`/`selectSessionElapsedMs`.
+  - `state/loggingHydration.ts` — `hydrateLoggingState` (launch read → restore
+    timers from stored timestamps) + `reconcileLoggingState` (foreground re-read;
+    drops a session finished elsewhere; re-flags a clock anomaly). Pure
+    orchestration over the injected repository + `Clock`.
+  - Barrel now exports `sessionMath` + the whole `state/` layer (still Node-safe).
+    Extended the smoke test with 8 checks (W1–W8) covering the math, selectors,
+    pure store transitions, restart recovery, and clock-anomaly detection → suite
+    now **87/87**.
 
 ## Current task
 
-04. Add the active-session model + timestamp-based timer helpers (plan Phase 1.3
-store + §6 / Phase 4 session engine). Introduce the logging store/state with
-distinct `activeSleep` / `activeBreastFeed` / `activePump` slots (the audit's
-central gap: one `orbView` cannot model concurrent sessions), hydrate it from the
-repository on launch, reconcile on foreground, and add the display-only
-`useElapsedTime` hook + `sessionMath` that recompute elapsed time as
-`now - startedAt` (never a persisted counter). Build on the task-03 repository.
+05. Implement the Feed flow (breast + bottle) on the task-04 foundation. Bottle is
+an instant quantity event (volume presets + ±10 stepper + milk type; no save when
+amount ≤ 0 via `validateBottleAmount`; remember last milk type — plan Phase 3).
+Breast is an active session (choose start side → side segments → switch side →
+finish) built on the session model: `activeBreastFeed`, `breastSegmentTotals`,
+`useElapsedTime`, and side-switch that closes the open segment and opens the new
+one (plan Phase 5). This is the first task to add UI + application use-cases
+(`startBreastFeed`/`switchBreastSide`/`finishBreastFeed`/`saveBottleFeed`) and to
+begin wiring the new domain behind the `loggingV2` flag (a `LoggingProvider` that
+calls `hydrateLoggingState` on mount and `subscribeForeground` →
+`reconcileLoggingState`).
+
+> Ordering note: the status queue lists Feed (05) before Diaper (07), whereas the
+> plan's §16 vertical slice suggests Diaper-first. The queue governs autopilot
+> order, so the next run does Feed; the session model is ready either way. Revisit
+> if a human prefers the plan's order.
 
 ## Decisions made
 
@@ -143,16 +183,38 @@ repository on launch, reconcile on foreground, and add the display-only
 - **The barrel (`index.ts`) stays Node-runnable:** it re-exports the RN-free data
   layer + flag but NOT `loggingStorage.ts` (AsyncStorage). Device callers import
   that file directly, mirroring how `localRepository` imports `localStorage`.
+- **Task 04 added the state + timer SUBSTRATE but wired nothing into the app.**
+  The React provider, the live `AppState` foreground subscription, and the
+  start/finish/cancel use-cases land with the flows (05+). This task delivers the
+  pure, testable layer they sit on (state shape + transitions, selectors,
+  hydration/reconcile orchestration, timestamp math) — all covered by the Node
+  smoke test with an in-memory repo + fake clock, so the running MVP is untouched.
+- **No persisted counter; durations always derive from timestamps.** `sessionMath`
+  recomputes `now − startedAt`; `useElapsedTime` derives the value during render
+  and uses the interval only to force a redraw — so there is no setState-in-effect
+  (satisfies `react-hooks/set-state-in-effect`) and no stale counter to drift.
+- **`useElapsedTime` (React) and `appStateReconcile` (RN `AppState`) are kept OUT
+  of the barrel** and imported directly by the UI, mirroring the `loggingStorage`
+  precedent, so the barrel stays Node-runnable. `sessionMath` + the `state/` layer
+  are pure and ARE exported from the barrel.
+- **A backwards clock is surfaced, not hidden:** an active session whose
+  `startedAt` is after `now` stays in place (it is real, stored data) but the
+  store sets `error: started_in_future` so the UI can show a recover prompt (plan
+  §6), while `elapsedMs` clamps the displayed duration to 0.
 
 ## Known issues (found during audit, to fix in later tasks)
 
 - **Sleep finish is hardcoded to +72 min** (`SLEEP_FINALIZE_MIN` /
   `endRunningSleep`, `src/data/mock.ts:214,354`) instead of `endedAt = now`.
   Highest-priority behavioral fix for the Sleep flow (task 06).
-- No independent sessions: a single `orbView` cannot model concurrent
-  sleep + pump (needed by plan Phase 4).
-- No `useElapsedTime` ticking hook and no `AppState` foreground reconciliation
-  (plan §6 / Phase 4).
+- No independent sessions IN THE LIVE APP: the running MVP still uses the single
+  `orbView`. The new `loggingStore` models concurrent `activeSleep`/
+  `activeBreastFeed`/`activePump` (task 04), but it is not wired in until the
+  flows + provider land (05+).
+- `useElapsedTime`, `sessionMath`, and the `reconcileLoggingState` logic now exist
+  (task 04), plus a `subscribeForeground` seam over `AppState`. What remains is the
+  live wiring: a provider that runs `hydrateLoggingState` on mount and calls
+  `subscribeForeground` → `reconcileLoggingState` on foreground (lands with 05+).
 - Diaper has no `dry`; quick-log is 3 taps, not 2. Pump drops `both` and captures
   no volume. Bottle captures no volume/milk type. Breast has no real timers or
   side segments.
@@ -160,6 +222,15 @@ repository on launch, reconcile on foreground, and add the display-only
 
 ## Last verification
 
+- 2026-06-21 (task 04) — `npx tsc --noEmit` → exit 0. `npm run
+  check:local-interactions` → **all 87 checks pass** (79 prior + 8 new, W1–W8,
+  for `sessionMath` / session selectors / pure store transitions / hydration /
+  foreground reconcile incl. restart recovery and clock-anomaly detection).
+  `npm run lint` (`expo lint`) → exit 0, clean. `npm test` still not available (no
+  runner; the extended smoke test is the substitute). The new state + timer layer
+  is additive and unreferenced by the app (barrel stays Node-safe; the React hook
+  + RN `AppState` seam are imported directly, not via the barrel), so MVP behavior
+  is unchanged.
 - 2026-06-21 (task 03) — `npx tsc --noEmit` → exit 0. `npm run
   check:local-interactions` → **all 79 checks pass** (70 prior + 9 new, V1–V9,
   for the repository/mapper/persistence/flag). `npm run lint` (`expo lint`) →
