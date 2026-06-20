@@ -19,7 +19,7 @@ Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
 - [x] 04. Add active session model for timestamp-based timers
 - [x] 05. Implement Feed flow: breast + bottle
 - [x] 06. Implement Sleep flow: start/stop session
-- [ ] 07. Implement Diaper quick-log flow
+- [x] 07. Implement Diaper quick-log flow
 - [ ] 08. Implement Pump flow: side + timer + optional volume
 - [ ] 09. Integrate all events into Today timeline
 - [ ] 10. Add Undo behavior
@@ -30,6 +30,26 @@ Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
 - [ ] 15. Final cleanup and implementation summary
 
 ## Completed tasks
+
+### 07 — Implement Diaper quick-log flow
+
+**Files created:**
+- `src/features/logging/application/saveDiaper.ts` — pure builder: `buildSaveDiaperEvent` → completed DiaperEvent
+- `src/features/logging/diaper/DiaperSheet.tsx` — modal bottom sheet with four type buttons (Wet, Dirty, Mixed, Dry); tapping any button immediately saves and closes (no separate Save button); double-press protected via savingRef
+
+**Files modified:**
+- `src/app/(tabs)/index.tsx` — added `DiaperSheet` import; when `featureFlags.loggingV2` and kind is `'diaper'`, renders `DiaperSheet` instead of the legacy `LogSheet`
+
+Key decisions:
+- Two-tap flow: open sheet → tap type → done. No separate Save button.
+- DiaperSheet is gated behind `featureFlags.loggingV2` (false by default) so the legacy diaper path is unaffected.
+- The `'dry'` option is added (the old MVP was missing it).
+- Double-press blocked by `savingRef` for the async create window.
+- `accessibilityLabel` includes the word "diaper" on each button for TalkBack/VoiceOver.
+
+Verification: `npm run lint` — clean (EXIT:0). `npm run check:local-interactions` — 60/60 passed.
+
+---
 
 ### 06 — Implement Sleep flow: start/stop session
 
@@ -189,7 +209,7 @@ Verification: `npm run lint` — clean (EXIT:0).
 
 ## Current task
 
-Next: Task 07 — Implement Diaper quick-log flow.
+Next: Task 08 — Implement Pump flow: side + timer + optional volume.
 
 ## Decisions made
 
@@ -207,8 +227,8 @@ Next: Task 07 — Implement Diaper quick-log flow.
 
 ## Last verification
 
-- `npm run lint` — ran cleanly after task 06 (EXIT:0).
-- `npm run check:local-interactions` — 60/60 passed after task 06.
+- `npm run lint` — ran cleanly after task 07 (EXIT:0).
+- `npm run check:local-interactions` — 60/60 passed after task 07.
 
 ## Final result
 
