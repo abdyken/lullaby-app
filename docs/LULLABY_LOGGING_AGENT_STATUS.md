@@ -14,7 +14,7 @@ Phase 1 — Foundation: domain types and repository.
 
 - [x] 00. Audit existing MVP structure
 - [x] 01. Identify current navigation, state management, storage, and logging code
-- [ ] 02. Create or adapt shared logging event TypeScript models
+- [x] 02. Create or adapt shared logging event TypeScript models
 - [ ] 03. Create logging repository/service layer
 - [ ] 04. Add active session model for timestamp-based timers
 - [ ] 05. Implement Feed flow: breast + bottle
@@ -30,6 +30,23 @@ Phase 1 — Foundation: domain types and repository.
 - [ ] 15. Final cleanup and implementation summary
 
 ## Completed tasks
+
+### 02 — Create shared logging event TypeScript models
+
+**File created:** `src/features/logging/domain/types.ts`
+
+Key additions:
+- `ISODateTime`, `SyncStatus`, `Clock` / `systemClock`
+- `CareEventBase` shared interface
+- `BreastFeedEvent` (with `BreastSideSegment[]`), `BottleFeedEvent`
+- `SleepEvent`, `DiaperEvent`, `PumpEvent`
+- `CareEvent` discriminated union
+- `UndoableMutation`, `PumpVolumeDraft`
+- Five validators: `validateBottleAmount`, `validateSessionRange`, `validateBreastSegments`, `validatePumpVolumes`, `validateDiaperKind`
+
+Verification: `npm run lint` — clean (EXIT:0).
+
+---
 
 ### 00 + 01 — Audit existing MVP structure and identify navigation/state/storage/logging code
 
@@ -84,7 +101,7 @@ Phase 1 — Foundation: domain types and repository.
 
 ## Current task
 
-Next: Task 02 — Create shared logging event TypeScript models.
+Next: Task 03 — Create logging repository/service layer.
 
 ## Decisions made
 
@@ -102,7 +119,7 @@ Next: Task 02 — Create shared logging event TypeScript models.
 
 ## Last verification
 
-- `npm run lint` — ran cleanly after audit (no errors).
+- `npm run lint` — ran cleanly after task 02 (EXIT:0).
 
 ## Final result
 
