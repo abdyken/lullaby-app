@@ -15,7 +15,7 @@ Phase 1 — Foundation: domain types and repository.
 - [x] 00. Audit existing MVP structure
 - [x] 01. Identify current navigation, state management, storage, and logging code
 - [x] 02. Create or adapt shared logging event TypeScript models
-- [ ] 03. Create logging repository/service layer
+- [x] 03. Create logging repository/service layer
 - [ ] 04. Add active session model for timestamp-based timers
 - [ ] 05. Implement Feed flow: breast + bottle
 - [ ] 06. Implement Sleep flow: start/stop session
@@ -30,6 +30,24 @@ Phase 1 — Foundation: domain types and repository.
 - [ ] 15. Final cleanup and implementation summary
 
 ## Completed tasks
+
+### 03 — Create logging repository/service layer
+
+**Files created:**
+- `src/features/logging/data/LoggingRepository.ts` — interface (`getTodayEvents`, `getActiveSessions`, `createEvent`, `updateEvent`, `softDeleteEvent`, `enqueueSync`)
+- `src/features/logging/data/LoggingRepositoryImpl.ts` — AsyncStorage implementation with in-memory cache
+
+Key decisions:
+- Separate storage key `lullaby/logging-v2/events` (flat `CareEvent[]` JSON) — does not touch the legacy `lullaby/local-events/v1` key.
+- Idempotent `createEvent` guards on `clientEventId` to prevent duplicates on retry.
+- `softDeleteEvent` sets `status: 'deleted'` without removing the row (needed for Undo/sync).
+- `enqueueSync` is a no-op stub; a future sync adapter will override it.
+- In-memory cache (`cachedEvents`) avoids repeated AsyncStorage reads within the same session.
+- `clearLoggingV2Storage()` exported for dev/test resets only.
+
+Verification: `npm run lint` — clean (EXIT:0).
+
+---
 
 ### 02 — Create shared logging event TypeScript models
 
@@ -101,7 +119,7 @@ Verification: `npm run lint` — clean (EXIT:0).
 
 ## Current task
 
-Next: Task 03 — Create logging repository/service layer.
+Next: Task 04 — Add active session model for timestamp-based timers.
 
 ## Decisions made
 
@@ -119,7 +137,7 @@ Next: Task 03 — Create logging repository/service layer.
 
 ## Last verification
 
-- `npm run lint` — ran cleanly after task 02 (EXIT:0).
+- `npm run lint` — ran cleanly after task 03 (EXIT:0).
 
 ## Final result
 
