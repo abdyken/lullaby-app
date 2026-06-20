@@ -20,7 +20,7 @@ Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
 - [x] 05. Implement Feed flow: breast + bottle
 - [x] 06. Implement Sleep flow: start/stop session
 - [x] 07. Implement Diaper quick-log flow
-- [ ] 08. Implement Pump flow: side + timer + optional volume
+- [x] 08. Implement Pump flow: side + timer + optional volume
 - [ ] 09. Integrate all events into Today timeline
 - [ ] 10. Add Undo behavior
 - [ ] 11. Add active session recovery after app restart
@@ -30,6 +30,31 @@ Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
 - [ ] 15. Final cleanup and implementation summary
 
 ## Completed tasks
+
+### 08 — Implement Pump flow: side + timer + optional volume
+
+**Files created:**
+- `src/features/logging/application/startPump.ts` — pure builder: `buildStartPumpEvent` → active PumpEvent
+- `src/features/logging/application/finishPump.ts` — pure builder: `buildFinishPumpTimer` → sets endedAt, keeps status 'active' (signals volume-draft state to persistence layer)
+- `src/features/logging/application/savePump.ts` — pure builders: `buildSavePumpEvent` (with volume) + `buildSavePumpWithoutVolume` → completed PumpEvent
+- `src/features/logging/pump/PumpIdle.tsx` — side selector (Left/Right/Both) + "Start pumping" button; double-press protected via startingRef
+- `src/features/logging/pump/PumpActive.tsx` — running timer (elapsed from startedAt) + "Finish pumping" primary button + "Cancel session" link
+- `src/features/logging/pump/PumpVolumeDraft.tsx` — per-side volume steppers (±5 ml), label adapts to side, "Save pump · N ml" enabled only when total > 0, "Save without volume" always available
+- `src/features/logging/pump/PumpSheet.tsx` — orchestrating bottom sheet: Idle → Active (timer) → VolumeDraft → done; closing during timer does NOT end session
+
+**Files modified:**
+- `src/app/(tabs)/index.tsx` — added PumpSheet import; when `featureFlags.loggingV2 && sheet === 'pump'`, renders `PumpSheet` instead of the legacy `LogSheet`
+
+Key decisions:
+- Timer stopped → event gets `endedAt` set but `status = 'active'`. `updateSession` (not finishSession) is called so `activePump` stays in memory; `getActiveSessions` will return this event after restart.
+- PumpSheet detects volume-draft state via `activePump.endedAt !== null` (no separate persisted draft key needed).
+- `effectiveDraft` is derived: uses `pumpVolumeDraft` from store if present, otherwise synthesizes one from `activePump` (covers restart recovery).
+- Volume values are local UI state in PumpVolumeDraft (start at 0 each session).
+- `PumpSheet` is gated behind `featureFlags.loggingV2` (false by default) so legacy pump path is unaffected.
+
+Verification: `npm run lint` — clean (EXIT:0). `npm run check:local-interactions` — 60/60 passed.
+
+---
 
 ### 07 — Implement Diaper quick-log flow
 
@@ -209,7 +234,7 @@ Verification: `npm run lint` — clean (EXIT:0).
 
 ## Current task
 
-Next: Task 08 — Implement Pump flow: side + timer + optional volume.
+Next: Task 09 — Integrate all events into Today timeline.
 
 ## Decisions made
 
@@ -227,8 +252,8 @@ Next: Task 08 — Implement Pump flow: side + timer + optional volume.
 
 ## Last verification
 
-- `npm run lint` — ran cleanly after task 07 (EXIT:0).
-- `npm run check:local-interactions` — 60/60 passed after task 07.
+- `npm run lint` — ran cleanly after task 08 (EXIT:0).
+- `npm run check:local-interactions` — 60/60 passed after task 08.
 
 ## Final result
 
