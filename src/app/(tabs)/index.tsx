@@ -52,6 +52,7 @@ import { featureFlags } from '@/data/featureFlags';
 import { FeedSheet } from '@/features/logging/feed/FeedSheet';
 import { SleepSheet } from '@/features/logging/sleep/SleepSheet';
 import { DiaperSheet } from '@/features/logging/diaper/DiaperSheet';
+import { PumpSheet } from '@/features/logging/pump/PumpSheet';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -345,6 +346,13 @@ export default function TonightScreen() {
         />
       ) : featureFlags.loggingV2 && sheet === 'diaper' ? (
         <DiaperSheet
+          familyId="family-local"
+          childId="baby-mia"
+          userId="cg-mom"
+          onClose={() => setSheet(null)}
+        />
+      ) : featureFlags.loggingV2 && sheet === 'pump' ? (
+        <PumpSheet
           familyId="family-local"
           childId="baby-mia"
           userId="cg-mom"
