@@ -13,7 +13,7 @@
  * theme clipped to an expanding circle on top) — and only commits the new mode
  * to the provider once the circle covers the screen, so there's no flash.
  */
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -53,6 +53,8 @@ import { FeedSheet } from '@/features/logging/feed/FeedSheet';
 import { SleepSheet } from '@/features/logging/sleep/SleepSheet';
 import { DiaperSheet } from '@/features/logging/diaper/DiaperSheet';
 import { PumpSheet } from '@/features/logging/pump/PumpSheet';
+import { useLoggingStore } from '@/features/logging/state/loggingStore';
+import { careEventsToTimeline } from '@/features/logging/ui/careEventFormatter';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -253,6 +255,21 @@ export default function TonightScreen() {
   // Uses the frozen clock so the labels don't shift during a theme reveal.
   const quickLogMeta = buildQuickLogMeta(events, displayNow);
 
+  // v2 timeline: convert CareEvent[] from the logging store to TimelineEntry[].
+  // Only consumed when featureFlags.loggingV2 is true; the hook itself is always
+  // called (hooks must not be conditional) but is a no-op when the flag is off.
+  const { todayEvents: v2TodayEvents } = useLoggingStore();
+  // Use remoteCaregivers (stable auth state) rather than the derived `caregivers`
+  // conditional to avoid a new array reference on every render.
+  const v2CaregiverSource = isSupabase ? remoteCaregivers : seedCaregivers;
+  const v2TimelineEntries = useMemo(() => {
+    const cgMap = new Map(
+      v2CaregiverSource.map((cg) => [cg.id, { name: cg.displayName, color: cg.colorHex }]),
+    );
+    return careEventsToTimeline(v2TodayEvents, cgMap);
+  }, [v2TodayEvents, v2CaregiverSource]);
+  const activeTimeline = featureFlags.loggingV2 ? v2TimelineEntries : tonightTimeline;
+
   // The whole screen body, parameterised by surface mode so it can be rendered
   // twice during a theme transition (base = current, reveal overlay = incoming)
   // with identical data and layout — only the colours differ.
@@ -301,7 +318,7 @@ export default function TonightScreen() {
       </View>
 
       <View style={{ marginTop: 13 }}>
-        <TimelineCard entries={tonightTimeline} surfaceMode={bodyMode} />
+        <TimelineCard entries={activeTimeline} surfaceMode={bodyMode} />
       </View>
 
       {/* P0 partner/handoff card — local-only, below the timeline so it never

@@ -21,7 +21,7 @@ Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
 - [x] 06. Implement Sleep flow: start/stop session
 - [x] 07. Implement Diaper quick-log flow
 - [x] 08. Implement Pump flow: side + timer + optional volume
-- [ ] 09. Integrate all events into Today timeline
+- [x] 09. Integrate all events into Today timeline
 - [ ] 10. Add Undo behavior
 - [ ] 11. Add active session recovery after app restart
 - [ ] 12. Add validation and edge-case handling
@@ -30,6 +30,27 @@ Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
 - [ ] 15. Final cleanup and implementation summary
 
 ## Completed tasks
+
+### 09 — Integrate all events into Today timeline
+
+**Files created:**
+- `src/features/logging/ui/careEventFormatter.ts` — pure formatter: `careEventToTimelineEntry` + `careEventsToTimeline`; converts `CareEvent[]` to `TimelineEntry[]` with correct labels for all four event types and states (active timer, volume draft, completed with/without volume)
+
+**Files modified:**
+- `src/app/(tabs)/index.tsx` — added `useLoggingStore` + `careEventsToTimeline` imports; reads `todayEvents` from the logging store; builds `v2TimelineEntries` via `useMemo`; when `featureFlags.loggingV2` is true passes `v2TimelineEntries` to `TimelineCard` instead of the legacy `tonightTimeline`
+
+Key decisions:
+- Formatter uses local time (`getHours`/`getMinutes`) instead of UTC for a real app experience.
+- Active timer sessions → label shows elapsed time dynamically (computed from `startedAt`).
+- Pump volume-draft state (timer stopped, `endedAt` set, status still 'active') → shown as "Pump · side · add volume".
+- Deleted and cancelled events are filtered out before rendering.
+- Sorted newest-first by `startedAt ?? occurredAt`.
+- `featureFlags.loggingV2 === false` by default — legacy path completely unaffected.
+- Used `remoteCaregivers` (stable auth state ref) rather than the derived `caregivers` conditional to keep useMemo deps stable.
+
+Verification: `npm run lint` — clean (EXIT:0). `npm run check:local-interactions` — 60/60 passed.
+
+---
 
 ### 08 — Implement Pump flow: side + timer + optional volume
 
@@ -234,7 +255,7 @@ Verification: `npm run lint` — clean (EXIT:0).
 
 ## Current task
 
-Next: Task 09 — Integrate all events into Today timeline.
+Next: Task 10 — Add Undo behavior.
 
 ## Decisions made
 
@@ -252,8 +273,8 @@ Next: Task 09 — Integrate all events into Today timeline.
 
 ## Last verification
 
-- `npm run lint` — ran cleanly after task 08 (EXIT:0).
-- `npm run check:local-interactions` — 60/60 passed after task 08.
+- `npm run lint` — ran cleanly after task 09 (EXIT:0).
+- `npm run check:local-interactions` — 60/60 passed after task 09.
 
 ## Final result
 
