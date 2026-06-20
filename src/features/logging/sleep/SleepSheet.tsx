@@ -8,6 +8,7 @@
  * the timer continues running and the sheet can be re-opened from the
  * Quick Log card.
  */
+import { useRef, useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -35,44 +36,70 @@ export function SleepSheet({ familyId, childId, userId, onClose }: Props) {
   const store = useLoggingStore();
 
   const isActive = store.activeSleep !== null;
+  const [error, setError] = useState<string | null>(null);
+
+  // Double-press guards for start and finish actions.
+  const startingRef = useRef(false);
+  const finishingRef = useRef(false);
 
   // ── Start sleep ────────────────────────────────────────────────────────────
   const handleStart = async (startedAt: string) => {
-    if (store.activeSleep) return; // guard: session already running
-    const event = buildStartSleepEvent({
-      familyId,
-      childId,
-      createdByUserId: userId,
-      startedAt,
-    });
-    await store.startSession(event);
+    if (store.activeSleep) return;
+    if (startingRef.current) return;
+    startingRef.current = true;
+    setError(null);
+    try {
+      const event = buildStartSleepEvent({
+        familyId,
+        childId,
+        createdByUserId: userId,
+        startedAt,
+      });
+      await store.startSession(event);
+    } catch {
+      setError('Could not start sleep. Please try again.');
+      startingRef.current = false;
+    }
   };
 
   // ── Finish sleep ───────────────────────────────────────────────────────────
   const handleFinish = async () => {
     if (!store.activeSleep) return;
-    const snapshot = store.activeSleep;
-    const finished = buildFinishSleepEvent({
-      event: snapshot,
-      endedAt: systemClock.nowIso(),
-    });
-    await store.finishSession(finished);
-    store.setLastMutation({
-      mutationId: makeId(),
-      kind: 'finish',
-      eventId: finished.id,
-      previousSnapshot: snapshot,
-      expiresAt: new Date(Date.now() + 10000).toISOString(),
-      label: 'Sleep finished',
-    });
-    onClose();
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    setError(null);
+    try {
+      const snapshot = store.activeSleep;
+      const finished = buildFinishSleepEvent({
+        event: snapshot,
+        endedAt: systemClock.nowIso(),
+      });
+      await store.finishSession(finished);
+      store.setLastMutation({
+        mutationId: makeId(),
+        kind: 'finish',
+        eventId: finished.id,
+        previousSnapshot: snapshot,
+        expiresAt: new Date(Date.now() + 10000).toISOString(),
+        label: 'Sleep finished',
+      });
+      onClose();
+    } catch {
+      setError('Could not finish sleep. Please try again.');
+      finishingRef.current = false;
+    }
   };
 
   // ── Cancel sleep ───────────────────────────────────────────────────────────
   const handleCancel = async () => {
     if (!store.activeSleep) return;
-    await store.cancelSession(store.activeSleep.id);
-    onClose();
+    setError(null);
+    try {
+      await store.cancelSession(store.activeSleep.id);
+      onClose();
+    } catch {
+      setError('Could not cancel sleep. Please try again.');
+    }
   };
 
   return (
@@ -122,6 +149,11 @@ export function SleepSheet({ familyId, childId, userId, onClose }: Props) {
           <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.inkFaint, marginTop: 2 }}>
             {isActive ? 'Session running' : 'Just now'}
           </Text>
+          {error && (
+            <Text style={{ fontFamily: fonts.body, fontSize: 12, color: '#E04040', marginTop: 4 }}>
+              {error}
+            </Text>
+          )}
 
           {/* Body */}
           <View style={{ marginTop: 20 }}>

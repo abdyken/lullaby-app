@@ -24,12 +24,31 @@ Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
 - [x] 09. Integrate all events into Today timeline
 - [x] 10. Add Undo behavior
 - [x] 11. Add active session recovery after app restart
-- [ ] 12. Add validation and edge-case handling
+- [x] 12. Add validation and edge-case handling
 - [ ] 13. Add or update tests
 - [ ] 14. Run final verification
 - [ ] 15. Final cleanup and implementation summary
 
 ## Completed tasks
+
+### 12 — Add validation and edge-case handling
+
+**Files modified:**
+- `src/features/logging/application/finishBreastFeed.ts` — added `validateBreastSegments(segments)` call after closing open segments, before recalculating totals; this catches any segment with endedAt < startedAt before the session is persisted as completed
+- `src/features/logging/feed/FeedSheet.tsx` — added `useRef`, `error` state, `startingRef` (breast-start double-press guard), `finishingRef` (breast-finish double-press guard); all five async handlers (`handleBreastStart`, `handleBreastSwitch`, `handleBreastFinish`, `handleBreastCancel`, `handleBottleSave`) now wrapped in try/catch with error state update; error message rendered below the subtitle when non-null
+- `src/features/logging/sleep/SleepSheet.tsx` — added `useState`, `useRef`; `startingRef` for `handleStart`, `finishingRef` for `handleFinish`; all three handlers wrapped in try/catch; error display added
+- `src/features/logging/pump/PumpSheet.tsx` — added `useState`, `useRef`; `finishingRef` for `handleFinishTimer`; all five handlers wrapped in try/catch (PumpIdle and PumpVolumeDraft already have internal double-press guards); error display added
+- `src/features/logging/diaper/DiaperSheet.tsx` — added `error` state; changed try/finally to try/catch/finally; `catch` sets `error` so the sheet shows the message instead of silently swallowing the failure; also replaced pre-existing `Date.now()` call with `systemClock.now()` to fix a lint violation that was uncovered when the file was re-checked
+
+Key decisions:
+- Error display uses a simple red Text (`#E04040`) beneath the sheet subtitle — non-intrusive but clearly visible.
+- `startingRef` and `finishingRef` reset to `false` only on error (not on success), since the sheet closes on success anyway.
+- DiaperSheet's `savingRef` is reset in the `finally` block so the user can retry after an error.
+- Pre-existing `Date.now()` lint violation in DiaperSheet fixed by using `systemClock.now()` (which the linter treats as a pure stable reference).
+
+Verification: `npm run lint` — clean (EXIT:0). `npm run check:local-interactions` — 60/60 passed.
+
+---
 
 ### 11 — Add active session recovery after app restart
 
@@ -299,7 +318,7 @@ Verification: `npm run lint` — clean (EXIT:0).
 
 ## Current task
 
-Next: Task 12 — Add validation and edge-case handling.
+Next: Task 13 — Add or update tests.
 
 ## Decisions made
 
@@ -317,8 +336,8 @@ Next: Task 12 — Add validation and edge-case handling.
 
 ## Last verification
 
-- `npm run lint` — ran cleanly after task 11 (EXIT:0).
-- `npm run check:local-interactions` — 60/60 passed after task 11.
+- `npm run lint` — ran cleanly after task 12 (EXIT:0).
+- `npm run check:local-interactions` — 60/60 passed after task 12.
 
 ## Final result
 

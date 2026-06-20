@@ -3,6 +3,7 @@
  * Pure function — returns an updated BreastFeedEvent. Caller passes to store.finishSession().
  */
 import type { BreastFeedEvent, ISODateTime } from '../domain/types';
+import { validateBreastSegments } from '../domain/types';
 import { calcBreastSegmentTotals } from '../timer/sessionMath';
 
 interface FinishBreastFeedParams {
@@ -17,6 +18,8 @@ export function buildFinishBreastFeedEvent(params: FinishBreastFeedParams): Brea
   const segments = event.details.segments.map((seg) =>
     seg.endedAt === null ? { ...seg, endedAt } : seg,
   );
+
+  validateBreastSegments(segments);
 
   const { totalLeftMs, totalRightMs } = calcBreastSegmentTotals(segments, nowMs);
 

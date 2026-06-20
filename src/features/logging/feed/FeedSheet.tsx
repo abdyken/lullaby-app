@@ -9,7 +9,7 @@
  * selected, BreastFeedActive is shown instead of BreastFeedIdle so the
  * caregiver continues the running session without accidentally creating a new one.
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -44,78 +44,114 @@ export function FeedSheet({ familyId, childId, userId, onClose }: Props) {
 
   const hasActiveBreastFeed = store.activeBreastFeed !== null;
   const [tab, setTab] = useState<FeedTab>(hasActiveBreastFeed ? 'breast' : 'breast');
+  const [error, setError] = useState<string | null>(null);
+
+  // Double-press guards for start and finish actions.
+  const startingRef = useRef(false);
+  const finishingRef = useRef(false);
 
   // ── Breast: start ────────────────────────────────────────────────────────
   const handleBreastStart = async (side: 'left' | 'right') => {
-    if (store.activeBreastFeed) return; // guard: session already running
-    const event = buildStartBreastFeedEvent({
-      familyId,
-      childId,
-      createdByUserId: userId,
-      side,
-      startedAt: systemClock.nowIso(),
-    });
-    await store.startSession(event);
+    if (store.activeBreastFeed) return;
+    if (startingRef.current) return;
+    startingRef.current = true;
+    setError(null);
+    try {
+      const event = buildStartBreastFeedEvent({
+        familyId,
+        childId,
+        createdByUserId: userId,
+        side,
+        startedAt: systemClock.nowIso(),
+      });
+      await store.startSession(event);
+    } catch {
+      setError('Could not start feeding. Please try again.');
+      startingRef.current = false;
+    }
   };
 
   // ── Breast: switch side ───────────────────────────────────────────────────
   const handleBreastSwitch = async (side: 'left' | 'right') => {
     if (!store.activeBreastFeed) return;
-    const updated = buildSwitchBreastSideEvent({
-      event: store.activeBreastFeed,
-      newSide: side,
-      nowIso: systemClock.nowIso(),
-    });
-    await store.updateSession(updated);
+    setError(null);
+    try {
+      const updated = buildSwitchBreastSideEvent({
+        event: store.activeBreastFeed,
+        newSide: side,
+        nowIso: systemClock.nowIso(),
+      });
+      await store.updateSession(updated);
+    } catch {
+      setError('Could not switch side. Please try again.');
+    }
   };
 
   // ── Breast: finish ───────────────────────────────────────────────────────
   const handleBreastFinish = async () => {
     if (!store.activeBreastFeed) return;
-    const snapshot = store.activeBreastFeed;
-    const finished = buildFinishBreastFeedEvent({
-      event: snapshot,
-      endedAt: systemClock.nowIso(),
-    });
-    await store.finishSession(finished);
-    store.setLastMutation({
-      mutationId: makeId(),
-      kind: 'finish',
-      eventId: finished.id,
-      previousSnapshot: snapshot,
-      expiresAt: new Date(Date.now() + 10000).toISOString(),
-      label: 'Breastfeeding finished',
-    });
-    onClose();
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    setError(null);
+    try {
+      const snapshot = store.activeBreastFeed;
+      const finished = buildFinishBreastFeedEvent({
+        event: snapshot,
+        endedAt: systemClock.nowIso(),
+      });
+      await store.finishSession(finished);
+      store.setLastMutation({
+        mutationId: makeId(),
+        kind: 'finish',
+        eventId: finished.id,
+        previousSnapshot: snapshot,
+        expiresAt: new Date(Date.now() + 10000).toISOString(),
+        label: 'Breastfeeding finished',
+      });
+      onClose();
+    } catch {
+      setError('Could not finish session. Please try again.');
+      finishingRef.current = false;
+    }
   };
 
   // ── Breast: cancel ───────────────────────────────────────────────────────
   const handleBreastCancel = async () => {
     if (!store.activeBreastFeed) return;
-    await store.cancelSession(store.activeBreastFeed.id);
-    onClose();
+    setError(null);
+    try {
+      await store.cancelSession(store.activeBreastFeed.id);
+      onClose();
+    } catch {
+      setError('Could not cancel session. Please try again.');
+    }
   };
 
   // ── Bottle: save ─────────────────────────────────────────────────────────
   const handleBottleSave = async (amountMl: number, milkType: MilkType) => {
-    const event = buildSaveBottleFeedEvent({
-      familyId,
-      childId,
-      createdByUserId: userId,
-      amountMl,
-      milkType,
-      occurredAt: systemClock.nowIso(),
-    });
-    await store.createEvent(event);
-    store.setLastMutation({
-      mutationId: makeId(),
-      kind: 'create',
-      eventId: event.id,
-      previousSnapshot: null,
-      expiresAt: new Date(Date.now() + 10000).toISOString(),
-      label: `Bottle · ${amountMl} ml saved`,
-    });
-    onClose();
+    setError(null);
+    try {
+      const event = buildSaveBottleFeedEvent({
+        familyId,
+        childId,
+        createdByUserId: userId,
+        amountMl,
+        milkType,
+        occurredAt: systemClock.nowIso(),
+      });
+      await store.createEvent(event);
+      store.setLastMutation({
+        mutationId: makeId(),
+        kind: 'create',
+        eventId: event.id,
+        previousSnapshot: null,
+        expiresAt: new Date(Date.now() + 10000).toISOString(),
+        label: `Bottle · ${amountMl} ml saved`,
+      });
+      onClose();
+    } catch {
+      setError('Could not save bottle feed. Please try again.');
+    }
   };
 
   return (
@@ -165,6 +201,11 @@ export function FeedSheet({ familyId, childId, userId, onClose }: Props) {
           <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.inkFaint, marginTop: 2 }}>
             Just now
           </Text>
+          {error && (
+            <Text style={{ fontFamily: fonts.body, fontSize: 12, color: '#E04040', marginTop: 4 }}>
+              {error}
+            </Text>
+          )}
 
           {/* Tabs */}
           <View style={{ flexDirection: 'row', gap: 9, marginTop: 16 }}>
