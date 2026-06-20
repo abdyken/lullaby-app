@@ -50,6 +50,7 @@ import { useHandoffCursor } from '@/state/useHandoffCursor';
 import { colors, type SurfaceMode } from '@/theme';
 import { featureFlags } from '@/data/featureFlags';
 import { FeedSheet } from '@/features/logging/feed/FeedSheet';
+import { SleepSheet } from '@/features/logging/sleep/SleepSheet';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -63,8 +64,8 @@ function ageInWeeks(birthDate: string): number {
 /** Calm fallback while a Supabase baby row is briefly unavailable. */
 const FALLBACK_BABY: Baby = { ...seedBaby, name: 'Your baby' };
 
-/** Which detail sheet is open (null = none). Sleep never uses a sheet. */
-type SheetKind = 'feed' | 'diaper' | 'note' | 'pump';
+/** Which detail sheet is open (null = none). */
+type SheetKind = 'feed' | 'sleep' | 'diaper' | 'note' | 'pump';
 
 type SheetConfig = {
   title: string;
@@ -76,7 +77,9 @@ type SheetConfig = {
   accentTint: string;
 };
 
-const SHEETS: Record<SheetKind, SheetConfig> = {
+type LegacySheetKind = Exclude<SheetKind, 'sleep'>;
+
+const SHEETS: Record<LegacySheetKind, SheetConfig> = {
   feed: {
     title: 'Log a feed',
     subtitle: 'Just now',
@@ -211,10 +214,15 @@ export default function TonightScreen() {
     scrollYRef.current = event.nativeEvent.contentOffset.y;
   };
 
-  // Feed / Diaper open a sheet (logging happens on Save); Sleep stays immediate.
+  // Feed / Diaper open a sheet (logging happens on Save).
+  // Sleep: v2 opens a sheet; legacy uses the direct handleSleepTap action.
   const handleSelect = (kind: PreviewState) => {
-    if (kind === 'sleep') handleSleepTap();
-    else setSheet(kind);
+    if (kind === 'sleep') {
+      if (featureFlags.loggingV2) setSheet('sleep');
+      else handleSleepTap();
+    } else {
+      setSheet(kind);
+    }
   };
 
   const handleThemeToggle = (origin?: RevealOrigin) => {
@@ -327,10 +335,17 @@ export default function TonightScreen() {
           userId="cg-mom"
           onClose={() => setSheet(null)}
         />
-      ) : sheet !== null ? (
+      ) : featureFlags.loggingV2 && sheet === 'sleep' ? (
+        <SleepSheet
+          familyId="family-local"
+          childId="baby-mia"
+          userId="cg-mom"
+          onClose={() => setSheet(null)}
+        />
+      ) : sheet !== null && sheet !== 'sleep' ? (
         <LogSheet
           key={sheet}
-          {...SHEETS[sheet]}
+          {...SHEETS[sheet as LegacySheetKind]}
           onSave={handleSheetSave}
           onClose={() => setSheet(null)}
         />

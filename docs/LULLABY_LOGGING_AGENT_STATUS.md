@@ -18,7 +18,7 @@ Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
 - [x] 03. Create logging repository/service layer
 - [x] 04. Add active session model for timestamp-based timers
 - [x] 05. Implement Feed flow: breast + bottle
-- [ ] 06. Implement Sleep flow: start/stop session
+- [x] 06. Implement Sleep flow: start/stop session
 - [ ] 07. Implement Diaper quick-log flow
 - [ ] 08. Implement Pump flow: side + timer + optional volume
 - [ ] 09. Integrate all events into Today timeline
@@ -30,6 +30,29 @@ Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
 - [ ] 15. Final cleanup and implementation summary
 
 ## Completed tasks
+
+### 06 — Implement Sleep flow: start/stop session
+
+**Files created:**
+- `src/features/logging/application/startSleep.ts` — pure builder: `buildStartSleepEvent` → active SleepEvent
+- `src/features/logging/application/finishSleep.ts` — pure builder: `buildFinishSleepEvent` → completed SleepEvent with validated range
+- `src/features/logging/sleep/SleepIdle.tsx` — idle UI: "Start now" / "5 min ago" option selector + "Start sleep" primary button
+- `src/features/logging/sleep/SleepActive.tsx` — active timer: elapsed display + "Baby woke up" primary button + "Cancel session" link
+- `src/features/logging/sleep/SleepSheet.tsx` — modal bottom sheet: shows SleepActive when session running, SleepIdle otherwise; closing does NOT end the session
+
+**Files modified:**
+- `src/app/(tabs)/index.tsx` — added `SleepSheet` import; added `'sleep'` to `SheetKind`; added `LegacySheetKind` type alias to fix SHEETS typing; in `handleSelect`, when `featureFlags.loggingV2` and kind is `'sleep'`, opens sheet instead of legacy `handleSleepTap()`; renders `SleepSheet` when `featureFlags.loggingV2 && sheet === 'sleep'`
+
+Key decisions:
+- SleepSheet is gated behind `featureFlags.loggingV2` (false by default) so the legacy sleep path is unaffected.
+- Closing the sheet while a session is active does NOT end the session — timer survives sheet dismissal.
+- "Started earlier" uses a fixed 5-minute backdate for v1; `buildStartSleepEvent` accepts any arbitrary `startedAt` so a full time-picker can be added later without changing business logic.
+- Single active session enforced by the existing store reducer (`activeSleep` field).
+- AppState foreground reconciliation already wired in the store — sleep sessions survive restart.
+
+Verification: `npm run lint` — clean (EXIT:0). `npm run check:local-interactions` — 60/60 passed.
+
+---
 
 ### 05 — Implement Feed flow: breast + bottle
 
@@ -166,7 +189,7 @@ Verification: `npm run lint` — clean (EXIT:0).
 
 ## Current task
 
-Next: Task 06 — Implement Sleep flow: start/stop session.
+Next: Task 07 — Implement Diaper quick-log flow.
 
 ## Decisions made
 
@@ -184,8 +207,8 @@ Next: Task 06 — Implement Sleep flow: start/stop session.
 
 ## Last verification
 
-- `npm run lint` — ran cleanly after task 05 (EXIT:0).
-- `npm run check:local-interactions` — 60/60 passed after task 05.
+- `npm run lint` — ran cleanly after task 06 (EXIT:0).
+- `npm run check:local-interactions` — 60/60 passed after task 06.
 
 ## Final result
 
