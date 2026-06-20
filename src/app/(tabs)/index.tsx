@@ -28,6 +28,7 @@ import { BabyHeader } from '@/components/BabyHeader';
 import { HandoffCard } from '@/components/HandoffCard';
 import { LogSheet, type SheetOption } from '@/components/LogSheet';
 import { isLoggingV2Enabled } from '@/features/logging';
+import { DiaperSheet } from '@/features/logging/diaper/DiaperSheet';
 import { FeedSheet } from '@/features/logging/feed/FeedSheet';
 import { SleepSheet } from '@/features/logging/sleep/SleepSheet';
 import { OrbHero, useOrbBreathe } from '@/components/OrbHero';
@@ -193,6 +194,9 @@ export default function TonightScreen() {
   // Logging v2 Sleep sheet (start/stop active session). Behind the same flag; the
   // legacy orb/Quick-Log sleep path (handleSleepTap) stays default while off.
   const [sleepV2Open, setSleepV2Open] = useState(false);
+  // Logging v2 Diaper sheet (instant two-tap log incl. "dry"). Behind the same
+  // flag; the legacy LogSheet diaper path stays default while off.
+  const [diaperV2Open, setDiaperV2Open] = useState(false);
   // Account/sign-out lives behind the baby header (blueprint settings home), but
   // only in real-sync mode — local demo keeps the header inert as before.
   const [accountOpen, setAccountOpen] = useState(false);
@@ -229,6 +233,10 @@ export default function TonightScreen() {
     }
     if (kind === 'feed' && loggingV2) {
       setFeedV2Open(true);
+      return;
+    }
+    if (kind === 'diaper' && loggingV2) {
+      setDiaperV2Open(true);
       return;
     }
     setSheet(kind);
@@ -349,6 +357,8 @@ export default function TonightScreen() {
       {feedV2Open && <FeedSheet onClose={() => setFeedV2Open(false)} />}
 
       {sleepV2Open && <SleepSheet onClose={() => setSleepV2Open(false)} />}
+
+      {diaperV2Open && <DiaperSheet onClose={() => setDiaperV2Open(false)} />}
 
       {accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} />}
 
