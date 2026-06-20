@@ -30,6 +30,7 @@ import {
 } from 'react';
 
 import { baby as seedBaby, caregivers as seedCaregivers } from '@/data/mock';
+import { hapticSave, hapticUndo } from '@/lib/haptics';
 import { useAuth } from '@/state/AuthProvider';
 
 import { isLoggingV2Enabled } from '../config/featureFlags';
@@ -45,6 +46,7 @@ import type {
   PumpSide,
   PumpVolumeDraft,
   SleepEvent,
+  UndoableMutation,
 } from '../domain/types';
 import { systemClock } from '../timer/clock';
 import { subscribeForeground } from '../timer/appStateReconcile';
@@ -63,6 +65,8 @@ import {
   startPump as runStartPump,
   startSleep as runStartSleep,
   switchBreastSide,
+  buildUndoableMutation,
+  undoLoggingMutation as runUndoLoggingMutation,
   type LoggingActor,
   type LoggingUseCaseDeps,
   type SaveBottleFeedInput,
@@ -74,8 +78,16 @@ import {
   clearError as clearErrorTransition,
   createInitialLoggingState,
   withError,
+  withLastMutation,
   type LoggingState,
 } from './loggingStore';
+import { formatLoggingToast } from './timelineSelectors';
+
+/** A transient save-confirmation toast. `id` lets each save reset the auto-dismiss timer. */
+export type LoggingToastState = { id: number; message: string };
+
+/** How long the "saved · Undo" toast stays before it quietly fades (mirrors AppToast). */
+const TOAST_DURATION_MS = 3200;
 
 type LoggingContextValue = {
   /** Whether the v2 logging system is active. When false, all data is inert. */
@@ -97,6 +109,13 @@ type LoggingContextValue = {
   /** Recover/error state from the last action (plan §6); null when clear. */
   error: LoggingError | null;
   clearError: () => void;
+
+  /** The live "saved · Undo" toast for the last completing/instant save (plan §8). */
+  toast: LoggingToastState | null;
+  /** Undo the last mutation: soft-delete a created event / restore a finished session. */
+  undo: () => Promise<void>;
+  /** Dismiss the toast without undoing anything. */
+  dismissToast: () => void;
 
   /** Start (or reopen) a breastfeeding session on the given side. */
   startBreast: (side: BreastSide) => Promise<void>;
@@ -176,6 +195,26 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
   // Serialize mutations + block double-taps during the short write phase (plan §10).
   const mutatingRef = useRef(false);
 
+  // The calm save-confirmation toast (plan §8). Pure React state here, like the
+  // legacy LocalEventProvider; LoggingToast is the presentational piece. `id`
+  // (a monotonic seq) lets a fresh save reset the auto-dismiss timer.
+  const [toast, setToast] = useState<LoggingToastState | null>(null);
+  const toastSeq = useRef(0);
+  const showToast = useCallback((message: string) => {
+    toastSeq.current += 1;
+    setToast({ id: toastSeq.current, message });
+  }, []);
+  const dismissToast = useCallback(() => setToast(null), []);
+
+  // Auto-dismiss the current toast after a short, calm delay (only the matching id).
+  useEffect(() => {
+    if (!toast) return;
+    const handle = setTimeout(() => {
+      setToast((current) => (current && current.id === toast.id ? null : current));
+    }, TOAST_DURATION_MS);
+    return () => clearTimeout(handle);
+  }, [toast]);
+
   const scope: LoggingScope | null = useMemo(
     () => (actor ? { familyId: actor.familyId, childId: actor.childId, userId: actor.userId } : null),
     [actor],
@@ -228,6 +267,22 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
     [repo, clock, actor],
   );
 
+  // Record the single live Undo + show the calm confirmation toast after a
+  // completing/instant save (plan §8). A new mutation replaces the previous Undo
+  // context (a fresh `mutationId` + a fresh toast id); `previousSnapshot` is the
+  // event as it was BEFORE the mutation, so undo-finish can restore the active
+  // session. Called only on success, AFTER `refresh()`, so the recorded mutation
+  // lands on top of the reconciled state (reconcile preserves `lastMutation`).
+  const recordMutation = useCallback(
+    (kind: UndoableMutation['kind'], event: CareEvent, previousSnapshot: CareEvent | null) => {
+      const mutation = buildUndoableMutation({ kind, eventId: event.id, previousSnapshot, clock });
+      setState((prev) => withLastMutation(prev, mutation));
+      hapticSave();
+      showToast(formatLoggingToast(event, clock.now()));
+    },
+    [clock, showToast],
+  );
+
   // A use-case validates BEFORE it writes, so a failure changed nothing — set the
   // error and skip refresh (which would re-read and clear it). A success refreshes
   // from the repo, which also clears any stale error.
@@ -261,10 +316,12 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
     if (!deps || !event) return;
     await runExclusive(async () => {
       const result = await finishBreastFeed(deps, { event });
-      if (result.ok) await refresh();
-      else setState((prev) => withError(prev, result.error));
+      if (result.ok) {
+        await refresh();
+        recordMutation('finish', result.event, event);
+      } else setState((prev) => withError(prev, result.error));
     });
-  }, [deps, refresh, runExclusive]);
+  }, [deps, refresh, runExclusive, recordMutation]);
 
   const cancelBreast = useCallback(async () => {
     const event = stateRef.current.activeBreastFeed;
@@ -284,13 +341,14 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
         if (result.ok) {
           ok = true;
           await refresh();
+          recordMutation('create', result.event, null);
         } else {
           setState((prev) => withError(prev, result.error));
         }
       });
       return ok;
     },
-    [deps, refresh, runExclusive],
+    [deps, refresh, runExclusive, recordMutation],
   );
 
   // Sleep — same pattern as the breast actions: validate-then-write use-cases,
@@ -313,10 +371,12 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
     if (!deps || !event) return;
     await runExclusive(async () => {
       const result = await runFinishSleep(deps, { event });
-      if (result.ok) await refresh();
-      else setState((prev) => withError(prev, result.error));
+      if (result.ok) {
+        await refresh();
+        recordMutation('finish', result.event, event);
+      } else setState((prev) => withError(prev, result.error));
     });
-  }, [deps, refresh, runExclusive]);
+  }, [deps, refresh, runExclusive, recordMutation]);
 
   const cancelSleep = useCallback(async () => {
     const event = stateRef.current.activeSleep;
@@ -336,13 +396,14 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
         if (result.ok) {
           ok = true;
           await refresh();
+          recordMutation('create', result.event, null);
         } else {
           setState((prev) => withError(prev, result.error));
         }
       });
       return ok;
     },
-    [deps, refresh, runExclusive],
+    [deps, refresh, runExclusive, recordMutation],
   );
 
   // Diaper — an instant log, same instant-save pattern as the bottle: validate,
@@ -358,13 +419,14 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
         if (result.ok) {
           ok = true;
           await refresh();
+          recordMutation('create', result.event, null);
         } else {
           setState((prev) => withError(prev, result.error));
         }
       });
       return ok;
     },
-    [deps, refresh, runExclusive],
+    [deps, refresh, runExclusive, recordMutation],
   );
 
   // Pump — same validate-then-write / refresh-on-success / set-error-on-failure
@@ -405,13 +467,14 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
         if (result.ok) {
           ok = true;
           await refresh();
+          recordMutation('finish', result.event, event);
         } else {
           setState((prev) => withError(prev, result.error));
         }
       });
       return ok;
     },
-    [deps, refresh, runExclusive],
+    [deps, refresh, runExclusive, recordMutation],
   );
 
   const cancelPump = useCallback(async () => {
@@ -422,6 +485,27 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       await refresh();
     });
   }, [deps, refresh, runExclusive]);
+
+  // Undo the last mutation (plan §8). A `create` → soft-delete the created event;
+  // a `finish` → restore the previous active snapshot (refused if a conflicting
+  // new session appeared). Either outcome consumes the toast and refreshes the
+  // store. `lastMutation` is cleared AFTER refresh because reconcile preserves it
+  // from the prior state, so clearing before would simply be re-applied.
+  const undo = useCallback(async () => {
+    const mutation = stateRef.current.lastMutation;
+    if (!deps || !mutation) return;
+    await runExclusive(async () => {
+      const result = await runUndoLoggingMutation(deps, mutation);
+      if (result.ok) {
+        hapticUndo();
+        await refresh();
+        setState((prev) => withLastMutation(prev, null));
+      } else {
+        setState((prev) => withError(prev, result.error));
+      }
+      dismissToast();
+    });
+  }, [deps, refresh, runExclusive, dismissToast]);
 
   const clearError = useCallback(() => setState((prev) => clearErrorTransition(prev)), []);
 
@@ -437,6 +521,9 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       pumpVolumeDraft: state.pumpVolumeDraft,
       error: state.error,
       clearError,
+      toast,
+      undo,
+      dismissToast,
       startBreast,
       switchBreast,
       finishBreast,
@@ -463,6 +550,9 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       state.pumpVolumeDraft,
       state.error,
       clearError,
+      toast,
+      undo,
+      dismissToast,
       startBreast,
       switchBreast,
       finishBreast,

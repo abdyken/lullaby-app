@@ -10,9 +10,9 @@
  * Built on RN's Modal in the existing design language (cream surface, grab
  * handle, diaper accent), mirroring `FeedSheet`/`SleepSheet`. All business logic
  * lives in the `saveDiaper` use-case behind `useLogging()`; this only maps a tap
- * to a kind. The toast + Undo that follow a save are wired with the shared Undo
- * (task 10); for now a successful save closes the sheet and the timeline picks
- * the event up via the v2 store.
+ * to a kind. A successful save closes the sheet; the provider then records the
+ * single live Undo and surfaces the calm "Diaper logged · wet · Undo" toast
+ * (LoggingToast, task 10), and the timeline picks the event up via the v2 store.
  */
 import { useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';

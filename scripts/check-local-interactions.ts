@@ -114,12 +114,14 @@ import {
 import {
   buildV2QuickLogSubtitles,
   buildV2TonightStatus,
+  formatLoggingToast,
   formatTimelineEvent,
 } from '../src/features/logging/state/timelineSelectors';
 import { loggingError } from '../src/features/logging/domain/errors';
 // Logging v2 Feed use-cases (plan Phase 3 & 5, task 05) — pure async functions
 // over an in-memory repository + a fake clock.
 import {
+  buildUndoableMutation,
   cancelBreastFeed,
   cancelPump,
   cancelSleep,
@@ -134,6 +136,7 @@ import {
   startPump,
   startSleep,
   switchBreastSide,
+  undoLoggingMutation,
   type LoggingActor,
 } from '../src/features/logging/application';
 
@@ -1881,6 +1884,115 @@ async function runAsyncChecks(): Promise<void> {
     status = buildV2TonightStatus(state, clock.now());
     assert.equal(status.find((s) => s.key === 'sleep')!.label, 'Awake');
     assert.equal(status.find((s) => s.key === 'diaper')!.value, '50m ago');
+  });
+
+  /* ---------------------------------------------------------------- *
+   * Task 10 — Undo: record a single live mutation + the calm "saved ·
+   * Undo" toast, and apply the inverse on undo — soft-delete a created
+   * event / restore a finished session (plan §8). The toast copy comes
+   * from the saved event, so it matches the timeline.
+   * ---------------------------------------------------------------- */
+
+  await checkAsync('CC1. undo a created diaper soft-deletes it, enqueues sync, and drops it from the timeline', async () => {
+    const port = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(port, clock);
+    const deps = { repo, clock, actor };
+    const r = await saveDiaper(deps, { kind: 'wet' });
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    const m = buildUndoableMutation({ kind: 'create', eventId: r.event.id, previousSnapshot: null, clock });
+    assert.ok((await undoLoggingMutation(deps, m)).ok);
+    const snap = await port.load();
+    assert.equal(snap.events.find((e) => e.id === r.event.id)!.status, 'deleted');
+    assert.ok(snap.syncQueue.includes(r.event.id)); // undo enters the sync queue (plan §8)
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.ok(!today.some((e) => e.id === r.event.id));
+  });
+
+  await checkAsync('CC2. undo a created bottle removes it from the timeline', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    const r = await saveBottleFeed(deps, { amountMl: 120, milkType: 'formula' });
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    const m = buildUndoableMutation({ kind: 'create', eventId: r.event.id, previousSnapshot: null, clock });
+    assert.ok((await undoLoggingMutation(deps, m)).ok);
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.length, 0);
+  });
+
+  await checkAsync('CC3. undo finishing a sleep restores the active session (status active, no endedAt)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    clock.advance(40 * 60_000);
+    const before = selectActiveSleep(await repo.getActiveSessions(feedScope))!;
+    assert.ok((await finishSleep(deps, { event: before })).ok);
+    assert.equal(selectActiveSleep(await repo.getActiveSessions(feedScope)), null); // now completed
+    const m = buildUndoableMutation({ kind: 'finish', eventId: before.id, previousSnapshot: before, clock });
+    assert.ok((await undoLoggingMutation(deps, m)).ok);
+    const restored = selectActiveSleep(await repo.getActiveSessions(feedScope));
+    assert.ok(restored && restored.status === 'active' && restored.endedAt === null);
+  });
+
+  await checkAsync('CC4. undo saving a pump restores the volume draft (active pump with endedAt)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'both' })).ok);
+    clock.advance(18 * 60_000);
+    await finishPump(deps, { event: (await activePumpOf(repo))! });
+    const draft = (await activePumpOf(repo))!;
+    assert.ok((await savePump(deps, { event: draft, leftVolumeMl: 50, rightVolumeMl: 60 })).ok);
+    assert.equal(await activePumpOf(repo), null); // completed — no longer active or a draft
+    const m = buildUndoableMutation({ kind: 'finish', eventId: draft.id, previousSnapshot: draft, clock });
+    assert.ok((await undoLoggingMutation(deps, m)).ok);
+    const restored = await activePumpOf(repo);
+    assert.ok(restored && restored.status === 'active' && restored.endedAt !== null); // the draft is back
+  });
+
+  await checkAsync('CC5. undo-finish is refused when a new active session of the same kind appeared (plan §8)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    clock.advance(30 * 60_000);
+    const before = selectActiveSleep(await repo.getActiveSessions(feedScope))!;
+    assert.ok((await finishSleep(deps, { event: before })).ok);
+    assert.ok((await startSleep(deps, {})).ok); // a fresh sleep starts before undo
+    const m = buildUndoableMutation({ kind: 'finish', eventId: before.id, previousSnapshot: before, clock });
+    const u = await undoLoggingMutation(deps, m);
+    assert.equal(u.ok, false);
+    if (!u.ok) assert.equal(u.error.code, 'undo_conflict');
+  });
+
+  await checkAsync('CC6. formatLoggingToast reads the saved event: diaper / bottle / sleep / pump', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    await saveDiaper(deps, { kind: 'wet' });
+    await saveBottleFeed(deps, { amountMl: 120, milkType: 'breast_milk' });
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(formatLoggingToast(today.find(isDiaperEvent)!, clock.now()), 'Diaper logged · wet');
+    assert.equal(formatLoggingToast(today.find(isBottleFeed)!, clock.now()), 'Feed logged · 120 ml');
+    // Sleep (40m) + pump (both, 110 ml) on a fresh store.
+    const { repo: r2, clock: c2, deps: d2 } = newFeedDeps();
+    assert.ok((await startSleep(d2, {})).ok);
+    c2.advance(40 * 60_000);
+    const fin = await finishSleep(d2, { event: selectActiveSleep(await r2.getActiveSessions(feedScope))! });
+    assert.ok(fin.ok);
+    if (fin.ok) assert.equal(formatLoggingToast(fin.event, c2.now()), 'Sleep logged · 40m');
+    assert.ok((await startPump(d2, { side: 'both' })).ok);
+    c2.advance(5 * 60_000);
+    await finishPump(d2, { event: (await activePumpOf(r2))! });
+    const sv = await savePump(d2, { event: (await activePumpOf(r2))!, leftVolumeMl: 50, rightVolumeMl: 60 });
+    assert.ok(sv.ok);
+    if (sv.ok) assert.equal(formatLoggingToast(sv.event, c2.now()), 'Pump saved · 110 ml');
+  });
+
+  await checkAsync('CC7. buildUndoableMutation mints a fresh id + future expiry; a create carries no snapshot', async () => {
+    const clock = createManualClock(NOW);
+    const a = buildUndoableMutation({ kind: 'create', eventId: 'e1', previousSnapshot: null, clock });
+    assert.equal(a.kind, 'create');
+    assert.equal(a.eventId, 'e1');
+    assert.equal(a.previousSnapshot, null);
+    assert.ok(typeof a.mutationId === 'string' && a.mutationId.length > 0);
+    assert.ok(Date.parse(a.expiresAt) > clock.now()); // expires in the future
+    const b = buildUndoableMutation({ kind: 'create', eventId: 'e1', previousSnapshot: null, clock });
+    assert.notEqual(a.mutationId, b.mutationId); // a new action replaces the previous undo context
   });
 }
 
