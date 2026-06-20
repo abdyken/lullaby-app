@@ -46,11 +46,13 @@ export function DiaperSheet({ familyId, childId, userId, onClose }: Props) {
   const store = useLoggingStore();
   const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSelect = async (kind: DiaperKind) => {
     if (savingRef.current) return;
     savingRef.current = true;
     setSaving(true);
+    setError(null);
     try {
       const event = buildSaveDiaperEvent({
         familyId,
@@ -65,10 +67,12 @@ export function DiaperSheet({ familyId, childId, userId, onClose }: Props) {
         kind: 'create',
         eventId: event.id,
         previousSnapshot: null,
-        expiresAt: new Date(Date.now() + 10000).toISOString(),
+        expiresAt: new Date(systemClock.now() + 10000).toISOString(),
         label: DIAPER_LABELS[kind],
       });
       onClose();
+    } catch {
+      setError('Could not save. Please try again.');
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -122,6 +126,11 @@ export function DiaperSheet({ familyId, childId, userId, onClose }: Props) {
           <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.inkFaint, marginTop: 2 }}>
             Just now
           </Text>
+          {error && (
+            <Text style={{ fontFamily: fonts.body, fontSize: 12, color: '#E04040', marginTop: 4 }}>
+              {error}
+            </Text>
+          )}
 
           {/* Type buttons */}
           <View style={{ marginTop: 20, gap: 10 }}>

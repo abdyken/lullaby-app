@@ -14,6 +14,7 @@
  * - activePump.endedAt !== null signals the "volume draft" state (timer done,
  *   waiting for volume input or explicit "save without volume").
  */
+import { useRef, useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -72,89 +73,121 @@ export function PumpSheet({ familyId, childId, userId, onClose }: Props) {
     subtitle = 'Session complete — add your output';
   }
 
+  const [error, setError] = useState<string | null>(null);
+
+  // Double-press guard for timer-stop (PumpActive has no built-in debounce).
+  const finishingRef = useRef(false);
+
   // ── Start pump ────────────────────────────────────────────────────────────
+  // PumpIdle has its own startingRef guard; error handling is needed here.
   const handleStart = async (side: PumpSide) => {
     if (store.activePump) return;
-    const startedAt = systemClock.nowIso();
-    const event = buildStartPumpEvent({
-      familyId,
-      childId,
-      createdByUserId: userId,
-      subjectUserId: userId,
-      side,
-      startedAt,
-    });
-    await store.startSession(event);
+    setError(null);
+    try {
+      const startedAt = systemClock.nowIso();
+      const event = buildStartPumpEvent({
+        familyId,
+        childId,
+        createdByUserId: userId,
+        subjectUserId: userId,
+        side,
+        startedAt,
+      });
+      await store.startSession(event);
+    } catch {
+      setError('Could not start pumping. Please try again.');
+    }
   };
 
   // ── Finish timer → enter volume draft ─────────────────────────────────────
   const handleFinishTimer = async () => {
     if (!store.activePump) return;
-    const endedAt = systemClock.nowIso();
-    const updated = buildFinishPumpTimer({ event: store.activePump, endedAt });
-    // updateSession persists endedAt to storage AND keeps activePump in memory.
-    // status stays 'active' so getActiveSessions() can restore this after restart.
-    await store.updateSession(updated);
-    // Initialize the volume draft so the PumpVolumeDraftView can render.
-    store.setPumpVolumeDraft({
-      eventId: updated.id,
-      side: updated.details.side,
-      leftVolumeMl: 0,
-      rightVolumeMl: 0,
-    });
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    setError(null);
+    try {
+      const endedAt = systemClock.nowIso();
+      const updated = buildFinishPumpTimer({ event: store.activePump, endedAt });
+      await store.updateSession(updated);
+      store.setPumpVolumeDraft({
+        eventId: updated.id,
+        side: updated.details.side,
+        leftVolumeMl: 0,
+        rightVolumeMl: 0,
+      });
+    } catch {
+      setError('Could not stop timer. Please try again.');
+      finishingRef.current = false;
+    }
   };
 
   // ── Cancel timer ──────────────────────────────────────────────────────────
   const handleCancel = async () => {
     if (!store.activePump) return;
-    await store.cancelSession(store.activePump.id);
-    store.setPumpVolumeDraft(null);
-    onClose();
+    setError(null);
+    try {
+      await store.cancelSession(store.activePump.id);
+      store.setPumpVolumeDraft(null);
+      onClose();
+    } catch {
+      setError('Could not cancel session. Please try again.');
+    }
   };
 
   // ── Save with volume ──────────────────────────────────────────────────────
+  // PumpVolumeDraft has its own savingRef guard; error handling is needed here.
   const handleSaveVolume = async (leftMl: number, rightMl: number) => {
     if (!store.activePump) return;
-    const snapshot = store.activePump;
-    const savedAt = systemClock.nowIso();
-    const draft: PumpVolumeDraft = {
-      eventId: snapshot.id,
-      side: snapshot.details.side,
-      leftVolumeMl: leftMl,
-      rightVolumeMl: rightMl,
-    };
-    const completed = buildSavePumpEvent({ event: snapshot, draft, savedAt });
-    await store.finishSession(completed);
-    store.setPumpVolumeDraft(null);
-    const totalMl = leftMl + rightMl;
-    store.setLastMutation({
-      mutationId: makeId(),
-      kind: 'finish',
-      eventId: completed.id,
-      previousSnapshot: snapshot,
-      expiresAt: new Date(Date.now() + 10000).toISOString(),
-      label: `Pump · ${totalMl} ml saved`,
-    });
-    onClose();
+    setError(null);
+    try {
+      const snapshot = store.activePump;
+      const savedAt = systemClock.nowIso();
+      const draft: PumpVolumeDraft = {
+        eventId: snapshot.id,
+        side: snapshot.details.side,
+        leftVolumeMl: leftMl,
+        rightVolumeMl: rightMl,
+      };
+      const completed = buildSavePumpEvent({ event: snapshot, draft, savedAt });
+      await store.finishSession(completed);
+      store.setPumpVolumeDraft(null);
+      const totalMl = leftMl + rightMl;
+      store.setLastMutation({
+        mutationId: makeId(),
+        kind: 'finish',
+        eventId: completed.id,
+        previousSnapshot: snapshot,
+        expiresAt: new Date(Date.now() + 10000).toISOString(),
+        label: `Pump · ${totalMl} ml saved`,
+      });
+      onClose();
+    } catch {
+      setError('Could not save pump volume. Please try again.');
+    }
   };
 
   // ── Save without volume ───────────────────────────────────────────────────
   const handleSaveWithoutVolume = async () => {
     if (!store.activePump) return;
-    const snapshot = store.activePump;
-    const savedAt = systemClock.nowIso();
-    const completed = buildSavePumpWithoutVolume({ event: snapshot, savedAt });
-    await store.finishSession(completed);
-    store.setPumpVolumeDraft(null);
-    store.setLastMutation({
-      mutationId: makeId(),
-      kind: 'finish',
-      eventId: completed.id,
-      previousSnapshot: snapshot,
-      expiresAt: new Date(Date.now() + 10000).toISOString(),
-      label: 'Pump saved',
-    });
-    onClose();
+    setError(null);
+    try {
+      const snapshot = store.activePump;
+      const savedAt = systemClock.nowIso();
+      const completed = buildSavePumpWithoutVolume({ event: snapshot, savedAt });
+      await store.finishSession(completed);
+      store.setPumpVolumeDraft(null);
+      store.setLastMutation({
+        mutationId: makeId(),
+        kind: 'finish',
+        eventId: completed.id,
+        previousSnapshot: snapshot,
+        expiresAt: new Date(Date.now() + 10000).toISOString(),
+        label: 'Pump saved',
+      });
+      onClose();
+    } catch {
+      setError('Could not save pump. Please try again.');
+    }
   };
 
   return (
@@ -210,6 +243,11 @@ export function PumpSheet({ familyId, childId, userId, onClose }: Props) {
             }}>
             {subtitle}
           </Text>
+          {error && (
+            <Text style={{ fontFamily: fonts.body, fontSize: 12, color: '#E04040', marginTop: 4 }}>
+              {error}
+            </Text>
+          )}
 
           {/* Body */}
           <View style={{ marginTop: 20 }}>
