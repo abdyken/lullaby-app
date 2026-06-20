@@ -36,18 +36,24 @@ import { isLoggingV2Enabled } from '../config/featureFlags';
 import { createDeviceLoggingRepository } from '../data/loggingStorage';
 import type { LoggingRepository } from '../data/LoggingRepository';
 import type { LoggingError } from '../domain/errors';
-import type { BreastFeedEvent, BreastSide } from '../domain/types';
+import type { BreastFeedEvent, BreastSide, SleepEvent } from '../domain/types';
 import { systemClock } from '../timer/clock';
 import { subscribeForeground } from '../timer/appStateReconcile';
 import {
   cancelBreastFeed,
+  cancelSleep as runCancelSleep,
   finishBreastFeed,
+  finishSleep as runFinishSleep,
   saveBottleFeed,
+  saveCompletedSleep as runSaveCompletedSleep,
   startBreastFeed,
+  startSleep as runStartSleep,
   switchBreastSide,
   type LoggingActor,
   type LoggingUseCaseDeps,
   type SaveBottleFeedInput,
+  type SaveCompletedSleepInput,
+  type StartSleepInput,
 } from '../application';
 import { hydrateLoggingState, reconcileLoggingState, type LoggingScope } from './loggingHydration';
 import {
@@ -66,6 +72,8 @@ type LoggingContextValue = {
   ready: boolean;
   /** The running breastfeeding session, or null. */
   activeBreastFeed: BreastFeedEvent | null;
+  /** The running sleep session for the child, or null. */
+  activeSleep: SleepEvent | null;
   /** Recover/error state from the last action (plan §6); null when clear. */
   error: LoggingError | null;
   clearError: () => void;
@@ -80,6 +88,15 @@ type LoggingContextValue = {
   cancelBreast: () => Promise<void>;
   /** Save a completed bottle feed. Returns false when validation rejected it. */
   saveBottle: (input: SaveBottleFeedInput) => Promise<boolean>;
+
+  /** Start (or reopen) the child's sleep session. Accepts a backdated start. */
+  startSleep: (input?: StartSleepInput) => Promise<void>;
+  /** Finish the active sleep session — "Baby woke up" (→ completed, endedAt = now). */
+  finishSleep: () => Promise<void>;
+  /** Cancel the active sleep session (→ cancelled, never a logged sleep). */
+  cancelSleep: () => Promise<void>;
+  /** Log an already-finished sleep. Returns false when validation rejected it. */
+  saveCompletedSleep: (input: SaveCompletedSleepInput) => Promise<boolean>;
 };
 
 const LoggingContext = createContext<LoggingContextValue | null>(null);
@@ -244,6 +261,58 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
     [deps, refresh, runExclusive],
   );
 
+  // Sleep — same pattern as the breast actions: validate-then-write use-cases,
+  // refresh on success, set the recover/error state on failure. A second start
+  // reopens the existing session (the use-case guards one active sleep per child).
+  const startSleep = useCallback(
+    async (input: StartSleepInput = {}) => {
+      if (!deps) return;
+      await runExclusive(async () => {
+        const result = await runStartSleep(deps, input);
+        if (result.ok) await refresh();
+        else setState((prev) => withError(prev, result.error));
+      });
+    },
+    [deps, refresh, runExclusive],
+  );
+
+  const finishSleep = useCallback(async () => {
+    const event = stateRef.current.activeSleep;
+    if (!deps || !event) return;
+    await runExclusive(async () => {
+      const result = await runFinishSleep(deps, { event });
+      if (result.ok) await refresh();
+      else setState((prev) => withError(prev, result.error));
+    });
+  }, [deps, refresh, runExclusive]);
+
+  const cancelSleep = useCallback(async () => {
+    const event = stateRef.current.activeSleep;
+    if (!deps || !event) return;
+    await runExclusive(async () => {
+      await runCancelSleep(deps, { event });
+      await refresh();
+    });
+  }, [deps, refresh, runExclusive]);
+
+  const saveCompletedSleep = useCallback(
+    async (input: SaveCompletedSleepInput) => {
+      if (!deps) return false;
+      let ok = false;
+      await runExclusive(async () => {
+        const result = await runSaveCompletedSleep(deps, input);
+        if (result.ok) {
+          ok = true;
+          await refresh();
+        } else {
+          setState((prev) => withError(prev, result.error));
+        }
+      });
+      return ok;
+    },
+    [deps, refresh, runExclusive],
+  );
+
   const clearError = useCallback(() => setState((prev) => clearErrorTransition(prev)), []);
 
   const value = useMemo<LoggingContextValue>(
@@ -252,6 +321,7 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       hydrated: enabled ? state.hydrated : true,
       ready: enabled && actor !== null,
       activeBreastFeed: state.activeBreastFeed,
+      activeSleep: state.activeSleep,
       error: state.error,
       clearError,
       startBreast,
@@ -259,12 +329,17 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       finishBreast,
       cancelBreast,
       saveBottle,
+      startSleep,
+      finishSleep,
+      cancelSleep,
+      saveCompletedSleep,
     }),
     [
       enabled,
       actor,
       state.hydrated,
       state.activeBreastFeed,
+      state.activeSleep,
       state.error,
       clearError,
       startBreast,
@@ -272,6 +347,10 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       finishBreast,
       cancelBreast,
       saveBottle,
+      startSleep,
+      finishSleep,
+      cancelSleep,
+      saveCompletedSleep,
     ],
   );
 

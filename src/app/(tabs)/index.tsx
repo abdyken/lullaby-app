@@ -29,6 +29,7 @@ import { HandoffCard } from '@/components/HandoffCard';
 import { LogSheet, type SheetOption } from '@/components/LogSheet';
 import { isLoggingV2Enabled } from '@/features/logging';
 import { FeedSheet } from '@/features/logging/feed/FeedSheet';
+import { SleepSheet } from '@/features/logging/sleep/SleepSheet';
 import { OrbHero, useOrbBreathe } from '@/components/OrbHero';
 import { QuickLogRow } from '@/components/QuickLogRow';
 import { Screen } from '@/components/Screen';
@@ -189,6 +190,9 @@ export default function TonightScreen() {
   // the legacy LogSheet feed path stays the default while the flag is off.
   const loggingV2 = isLoggingV2Enabled();
   const [feedV2Open, setFeedV2Open] = useState(false);
+  // Logging v2 Sleep sheet (start/stop active session). Behind the same flag; the
+  // legacy orb/Quick-Log sleep path (handleSleepTap) stays default while off.
+  const [sleepV2Open, setSleepV2Open] = useState(false);
   // Account/sign-out lives behind the baby header (blueprint settings home), but
   // only in real-sync mode — local demo keeps the header inert as before.
   const [accountOpen, setAccountOpen] = useState(false);
@@ -219,7 +223,8 @@ export default function TonightScreen() {
   // With loggingV2 on, Feed opens the new purpose-built FeedSheet instead.
   const handleSelect = (kind: PreviewState) => {
     if (kind === 'sleep') {
-      handleSleepTap();
+      if (loggingV2) setSleepV2Open(true);
+      else handleSleepTap();
       return;
     }
     if (kind === 'feed' && loggingV2) {
@@ -342,6 +347,8 @@ export default function TonightScreen() {
       )}
 
       {feedV2Open && <FeedSheet onClose={() => setFeedV2Open(false)} />}
+
+      {sleepV2Open && <SleepSheet onClose={() => setSleepV2Open(false)} />}
 
       {accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} />}
 

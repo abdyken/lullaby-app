@@ -9,16 +9,17 @@ AUTOPILOT_STATUS: RUNNING
 
 ## Current phase
 
-Phases 3 + 5 (Feed) — the first live flow. The Feed flow now runs end-to-end
-behind the `loggingV2` flag: the application use-cases
-(`startBreastFeed`/`switchBreastSide`/`finishBreastFeed`/`cancelBreastFeed`/
-`saveBottleFeed`), a React `LoggingProvider` that hydrates on launch and
-reconciles on `AppState` foreground, and the Feed UI (`FeedSheet` + breast
-idle/active + bottle form). Breast is a real active session with side segments and
-live, timestamp-derived timers; bottle is an instant volume+milk-type event. All
-gated so the MVP is untouched while the flag is off. Next: status task 06 "Sleep
-flow: start/stop session" (the session engine + provider are now in place to build
-on; the Sleep finish-time bug in `mock.ts` is fixed there).
+Phase 6 (Sleep) — done. Sleep now runs end-to-end behind the `loggingV2` flag on
+the live session engine + provider built in tasks 04–05: the use-cases
+(`startSleep` incl. backdated "started earlier", `finishSleep` → `endedAt = now`,
+`cancelSleep`, `saveCompletedSleep` for the manual completed-sleep path), the
+provider actions + `activeSleep` slot, and the Sleep UI (`SleepSheet` + idle +
+active). Sleep is a single active session per child with a live,
+timestamp-derived timer (no persisted counter) that survives restart via
+hydration. This task also fixed the audit's **highest-priority behavioral bug**:
+the legacy `endRunningSleep` (`src/data/mock.ts`) now finalizes at `endedAt = now`
+(clamped ≥ `startAt`) instead of the hardcoded `+72 min`. All gated so the MVP is
+untouched while the flag is off. Next: status task 07 "Diaper quick-log flow".
 
 ## Task queue
 
@@ -28,7 +29,7 @@ on; the Sleep finish-time bug in `mock.ts` is fixed there).
 - [x] 03. Create logging repository/service layer
 - [x] 04. Add active session model for timestamp-based timers
 - [x] 05. Implement Feed flow: breast + bottle
-- [ ] 06. Implement Sleep flow: start/stop session
+- [x] 06. Implement Sleep flow: start/stop session
 - [ ] 07. Implement Diaper quick-log flow
 - [ ] 08. Implement Pump flow: side + timer + optional volume
 - [ ] 09. Integrate all events into Today timeline
@@ -152,35 +153,68 @@ on; the Sleep finish-time bug in `mock.ts` is fixed there).
     (bottle save/validation/idempotency; breast start/switch/finish totals, the
     canonical 5m/3m and multi-switch cases, resume-existing, hydration restore,
     same-side no-op, cancel) → suite now **97/97**.
+- **06 — Sleep flow: start/stop active session (Phase 6, second live flow + the
+  legacy finish-time bug fix).** Built on the now-live session engine + provider:
+  - `application/` — four pure use-cases over `{ repo, clock, actor }`:
+    `startSleep` (active `SleepEvent`, `startedAt = now` or a backdated/"started
+    earlier" timestamp validated not-future; reopens the existing session instead
+    of creating a second — one active sleep per child, plan Phase 4/6.1),
+    `finishSleep` (`endedAt = now`, `status = completed`, range-validated so a
+    backwards clock surfaces an error not a bad record), `cancelSleep`
+    (→ cancelled, never a logged sleep), and `saveCompletedSleep` (the Phase 6.4
+    manual path — a completed event from an explicit start/end, never an active
+    timer). Exported from the barrel (Node-safe).
+  - `state/LoggingProvider.tsx` — added the `activeSleep` slot + `startSleep`/
+    `finishSleep`/`cancelSleep`/`saveCompletedSleep` bound actions, same
+    validate-then-write / refresh-on-success / error-on-failure pattern and
+    mutation lock as the Feed actions.
+  - `sleep/` UI — `SleepSheet` (Modal shell + sleep accent; opens straight into
+    the active view when a session is running), `SleepIdle` (STARTED presets
+    Now / 5m / 15m / 30m ago + "Start sleep", and an "Add a completed sleep"
+    expander with 30m / 1h / 2h duration presets), and `SleepActive` (live
+    `HH:MM:SS` from `useElapsedTime`, "Started HH:MM", "Baby woke up" finish,
+    separated Cancel). Reuses the Feed flow's `ChoicePill` + `PrimaryActionButton`.
+  - Wired into `(tabs)/index.tsx`: with the flag on, the Sleep quick-log tap opens
+    `SleepSheet`; with it off, the legacy `handleSleepTap` orb path is unchanged.
+  - **Fixed the audit's highest-priority bug:** legacy `endRunningSleep`
+    (`src/data/mock.ts`) now sets `endAt = now` (clamped ≥ `startAt`) instead of
+    `startAt + 72 min`; removed the dead `SLEEP_FINALIZE_MIN` const and threaded
+    `now` from `handlePrimaryAction`. Updated the one smoke-test check that encoded
+    the bug (N2: 72 → the real 68m / "1h 08m").
+  - Extended the smoke test with 8 checks (Y1–Y8): start creates one active sleep;
+    start→+40m finish = 40m completed in the timeline; started-5m-earlier→+20m =
+    25m; second start resumes (no duplicate); finish with `endedAt < startedAt`
+    rejected (nothing persisted); cancel discards; hydration restores after
+    restart; `saveCompletedSleep` logs a completed sleep (no timer) and rejects a
+    future start → suite now **105/105**.
 
 ## Current task
 
-06. Implement the Sleep flow (start/stop active session) on the now-live session
-engine + provider. Sleep is a single active session per child: `startSleep`
-(`status = active`, `startedAt = now`, also accept a backdated/"started earlier"
-start, validated not-future), `finishSleep` (`endedAt = now`, `status = completed`)
-and a manual completed-sleep path; durations always derive from timestamps (no
-ticking counter). This is also where the audit's **highest-priority behavioral
-bug** is fixed: the legacy Sleep finish is hardcoded to +72 min
-(`SLEEP_FINALIZE_MIN`/`endRunningSleep`, `src/data/mock.ts`) instead of
-`endedAt = now`. Add `application/startSleep.ts` + `finishSleep.ts`, the Sleep UI
-(`SleepSheet`/idle/active), the provider actions, and a single source of truth so
-Hero + Quick Log + sheet control the same session (plan Phase 6). Behind the
-`loggingV2` flag.
+07. Implement the Diaper quick-log flow (plan Phase 2 — the simplest flow, the
+canonical two-tap path). Add `application/saveDiaper.ts` (instant `completed`
+`DiaperEvent`, `occurredAt = now`, idempotent by `clientEventId`, validated kind),
+the provider action, and a `DiaperSheet` whose four type buttons — Wet / Dirty /
+Both / **Dry** — each call `saveDiaper(kind)` and close the sheet on success (no
+separate Save button), so a wet diaper is two taps: `Diaper → Wet`. This closes
+the audit gap that the legacy diaper has no `dry` and is a 3-tap save. Behind the
+`loggingV2` flag; the legacy `LogSheet` diaper path stays default while off. Undo
+(plan Phase 2 acceptance) is wired as part of **task 10** with the shared Undo.
 
 > Ordering note: the status queue lists Feed (05) before Diaper (07), whereas the
 > plan's §16 vertical slice suggests Diaper-first. The queue governs autopilot
 > order; Diaper (07) and Pump (08) follow Sleep. The session engine + provider are
-> now in place, so each remaining flow is an application + UI increment.
+> in place, so each remaining flow is an application + UI increment.
 >
-> Scope boundary carried forward: the new Feed events are written to the v2 store
-> (`lullaby/logging-v2/v1`) and appear in the v2 `LoggingState.todayEvents`, but
-> the VISIBLE timeline + the quick-log card subtitle/active-ring still read the
+> Scope boundary carried forward: the new Feed + Sleep events are written to the v2
+> store (`lullaby/logging-v2/v1`) and appear in the v2 `LoggingState.todayEvents`,
+> but the VISIBLE timeline + the quick-log card subtitle/active-ring still read the
 > legacy `useLocalEvents` store. Wiring the rendered timeline + quick-log cards to
-> the v2 store is **task 09** (integrate timeline). Undo for v2 mutations is **task
-> 10**; deeper restart-recovery acceptance is **task 11**. Tapping Feed already
-> opens the active v2 session, so "Feed card opens the active session if running"
-> holds via the sheet today.
+> the v2 store is **task 09** (integrate timeline). The **single source of truth**
+> for Sleep — unifying the Hero `Start sleep / Baby woke up` + the Quick Log card +
+> the sheet on one v2 session (plan Phase 6.5) — also lands in task 09: today the
+> Sleep card opens the v2 sheet, while the Hero still drives the legacy orb session,
+> so with the flag on the two are not yet the same session. Undo for v2 mutations is
+> **task 10**; deeper restart-recovery acceptance is **task 11**.
 
 ## Decisions made
 
@@ -271,28 +305,70 @@ Hero + Quick Log + sheet control the same session (plan Phase 6). Behind the
 - **The provider repo is created with `useMemo([])`, not a lazy ref**, to satisfy
   `react-hooks/refs` (no ref access during render). The repository is a stateless
   AsyncStorage wrapper, so even an unlikely memo discard/recreate is harmless.
+- **Task 06 fixed the legacy `endRunningSleep` bug in place rather than deferring
+  it.** The v2 Sleep flow already finishes with `endedAt = now`, but the status
+  doc's task-06 plan committed to the legacy fix too, the audit ranked it the
+  highest-priority behavioral bug, and the plan's Sleep rule ("calculate elapsed
+  from timestamps") is violated even on the legacy path. The change is one clamped
+  line + a threaded `now`; the only test that encoded the old `+72 min` behavior
+  (N2) was updated to assert the real elapsed time. The seed demo is unaffected
+  (the orb timer was already live; finishing now matches it).
+- **The Sleep finish clamps `endAt`/`endedAt` to ≥ `startAt`** in both the legacy
+  `endRunningSleep` and (via `validateSessionRange`) the v2 `finishSleep`, so a
+  backwards device clock can never persist `endedAt < startedAt`; v2 surfaces it
+  as a recover/error state instead of writing a bad record (plan §6).
+- **Sleep keeps the same provider pattern as Feed:** distinct `activeSleep` slot,
+  validate-then-write use-cases that return `{ ok: false, error }`, refresh on
+  success / set-error + skip-refresh on failure, and the shared mutation lock for
+  double-tap safety. The use-cases are imported into the provider under `run*`
+  aliases so the bound action names (`startSleep`/`finishSleep`/…) don't shadow.
+- **"Started earlier" + "Add a completed sleep" pass explicit timestamps, not a
+  business-logic branch** (plan Phase 6.2/6.4). The sheet converts a preset choice
+  (N minutes ago / an N-minute completed sleep) into ISO `startedAt`/`endedAt` and
+  hands them to the same `startSleep`/`saveCompletedSleep` use-cases, so a real
+  time picker can replace the presets later without touching business logic.
+- **Sleep's Quick Log card opens the v2 sheet, but the Hero stays legacy for now.**
+  Unifying Hero + Quick Log + sheet on one v2 session (plan Phase 6.5 single source
+  of truth) is the same "wire the rendered UI to the v2 store" work as the timeline
+  + card subtitles, so it is deferred to **task 09** (integrate) to keep task 06 a
+  clean application + UI increment, consistent with how task 05 handled Feed.
 
 ## Known issues (found during audit, to fix in later tasks)
 
-- **Sleep finish is hardcoded to +72 min** (`SLEEP_FINALIZE_MIN` /
-  `endRunningSleep`, `src/data/mock.ts:214,354`) instead of `endedAt = now`.
-  Highest-priority behavioral fix — addressed in the Sleep flow (task 06, next).
-- The LIVE Feed flow is now wired (task 05) behind the flag: the provider runs
-  `hydrateLoggingState` on mount and `subscribeForeground` → `reconcileLoggingState`
-  on foreground. Sleep/Diaper/Pump still use the legacy `orbView`/`addX` path until
-  their flows land (06–08).
+- ~~Sleep finish is hardcoded to +72 min~~ **FIXED (task 06):** legacy
+  `endRunningSleep` (`src/data/mock.ts`) now finalizes at `endAt = now` (clamped
+  ≥ `startAt`); `SLEEP_FINALIZE_MIN` removed. v2 `finishSleep` likewise uses
+  `endedAt = now`.
+- The LIVE Feed + Sleep flows are wired (tasks 05–06) behind the flag: the provider
+  runs `hydrateLoggingState` on mount and `subscribeForeground` →
+  `reconcileLoggingState` on foreground. Diaper/Pump still use the legacy
+  `orbView`/`addX` path until their flows land (07–08).
 - The VISIBLE timeline + quick-log card subtitles/active-ring still read the legacy
-  `useLocalEvents` store, so v2 Feed events are persisted + in `LoggingState` but
-  not yet rendered there — **task 09** (integrate timeline) wires the rendered UI to
-  the v2 store.
-- Diaper has no `dry`; quick-log is 3 taps, not 2. Pump drops `both` and captures
-  no volume. (Bottle volume/milk type ✓ and Breast timers/side segments ✓ as of
-  task 05.)
+  `useLocalEvents` store, so v2 Feed + Sleep events are persisted + in
+  `LoggingState` but not yet rendered there — **task 09** (integrate timeline) wires
+  the rendered UI to the v2 store, and unifies the Sleep Hero with the v2 session
+  (single source of truth, plan Phase 6.5).
+- Diaper has no `dry` and quick-log is 3 taps, not 2 — **task 07, next.** Pump drops
+  `both` and captures no volume — **task 08.** (Bottle volume/milk type ✓, Breast
+  timers/side segments ✓ as of task 05; Sleep start/stop + completed ✓ as of task 06.)
 - Undo is delete-newest only (no `UndoableMutation` snapshot / undo-finish) — the
-  v2 Feed flow does not show Undo yet; **task 10** adds it.
+  v2 Feed + Sleep flows do not show Undo yet; **task 10** adds it.
 
 ## Last verification
 
+- 2026-06-21 (task 06) — `npx tsc --noEmit` → exit 0. `npm run
+  check:local-interactions` → **all 105 checks pass** (97 prior + 8 new, Y1–Y8, for
+  the Sleep use-cases: start creates one active sleep; start→+40m finish = 40m
+  completed in the timeline; started-5m-earlier→+20m = 25m; second start resumes
+  with no duplicate; finish with `endedAt < startedAt` rejected and nothing
+  persisted; cancel discards; hydration restores after restart; `saveCompletedSleep`
+  logs a completed sleep with no timer and rejects a future start). Also updated the
+  one legacy check that encoded the `+72 min` bug (N2 → real 68m / "1h 08m").
+  `npm run lint` (`expo lint`) → exit 0, clean. `npm test` still not available (no
+  runner; the smoke test is the substitute). MVP behavior is unchanged with the
+  flag off: the new `SleepSheet` is only reachable when `loggingV2` is on, and the
+  legacy `handleSleepTap` orb path is otherwise untouched (the only legacy edit is
+  the in-place `endRunningSleep` correctness fix, covered by the updated N2).
 - 2026-06-21 (task 05) — `npx tsc --noEmit` → exit 0. `npm run
   check:local-interactions` → **all 97 checks pass** (87 prior + 10 new, X1–X10,
   for the Feed use-cases: bottle save/validation/idempotency and breast
