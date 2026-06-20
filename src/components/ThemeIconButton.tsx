@@ -16,9 +16,10 @@ type Props = {
   disabled?: boolean;
 };
 
-/** Icon swap timing — soft and fluid, kicked off in sync with the circular reveal.
- *  Same balanced "ease" curve as the reveal so the two motions feel like one. */
-const ICON_DURATION = 550;
+/** Icon swap timing — kicked off in sync with the theme cross-fade. Kept just
+ *  under the reveal duration so the moon/sun has fully settled before the new
+ *  mode commits (no snap), and the two motions feel like one. */
+const ICON_DURATION = 300;
 const ICON_EASING = Easing.bezier(0.25, 0.1, 0.25, 1);
 /** 0 = day (moon shown, tap → night), 1 = night (sun shown, tap → day). */
 const nightAmount = (mode: SurfaceMode) => (mode === 'night' ? 1 : 0);
