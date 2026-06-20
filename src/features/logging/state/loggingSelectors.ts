@@ -17,7 +17,9 @@ import {
   isSleepEvent,
   type BreastFeedEvent,
   type CareEvent,
+  type ISODateTime,
   type PumpEvent,
+  type PumpVolumeDraft,
   type SleepEvent,
 } from '../domain/types';
 import { sessionElapsedMs } from '../timer/sessionMath';
@@ -58,6 +60,43 @@ export function selectActivePump(
     }
   }
   return null;
+}
+
+/**
+ * Whether a pump has finished its timer but not yet been saved (an active pump
+ * with an `endedAt` set). The store turns such an event into a `pumpVolumeDraft`;
+ * a running pump (`endedAt === null`) is not a draft (plan Phase 7.2).
+ */
+export function isPumpVolumeDraft(event: PumpEvent | null): boolean {
+  return event !== null && event.endedAt !== null;
+}
+
+/**
+ * The persisted volume-draft view of a finished-but-unsaved pump (plan §7.2 /
+ * §4.5 `PumpVolumeDraft`). Self-contained so the draft survives a sheet close
+ * and a restart: it carries everything the volume step needs without holding a
+ * reference to live store state. Volumes are whatever the event has so far
+ * (null right after finish).
+ */
+export function pumpEventToVolumeDraft(event: PumpEvent): PumpVolumeDraft {
+  return {
+    eventId: event.id,
+    clientEventId: event.clientEventId,
+    side: event.details.side,
+    startedAt: event.startedAt as ISODateTime,
+    endedAt: event.endedAt as ISODateTime,
+    leftVolumeMl: event.details.leftVolumeMl,
+    rightVolumeMl: event.details.rightVolumeMl,
+  };
+}
+
+/**
+ * Total pumped volume in ml — derived, NEVER stored (plan §7.3 "calculate Total;
+ * do not store it as an independent field"). A `null` side counts as 0, so a
+ * "save without volume" record totals 0.
+ */
+export function pumpTotalVolumeMl(details: PumpEvent['details']): number {
+  return (details.leftVolumeMl ?? 0) + (details.rightVolumeMl ?? 0);
 }
 
 /** Whether any session (sleep, breast, or pump) is currently running. */

@@ -30,6 +30,7 @@ import { LogSheet, type SheetOption } from '@/components/LogSheet';
 import { isLoggingV2Enabled } from '@/features/logging';
 import { DiaperSheet } from '@/features/logging/diaper/DiaperSheet';
 import { FeedSheet } from '@/features/logging/feed/FeedSheet';
+import { PumpSheet } from '@/features/logging/pump/PumpSheet';
 import { SleepSheet } from '@/features/logging/sleep/SleepSheet';
 import { OrbHero, useOrbBreathe } from '@/components/OrbHero';
 import { QuickLogRow } from '@/components/QuickLogRow';
@@ -197,6 +198,9 @@ export default function TonightScreen() {
   // Logging v2 Diaper sheet (instant two-tap log incl. "dry"). Behind the same
   // flag; the legacy LogSheet diaper path stays default while off.
   const [diaperV2Open, setDiaperV2Open] = useState(false);
+  // Logging v2 Pump sheet (side + timer + optional volume draft). Behind the same
+  // flag; the legacy LogSheet pump path stays default while off.
+  const [pumpV2Open, setPumpV2Open] = useState(false);
   // Account/sign-out lives behind the baby header (blueprint settings home), but
   // only in real-sync mode — local demo keeps the header inert as before.
   const [accountOpen, setAccountOpen] = useState(false);
@@ -309,7 +313,7 @@ export default function TonightScreen() {
         <QuickLogRow
           selected={activeTile}
           onSelect={handleSelect}
-          onPump={() => setSheet('pump')}
+          onPump={() => (loggingV2 ? setPumpV2Open(true) : setSheet('pump'))}
           meta={quickLogMeta}
           surfaceMode={bodyMode}
         />
@@ -359,6 +363,8 @@ export default function TonightScreen() {
       {sleepV2Open && <SleepSheet onClose={() => setSleepV2Open(false)} />}
 
       {diaperV2Open && <DiaperSheet onClose={() => setDiaperV2Open(false)} />}
+
+      {pumpV2Open && <PumpSheet onClose={() => setPumpV2Open(false)} />}
 
       {accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} />}
 
