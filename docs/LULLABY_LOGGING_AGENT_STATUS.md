@@ -16,7 +16,7 @@ Phase 1 — Foundation: domain types and repository.
 - [x] 01. Identify current navigation, state management, storage, and logging code
 - [x] 02. Create or adapt shared logging event TypeScript models
 - [x] 03. Create logging repository/service layer
-- [ ] 04. Add active session model for timestamp-based timers
+- [x] 04. Add active session model for timestamp-based timers
 - [ ] 05. Implement Feed flow: breast + bottle
 - [ ] 06. Implement Sleep flow: start/stop session
 - [ ] 07. Implement Diaper quick-log flow
@@ -30,6 +30,24 @@ Phase 1 — Foundation: domain types and repository.
 - [ ] 15. Final cleanup and implementation summary
 
 ## Completed tasks
+
+### 04 — Add active session model for timestamp-based timers
+
+**Files created:**
+- `src/features/logging/timer/sessionMath.ts` — pure session math: `calcElapsedMs`, `calcBreastSegmentTotals`, `formatElapsedTime`, `formatElapsedHuman`
+- `src/features/logging/timer/useElapsedTime.ts` — React hook: returns elapsed ms from `startedAt`, updates 1×/sec while `isActive`; tick counter pattern avoids setState in effect body
+- `src/features/logging/state/loggingStore.tsx` — React context + useReducer: `LoggingState` (hydrated, todayEvents, activeBreastFeed, activeSleep, activePump, pumpVolumeDraft, lastMutation, error); `LoggingStoreProvider` hydrates on mount, reconciles on AppState foreground; actions: `startSession`, `updateSession`, `finishSession`, `cancelSession`, `createEvent`, `softDeleteEvent`, `setLastMutation`, `setPumpVolumeDraft`, `recoverActiveSessions`
+
+Key decisions:
+- Timer value is always computed from `startedAt` ISO timestamp — no stored counters.
+- `useElapsedTime` uses a tick counter to force re-renders; `calcElapsedMs` runs during render from the prop directly (avoids ref-during-render lint rule).
+- `LoggingStoreProvider` accepts optional `repository`, `familyId`, `childId`, `userId` props — defaults to local-only sentinel values matching mock.ts so the demo works without auth.
+- AppState `active` event triggers `recoverActiveSessions()` — re-reads active sessions from repo and reconciles in-memory state.
+- One active session per type enforced by the reducer (`activeBreastFeed`, `activeSleep`, `activePump` fields).
+
+Verification: `npm run lint` — clean (EXIT:0). `npm run check:local-interactions` — 60/60 passed.
+
+---
 
 ### 03 — Create logging repository/service layer
 
@@ -119,7 +137,7 @@ Verification: `npm run lint` — clean (EXIT:0).
 
 ## Current task
 
-Next: Task 04 — Add active session model for timestamp-based timers.
+Next: Task 05 — Implement Feed flow: breast + bottle.
 
 ## Decisions made
 
@@ -137,7 +155,8 @@ Next: Task 04 — Add active session model for timestamp-based timers.
 
 ## Last verification
 
-- `npm run lint` — ran cleanly after task 03 (EXIT:0).
+- `npm run lint` — ran cleanly after task 04 (EXIT:0).
+- `npm run check:local-interactions` — 60/60 passed after task 04.
 
 ## Final result
 
