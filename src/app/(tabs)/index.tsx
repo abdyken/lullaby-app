@@ -32,6 +32,7 @@ import { DiaperSheet } from '@/features/logging/diaper/DiaperSheet';
 import { FeedSheet } from '@/features/logging/feed/FeedSheet';
 import { PumpSheet } from '@/features/logging/pump/PumpSheet';
 import { SleepSheet } from '@/features/logging/sleep/SleepSheet';
+import { useV2TodayView } from '@/features/logging/state/useV2TodayView';
 import { OrbHero, useOrbBreathe } from '@/components/OrbHero';
 import { QuickLogRow } from '@/components/QuickLogRow';
 import { Screen } from '@/components/Screen';
@@ -272,6 +273,21 @@ export default function TonightScreen() {
   // Uses the frozen clock so the labels don't shift during a theme reveal.
   const quickLogMeta = buildQuickLogMeta(events, displayNow);
 
+  // Logging v2 — the Today view read from the v2 store (orb, timeline, quick-log
+  // cards, status strip). Null when the flag is off, so the legacy useLocalEvents
+  // values below are used unchanged (the production path is byte-for-byte the
+  // same). When on, the Sleep Hero, the Sleep card, and the Sleep sheet all act on
+  // the SAME v2 session — the single source of truth for Sleep (plan Phase 6.5).
+  const v2View = useV2TodayView({ now: displayNow, caregivers });
+  const v2 = loggingV2 ? v2View : null;
+  const heroOrb = v2 ? v2.orb : orb;
+  const heroActiveTile = v2 ? v2.activeTile : activeTile;
+  const heroPrimaryAction = v2 ? v2.onPrimaryAction : handlePrimaryAction;
+  const timelineEntries = v2 ? v2.timeline : tonightTimeline;
+  const cardMeta = v2 ? v2.quickLogMeta : quickLogMeta;
+  // TonightStatus derives from `events` when no items are passed (legacy path).
+  const statusItems = v2 ? v2.tonightStatus : undefined;
+
   // The whole screen body, parameterised by surface mode so it can be rendered
   // twice during a theme transition (base = current, reveal overlay = incoming)
   // with identical data and layout — only the colours differ.
@@ -289,16 +305,16 @@ export default function TonightScreen() {
 
       <View style={{ marginTop: 13 }}>
         <OrbHero
-          state={orb.state}
-          skyTone={orb.skyTone}
-          eyebrow={orb.eyebrow}
-          timerText={orb.timerText}
-          title={orb.title}
-          description={orb.description}
-          actionLabel={orb.actionLabel}
-          progress={orb.progress}
-          coreKind={orb.coreKind}
-          onActionPress={handlePrimaryAction}
+          state={heroOrb.state}
+          skyTone={heroOrb.skyTone}
+          eyebrow={heroOrb.eyebrow}
+          timerText={heroOrb.timerText}
+          title={heroOrb.title}
+          description={heroOrb.description}
+          actionLabel={heroOrb.actionLabel}
+          progress={heroOrb.progress}
+          coreKind={heroOrb.coreKind}
+          onActionPress={heroPrimaryAction}
           surfaceMode={bodyMode}
           breathe={breathe}
         />
@@ -306,21 +322,21 @@ export default function TonightScreen() {
 
       {/* "Time since last feed / diaper / current sleep" at a glance (P0.5). */}
       <View style={{ marginTop: 13 }}>
-        <TonightStatus events={events} now={displayNow} surfaceMode={bodyMode} />
+        <TonightStatus events={events} now={displayNow} items={statusItems} surfaceMode={bodyMode} />
       </View>
 
       <View style={{ marginTop: 13 }}>
         <QuickLogRow
-          selected={activeTile}
+          selected={heroActiveTile}
           onSelect={handleSelect}
           onPump={() => (loggingV2 ? setPumpV2Open(true) : setSheet('pump'))}
-          meta={quickLogMeta}
+          meta={cardMeta}
           surfaceMode={bodyMode}
         />
       </View>
 
       <View style={{ marginTop: 13 }}>
-        <TimelineCard entries={tonightTimeline} surfaceMode={bodyMode} />
+        <TimelineCard entries={timelineEntries} surfaceMode={bodyMode} />
       </View>
 
       {/* P0 partner/handoff card — local-only, below the timeline so it never

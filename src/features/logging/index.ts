@@ -25,6 +25,8 @@ export * from './data/loggingPersistence';
 export * from './state/loggingStore';
 export * from './state/loggingSelectors';
 export * from './state/loggingHydration';
+// Timeline + quick-log presentation selectors (plan §7.1, §7.4).
+export * from './state/timelineSelectors';
 
 // Application use-cases (plan §3). Pure + Node-safe (no React, no AsyncStorage).
 export * from './application';

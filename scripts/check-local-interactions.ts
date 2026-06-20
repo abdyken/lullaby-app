@@ -110,6 +110,12 @@ import {
   hydrateLoggingState,
   reconcileLoggingState,
 } from '../src/features/logging/state/loggingHydration';
+// Logging v2 timeline + quick-log presentation selectors (plan §7.1, §7.4, task 09).
+import {
+  buildV2QuickLogSubtitles,
+  buildV2TonightStatus,
+  formatTimelineEvent,
+} from '../src/features/logging/state/timelineSelectors';
 import { loggingError } from '../src/features/logging/domain/errors';
 // Logging v2 Feed use-cases (plan Phase 3 & 5, task 05) — pure async functions
 // over an in-memory repository + a fake clock.
@@ -1742,6 +1748,139 @@ async function runAsyncChecks(): Promise<void> {
     const state = await hydrateLoggingState(repo, feedScope, clock);
     assert.ok(state.activeSleep);
     assert.ok(state.activePump);
+  });
+
+  /* ---------------------------------------------------------------- *
+   * Task 09 — Today timeline integration: the pure §7.4 timeline
+   * formatter + §7.1 quick-log subtitle selectors + the status strip.
+   * Fixtures are built through the real use-cases, then read back.
+   * ---------------------------------------------------------------- */
+
+  await checkAsync('BB1. formatTimelineEvent renders instant events: bottle + diaper (plan §7.4)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    await saveBottleFeed(deps, { amountMl: 120, milkType: 'breast_milk' });
+    await saveDiaper(deps, { kind: 'wet' });
+    const state = await hydrateLoggingState(repo, feedScope, clock);
+    const bottle = state.todayEvents.find((e) => isBottleFeed(e))!;
+    const diaper = state.todayEvents.find((e) => isDiaperEvent(e))!;
+    const b = formatTimelineEvent(bottle, clock.now());
+    assert.equal(b.title, 'Bottle');
+    assert.equal(b.subtitle, '120 ml · breast milk');
+    assert.equal(b.icon, 'feed');
+    assert.ok(typeof b.tint === 'string' && b.tint.length > 0); // §7.4 tint present
+    const d = formatTimelineEvent(diaper, clock.now());
+    assert.equal(d.title, 'Diaper');
+    assert.equal(d.subtitle, 'wet');
+    assert.equal(d.icon, 'diaper');
+  });
+
+  await checkAsync('BB2. formatTimelineEvent: sleep reads "Sleeping" while active, "Sleep" once completed', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    clock.advance(42 * 60_000);
+    const active = selectActiveSleep(await repo.getActiveSessions(feedScope))!;
+    const a = formatTimelineEvent(active, clock.now());
+    assert.equal(a.title, 'Sleeping');
+    assert.equal(a.subtitle, '42m');
+    assert.equal(a.icon, 'sleep');
+    await finishSleep(deps, { event: active });
+    const done = (await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' })).find((e) => isSleepEvent(e))!;
+    const f = formatTimelineEvent(done, clock.now());
+    assert.equal(f.title, 'Sleep');
+    assert.equal(f.subtitle, '42m'); // fixed at endedAt — no longer ticking
+  });
+
+  await checkAsync('BB3. formatTimelineEvent: breastfeed active vs completed per-side summary', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps, { side: 'right' })).ok);
+    clock.advance(12 * 60_000);
+    const running = (await activeBreast(repo))!;
+    const r = formatTimelineEvent(running, clock.now());
+    assert.equal(r.title, 'Breastfeeding');
+    assert.equal(r.subtitle, '12m · right');
+    // A fresh session: left 5m, switch, right 3m, finish → "5m left · 3m right".
+    const { repo: repo2, clock: clock2, deps: deps2 } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps2, { side: 'left' })).ok);
+    clock2.advance(5 * 60_000);
+    await switchBreastSide(deps2, { event: (await activeBreast(repo2))!, side: 'right' });
+    clock2.advance(3 * 60_000);
+    await finishBreastFeed(deps2, { event: (await activeBreast(repo2))! });
+    const done = (await repo2.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' })).find((e) => isBreastFeed(e))!;
+    const f = formatTimelineEvent(done, clock2.now());
+    assert.equal(f.title, 'Breastfeed');
+    assert.equal(f.subtitle, '5m left · 3m right');
+  });
+
+  await checkAsync('BB4. formatTimelineEvent: pump running → draft → completed (110 ml total)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'both' })).ok);
+    clock.advance(18 * 60_000);
+    const running = (await activePumpOf(repo))!;
+    const r = formatTimelineEvent(running, clock.now());
+    assert.equal(r.title, 'Pumping');
+    assert.equal(r.subtitle, '18m · both');
+    await finishPump(deps, { event: running });
+    const draft = (await activePumpOf(repo))!;
+    const d = formatTimelineEvent(draft, clock.now());
+    assert.equal(d.title, 'Pump');
+    assert.equal(d.subtitle, 'finished · add volume'); // survives close/restart as a draft
+    await savePump(deps, { event: draft, leftVolumeMl: 50, rightVolumeMl: 60 });
+    const done = (await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' })).find((e) => isPumpEvent(e))!;
+    const f = formatTimelineEvent(done, clock.now());
+    assert.equal(f.title, 'Pump');
+    assert.equal(f.subtitle, '110 ml · both'); // derived total, never stored (§7.3)
+  });
+
+  await checkAsync('BB5. buildV2QuickLogSubtitles: active sessions lead in the present tense (plan §7.1)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    assert.ok((await startBreastFeed(deps, { side: 'right' })).ok);
+    assert.ok((await startPump(deps, { side: 'both' })).ok);
+    clock.advance(12 * 60_000);
+    const state = await hydrateLoggingState(repo, feedScope, clock);
+    const subs = buildV2QuickLogSubtitles(state, clock.now());
+    assert.equal(subs.feed, 'Feeding · 12m · right');
+    assert.equal(subs.sleep, 'Sleeping · 12m');
+    assert.equal(subs.pump, 'Pumping · 12m · both');
+  });
+
+  await checkAsync('BB6. buildV2QuickLogSubtitles: pump draft "Finished · add volume", then last-pump line', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'left' })).ok);
+    clock.advance(10 * 60_000);
+    await finishPump(deps, { event: (await activePumpOf(repo))! });
+    let state = await hydrateLoggingState(repo, feedScope, clock);
+    assert.equal(buildV2QuickLogSubtitles(state, clock.now()).pump, 'Finished · add volume');
+    await savePump(deps, { event: (await activePumpOf(repo))!, leftVolumeMl: 90, rightVolumeMl: null });
+    clock.advance(5 * 60_000);
+    state = await hydrateLoggingState(repo, feedScope, clock);
+    assert.equal(buildV2QuickLogSubtitles(state, clock.now()).pump, '5m ago · 90 ml');
+  });
+
+  await checkAsync('BB7. buildV2TonightStatus + idle/awake subtitles (plan §7.1)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    // Empty store → calm prompts + "Awake".
+    let state = await hydrateLoggingState(repo, feedScope, clock);
+    let subs = buildV2QuickLogSubtitles(state, clock.now());
+    assert.equal(subs.feed, 'Tap to log');
+    assert.equal(subs.sleep, 'Tap to start');
+    assert.equal(subs.diaper, 'Tap to log');
+    assert.equal(subs.pump, 'Log pump');
+    let status = buildV2TonightStatus(state, clock.now());
+    assert.deepEqual(status.map((s) => `${s.label}:${s.value}`), ['Last feed:None yet', 'Last diaper:None yet', 'Awake:now']);
+    // Log a diaper, sleep 40m then wake → "Awake for 40m" + diaper "ago".
+    await saveDiaper(deps, { kind: 'dirty' });
+    assert.ok((await startSleep(deps, {})).ok);
+    clock.advance(40 * 60_000);
+    await finishSleep(deps, { event: selectActiveSleep(await repo.getActiveSessions(feedScope))! });
+    clock.advance(10 * 60_000);
+    state = await hydrateLoggingState(repo, feedScope, clock);
+    subs = buildV2QuickLogSubtitles(state, clock.now());
+    assert.equal(subs.sleep, 'Awake for 10m'); // 10m since the sleep ended (not since it started)
+    assert.equal(subs.diaper, '50m ago · dirty');
+    status = buildV2TonightStatus(state, clock.now());
+    assert.equal(status.find((s) => s.key === 'sleep')!.label, 'Awake');
+    assert.equal(status.find((s) => s.key === 'diaper')!.value, '50m ago');
   });
 }
 
