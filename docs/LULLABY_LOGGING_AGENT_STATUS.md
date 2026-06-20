@@ -26,10 +26,23 @@ Phase 2 — Feature flows: Feed, Sleep, Diaper, Pump.
 - [x] 11. Add active session recovery after app restart
 - [x] 12. Add validation and edge-case handling
 - [x] 13. Add or update tests
-- [ ] 14. Run final verification
+- [x] 14. Run final verification
 - [ ] 15. Final cleanup and implementation summary
 
 ## Completed tasks
+
+### 14 — Run final verification
+
+**Commands run:**
+- `npm run lint` — EXIT:0 (clean, no warnings or errors)
+- `npm run check:local-interactions` — 60/60 passed
+- `npm run check:logging-v2` — 44/44 passed
+- `npm run typecheck` — not available (no script in package.json)
+- `npm test` — not available (no script in package.json)
+
+All three available verification commands passed cleanly. No regressions detected against the legacy MVP path (legacy checks remain at 60/60).
+
+---
 
 ### 13 — Add or update tests
 
@@ -335,7 +348,7 @@ Verification: `npm run lint` — clean (EXIT:0).
 
 ## Current task
 
-Next: Task 14 — Run final verification.
+Next: Task 15 — Final cleanup and implementation summary.
 
 ## Decisions made
 
@@ -353,9 +366,9 @@ Next: Task 14 — Run final verification.
 
 ## Last verification
 
-- `npm run lint` — ran cleanly after task 13 (EXIT:0).
-- `npm run check:local-interactions` — 60/60 passed after task 13.
-- `npm run check:logging-v2` — 44/44 passed after task 13 (new).
+- `npm run lint` — ran cleanly after task 14 (EXIT:0).
+- `npm run check:local-interactions` — 60/60 passed after task 14.
+- `npm run check:logging-v2` — 44/44 passed after task 14.
 
 ## Final result
 
