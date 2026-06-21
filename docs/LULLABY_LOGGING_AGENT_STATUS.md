@@ -9,17 +9,33 @@ AUTOPILOT_STATUS: RUNNING
 
 ## Current phase
 
-Phases 4–8 (session engine, four flows, timeline, Undo) — done. The Today screen
-RENDERS from the v2 store behind the `loggingV2` flag (task 09), every
-completing/instant save records a shared single-Undo + calm toast (task 10), and as
-of **task 11** the end-to-end active-session restart-recovery acceptance is proven
-(plan §6 AppState, Phase 4/6.5/7.2, §11.2): a force-closed session reopens with the
-correct elapsed time, the same session reads consistently across card / status /
-timeline after relaunch, a backwards device clock surfaces the `started_in_future`
-recover state instead of a negative duration, and the pump volume draft reopens on its
-volume step. No production code changed — the hydrate/reconcile/clock-anomaly substrate
-was already built and wired in tasks 04–08; task 11 is the additive integration-style
-proof (DD1–DD6). Up next is **task 12** — validation + edge-case hardening.
+Phases 4–8 (session engine, four flows, timeline, Undo) — done; restart recovery
+proven (task 11). As of **task 12**, validation + edge-case handling is hardened
+(plan §1.1 validators, §6 time validations, Phase 10 interaction safety). The audit
+confirmed the validate-then-write substrate is complete (every use-case validates
+before any repo write and returns `{ ok: false, error }`, which the provider drops into
+`state.error` as a recover prompt and skips the refresh, so nothing bad persists), and
+closed two real gaps:
+1. **A destructive-cancel confirmation (Phase 10).** Cancelling an in-progress
+   Feed / Sleep / Pump session is an unrecoverable discard (cancel records NO Undo by
+   design), so an accidental tap permanently lost a running session. New shared
+   `ui/confirmDiscardSession` wraps the platform `Alert` (the app had no prior
+   confirmation pattern) and each session sheet's `handleCancel` now confirms before
+   discarding ("Discard this …?" / Keep going / destructive Discard). The presentational
+   `*Active` components are unchanged — only the sheet seam that binds the cancel action.
+2. **Proof that every flow's FAILURE path is reachable end-to-end (not just
+   unit-validated)** via 7 additive integration-style checks (EE1–EE7), each driving a
+   use-case through a real repository and asserting the recover/error code AND that
+   nothing bad was persisted. The canonical §6 anomaly — a backwards device clock — is
+   now proven refused on breast, pump, and sleep finish (a distinct case from Y5's manual
+   `endedAt < startedAt`), plus a backwards side-switch, `saveCompletedSleep` ordering +
+   idempotency, the bottle/pump sanity caps reachable through the use-cases, and the full
+   surface→recover→clear store flow (EE7).
+
+No production code outside the v2 sheets changed; the sheets render only when the flag is
+on, so the flag-off MVP is byte-for-byte unchanged. Up next is **task 13** — add/update
+tests (the smoke test is now 147 checks; task 13 reviews the plan §11 matrix for any
+remaining acceptance cases worth encoding).
 
 The timeline integration (task 09) is three purely descriptive pieces (no business
 logic in a formatter, plan §8):
@@ -59,7 +75,7 @@ now exposes `todayEvents`. With the flag OFF every widget reads the legacy
 - [x] 09. Integrate all events into Today timeline
 - [x] 10. Add Undo behavior
 - [x] 11. Add active session recovery after app restart
-- [ ] 12. Add validation and edge-case handling
+- [x] 12. Add validation and edge-case handling
 - [ ] 13. Add or update tests
 - [ ] 14. Run final verification
 - [ ] 15. Final cleanup and implementation summary
@@ -401,26 +417,81 @@ now exposes `todayEvents`. With the flag OFF every widget reads the legacy
     recovery checks (W6 sleep restart, W7 reconcile + sleep clock-anomaly, X8 breast
     restart, Y7 sleep restart, AA7 pump-draft restart) by proving the FOUR acceptance
     scenarios end-to-end across all three session types.
+- **12 — Validation & edge-case handling (plan §1.1 validators, §6 time validations,
+  Phase 10 interaction safety).** An audit confirmed the validate-then-write substrate
+  is already complete and correct: every use-case validates BEFORE any repo write and
+  returns `{ ok: false, error }`, and the provider sets that into `state.error` (a
+  recover prompt) and SKIPS the post-mutation refresh, so a rejected action persists
+  nothing. Task 12 closed two real gaps the audit found, behind the flag:
+  - **Targeted fix — confirm the destructive active-session Cancel (Phase 10).**
+    Cancelling an in-progress Feed / Sleep / Pump session discards the elapsed time and,
+    unlike Finish, records NO Undo (cancel is a deliberate discard, never a logged
+    event — task 10 decision), so an accidental tap was unrecoverable. Added
+    `ui/confirmDiscardSession.ts` (a thin shared wrapper over the platform `Alert`; the
+    app had no prior confirmation pattern, and the helper is RN-only so it is kept OUT of
+    the Node-safe barrel, imported directly like the other `ui/` pieces). Each session
+    sheet's `handleCancel` (`SleepSheet` / `FeedSheet` / `PumpSheet`) now confirms first
+    ("Discard this …?" → "Keep going" / destructive "Discard"); only on confirm does it
+    run the existing `cancel*` action + close. The presentational `SleepActive` /
+    `BreastFeedActive` / `PumpActive` components are unchanged — the confirmation lives at
+    the sheet seam that already owned the cancel→close binding.
+  - **Additive proof that every flow's FAILURE path is reachable end-to-end** (not just
+    unit-validated): 7 integration-style checks (EE1–EE7), each driving a use-case through
+    a real repository and asserting both the recover/error code AND that nothing bad was
+    persisted (the session is left untouched). The canonical §6 anomaly is a backwards
+    device clock:
+    - **EE1** — `finishBreastFeed` with a backwards clock is refused
+      (`invalid_breast_segments` — the segment-chain guard catches the reversed range
+      first; the range guard is the second line of defence) and the session stays active
+      (one open Left segment, unchanged).
+    - **EE2** — `finishPump` with a backwards clock is refused (`started_in_future`); the
+      pump stays running (`endedAt` null → no volume draft).
+    - **EE3** — `finishSleep` with a backwards clock is refused (`started_in_future`); the
+      sleep stays active. Complements **Y5** (the manual `endedAt < startedAt` →
+      `invalid_session_range` case): the future-start guard fires before the ordering
+      check, so the two scenarios surface different codes.
+    - **EE4** — `switchBreastSide` to a time before the open segment began is refused
+      (`invalid_breast_segments`); no second segment is appended and the active side is
+      unchanged.
+    - **EE5** — `saveCompletedSleep` rejects `endedAt` before `startedAt`
+      (`invalid_session_range`, nothing persisted) and is idempotent by `clientEventId`
+      (a retried save lands a single event — plan §9 for the manual completed-sleep path).
+    - **EE6** — the bottle/pump sanity caps are reachable THROUGH the use-cases (not just
+      the U4/U8 validator units): an over-`BOTTLE_MAX_ML` / non-finite bottle amount and
+      an over-`PUMP_MAX_ML` / negative pump side volume each reject and persist nothing /
+      leave the volume draft intact.
+    - **EE7** — the provider's failure→recover→clear flow end-to-end without React: a
+      backwards-clock finish fails → `withError` surfaces `started_in_future` in the store
+      → the clock recovers → finishing succeeds → `reconcileLoggingState` clears the error
+      and leaves the completed sleep in the timeline.
+  - Suite now **147/147** (140 prior + 7 EE). No production code outside the v2 sheets
+    changed; the sheets render only behind the flag, so the flag-off MVP is byte-for-byte
+    unchanged.
 
 ## Current task
 
-12. Add validation and edge-case handling (plan §1.1 validators, §6 time
-validations, Phase 10 interaction safety). The five validators already exist
-(`validateBottleAmount`, `validateSessionRange` with the future-start guard,
-`validateBreastSegments`, `validatePumpVolumes`, `validateDiaperKind`) and the
-use-cases call them before writing, returning `{ ok: false, error }` so the provider
-surfaces a recover/error state rather than crashing. Task 12 audits and closes the
-remaining edge cases end-to-end: that every flow's failure path is reachable and
-surfaced (not just unit-validated), that the double-tap mutation lock + `clientEventId`
-idempotency hold under the actual provider, that a backwards-clock finish is rejected
-without persisting a bad record on every session type, and any small gaps the audit
-finds (likely additive checks + targeted fixes), behind the flag with the legacy path
-untouched.
+13. Add or update tests (plan §11 testing matrix). The smoke test
+(`scripts/check-local-interactions.ts`) is now **147 checks** and already covers the
+plan §11.1 unit matrix (breast 5m/3m + multi-switch + hydration, bottle amount/idempotency,
+sleep start/finish/second-start/ordering, diaper each-kind/undo/double-press, pump
+both-110ml/save-without-volume/draft-restore), the §11.2 integration matrix (repo→store→
+timeline, finish→restart→completed, AppState background/active recompute, legacy mapper),
+and now the §6/§1.1 failure matrix (task 12, EE1–EE7). Task 13 reviews the plan §11 matrix
+for any remaining acceptance case worth encoding (e.g. the §11.3 E2E scenarios expressed
+as use-case sequences, or an explicit `repo create → store update → timeline render`
+pipeline check) and documents that there is still no RN test runner (`npm test`
+unavailable) — the Node smoke test is the substitute, by design, since the app has no
+Jest/RNTL infrastructure to extend (CLAUDE.md: "add tests where the project already has
+test infrastructure").
 
-> Milestone: with restart-recovery proven (11), **the four flows + timeline + Undo +
-> restart recovery are all complete end-to-end behind the flag.** What remains is
-> hardening (12 validation/edge cases, 13 tests, 14 final verification, 15 cleanup) —
-> not new flows.
+> Milestone: with validation/edge-case handling hardened (12), **the four flows +
+> timeline + Undo + restart recovery + validation are all complete end-to-end behind the
+> flag,** and every flow's failure path is proven reachable + non-destructive (EE1–EE7).
+> What remains is test review + sign-off (13 tests, 14 final verification, 15 cleanup) —
+> not new behavior.
+>
+> Earlier milestone: with restart-recovery proven (11), the four flows + timeline + Undo +
+> restart recovery were all complete end-to-end behind the flag.
 >
 > Earlier milestone: with Undo (10) done, **every v2 flow is now complete end-to-end behind
 > the flag** — Feed / Sleep / Diaper / Pump write to the v2 store, render on the Today
@@ -651,6 +722,25 @@ untouched.
   reads `useLogging()`. Both mount in `(tabs)/_layout.tsx`; each self-gates on its own
   store, and with the flag on only the v2 sheets save on the Today screen, so they
   never show together. This keeps the flag-off path byte-for-byte legacy.
+- **Task 12 added a destructive-cancel confirmation, not a new validator.** The audit
+  found the validate-then-write substrate already complete (validators return
+  `ValidationResult`; use-cases call them before writing; the provider surfaces the error
+  and skips refresh), so the only production change is the Phase 10 safety gap: cancelling
+  an in-progress session is unrecoverable (cancel records no Undo — task 10 decision), so
+  it now confirms first. The confirmation uses the platform `Alert` (the app had no prior
+  confirmation pattern, and `Alert` is the accessible RN-standard destructive confirm) via
+  a shared `ui/confirmDiscardSession` helper, placed at the sheet `handleCancel` seam so
+  the presentational `*Active` components stay unchanged. On web, RN's `Alert` renders a
+  limited dialog, but web is a dev surface, not a shipping target (the plan is RN-native);
+  on iOS/Android it is the correct two-button destructive confirm.
+- **Task 12's failure-path proof is test-only and at the use-case layer.** The provider's
+  mutation lock (`runExclusive`) and the React error-surfacing are not unit-tested in Node
+  (no React/RN in the smoke test), but the invariant they protect IS: the use-cases are
+  idempotent by `clientEventId` and the session-start guards reopen rather than duplicate
+  (X6/Y4/AA2), and EE7 reproduces the provider's exact failure→`withError`→recover→
+  reconcile-clears flow with pure functions. The `Alert` wrapper and the sheet edits are
+  verified by typecheck + lint (consistent with how all v2 UI is verified — it renders
+  only behind the flag).
 
 ## Known issues (found during audit, to fix in later tasks)
 
@@ -692,6 +782,23 @@ untouched.
 
 ## Last verification
 
+- 2026-06-21 (task 12) — `npx tsc --noEmit` → exit 0. `npm run
+  check:local-interactions` → **all 147 checks pass** (140 prior + 7 new, EE1–EE7, the
+  validation/edge-case failure matrix: EE1 a backwards-clock `finishBreastFeed` is refused
+  (`invalid_breast_segments`, the segment guard first) with the session left active; EE2 a
+  backwards-clock `finishPump` is refused (`started_in_future`) and stays running (no
+  draft); EE3 a backwards-clock `finishSleep` is refused (`started_in_future`) and stays
+  active (complements Y5's manual `invalid_session_range`); EE4 a backwards-time
+  `switchBreastSide` is refused (`invalid_breast_segments`) with segments unchanged; EE5
+  `saveCompletedSleep` rejects `endedAt < startedAt` and is idempotent by `clientEventId`;
+  EE6 the bottle/pump sanity caps reject through the use-cases and persist nothing / leave
+  the draft intact; EE7 a failure surfaces as a store recover state via `withError` and a
+  later success + `reconcileLoggingState` clears it). `npm run lint` (`expo lint`) → exit
+  0, clean. `npm test` still not available (no RN runner; the smoke test is the
+  substitute). The only production change is the Phase 10 destructive-cancel confirmation
+  in the three v2 session sheets (new `ui/confirmDiscardSession` helper) — verified by
+  typecheck + lint, rendered only behind the flag, so MVP behavior with the flag off is
+  byte-for-byte unchanged.
 - 2026-06-21 (task 11) — `npx tsc --noEmit` → exit 0. `npm run
   check:local-interactions` → **all 140 checks pass** (134 prior + 6 new, DD1–DD6,
   the end-to-end restart-recovery acceptance: DD1 finish a sleep → restart → it leaves

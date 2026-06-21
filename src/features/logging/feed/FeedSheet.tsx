@@ -20,6 +20,7 @@ import { colors, fonts, radii, shadows } from '@/theme';
 import { newClientEventId } from '../domain/ids';
 import type { BreastSide, MilkType } from '../domain/types';
 import { useLogging } from '../state/LoggingProvider';
+import { confirmDiscardSession } from '../ui/confirmDiscardSession';
 import { BottleFeedForm } from './BottleFeedForm';
 import { BreastFeedActive } from './BreastFeedActive';
 import { BreastFeedIdle } from './BreastFeedIdle';
@@ -61,10 +62,11 @@ export function FeedSheet({ onClose }: Props) {
     handleClose();
   };
 
-  const handleCancel = async () => {
-    await cancelBreast();
-    handleClose();
-  };
+  // Cancel discards an in-progress feed with no Undo, so confirm first (plan §10).
+  const handleCancel = () =>
+    confirmDiscardSession('feeding session', () => {
+      void cancelBreast().then(handleClose);
+    });
 
   const handleSaveBottle = async (amountMl: number, milkType: MilkType): Promise<boolean> => {
     const ok = await saveBottle({ amountMl, milkType, clientEventId: bottleClientId.current });
