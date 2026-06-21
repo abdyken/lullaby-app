@@ -38,6 +38,8 @@ type Props = {
   currentCaregiverId?: string | null;
   /** the "last caught up" cursor (epoch ms) driving the summary; null = never */
   since?: number | null;
+  /** Frozen clock — passed so any "X ago" summary text stays put mid theme-reveal. */
+  now?: number;
   /** true once the stored cursor has loaded (avoids a flash of stale summary) */
   cursorReady?: boolean;
   /** mark the handoff as seen (shown only when there are new events) */
@@ -130,6 +132,7 @@ export function HandoffCard({
   syncStatus,
   currentCaregiverId = null,
   since = null,
+  now,
   cursorReady = false,
   onMarkCaughtUp,
 }: Props) {
@@ -152,7 +155,7 @@ export function HandoffCard({
   // The handoff summary takes the title slot once the cursor has loaded and there
   // is something to summarize. Until then (or with no events) we keep the calm
   // existing copy so nothing flashes.
-  const summary = buildHandoffSummary(events, caregivers, currentCaregiverId, since ?? null);
+  const summary = buildHandoffSummary(events, caregivers, currentCaregiverId, since ?? null, now);
   const useSummary = cursorReady && hasAnyEvents;
   const showMarkCaughtUp = useSummary && summary.hasNew && onMarkCaughtUp != null;
 

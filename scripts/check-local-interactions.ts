@@ -38,6 +38,109 @@ import { buildSeedEvents, getTonightTimeline } from '../src/data/mock';
 import type { Caregiver, LogEvent, LogEventType } from '../src/data/models';
 import { resolveSurfaceMode } from '../src/theme';
 import { parsePersistedState, serializeState } from '../src/data/persistedState';
+// Logging v2 foundation (plan Phase 1.1) — new model lives beside the legacy one.
+import { createManualClock, systemClock } from '../src/features/logging/timer/clock';
+import { newClientEventId, newUuid } from '../src/features/logging/domain/ids';
+import {
+  BOTTLE_MAX_ML,
+  PUMP_MAX_ML,
+  validateBottleAmount,
+  validateBreastSegments,
+  validateDiaperKind,
+  validatePumpVolumes,
+  validateSessionRange,
+} from '../src/features/logging/domain/rules';
+import {
+  isBottleFeed,
+  isBreastFeed,
+  isDiaperEvent,
+  isPumpEvent,
+  isSleepEvent,
+} from '../src/features/logging/domain/types';
+import type {
+  BottleFeedEvent,
+  BreastFeedEvent,
+  BreastSideSegment,
+  CareEventBase,
+  DiaperEvent,
+  PumpEvent,
+  SleepEvent,
+} from '../src/features/logging/domain/types';
+// Logging v2 repository/service layer (plan Phase 1.2) — interface, in-memory
+// persistence, the impl, the legacy mapper, and the loggingV2 feature flag.
+import {
+  createInMemoryLoggingPersistence,
+  parseLoggingSnapshot,
+  serializeLoggingSnapshot,
+} from '../src/features/logging/data/loggingPersistence';
+import { createLoggingRepository } from '../src/features/logging/data/LoggingRepositoryImpl';
+import {
+  careEventToLegacyEvent,
+  legacyEventToCareEvent,
+  mapLegacyEvents,
+} from '../src/features/logging/data/LegacyLoggingMapper';
+import {
+  isLoggingV2Enabled,
+  resetLoggingFlags,
+  resolveLoggingFlags,
+  setLoggingV2Enabled,
+} from '../src/features/logging/config/featureFlags';
+// Logging v2 active-session model + timestamp-based timers (plan §1.3, §6, Phase 4).
+import {
+  breastSegmentTotals,
+  elapsedMs,
+  formatClock,
+  formatCompactDuration,
+  isReversedRange,
+  sessionElapsedMs,
+} from '../src/features/logging/timer/sessionMath';
+import {
+  applyActiveSessions,
+  applyTodayEvents,
+  clearError,
+  createInitialLoggingState,
+  withError,
+} from '../src/features/logging/state/loggingStore';
+import {
+  pumpTotalVolumeMl,
+  selectActiveBreastFeed,
+  selectActivePump,
+  selectActiveSleep,
+  selectIsAnySessionActive,
+} from '../src/features/logging/state/loggingSelectors';
+import {
+  hydrateLoggingState,
+  reconcileLoggingState,
+} from '../src/features/logging/state/loggingHydration';
+// Logging v2 timeline + quick-log presentation selectors (plan §7.1, §7.4, task 09).
+import {
+  buildV2QuickLogSubtitles,
+  buildV2TonightStatus,
+  formatLoggingToast,
+  formatTimelineEvent,
+} from '../src/features/logging/state/timelineSelectors';
+import { loggingError } from '../src/features/logging/domain/errors';
+// Logging v2 Feed use-cases (plan Phase 3 & 5, task 05) — pure async functions
+// over an in-memory repository + a fake clock.
+import {
+  buildUndoableMutation,
+  cancelBreastFeed,
+  cancelPump,
+  cancelSleep,
+  finishBreastFeed,
+  finishPump,
+  finishSleep,
+  saveBottleFeed,
+  saveCompletedSleep,
+  saveDiaper,
+  savePump,
+  startBreastFeed,
+  startPump,
+  startSleep,
+  switchBreastSide,
+  undoLoggingMutation,
+  type LoggingActor,
+} from '../src/features/logging/application';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
 const NOW = Date.parse('2026-06-17T00:00:00.000Z');
@@ -388,11 +491,13 @@ check('N1. recap counts feeds/diapers and flags the seed’s running sleep', () 
 
 check('N2. after Wake baby the recap reports the longest completed sleep', () => {
   let s = initTonightState(seedEvents);
-  s = handlePrimaryAction(s, NOW); // ends the running sleep (72m finalize)
+  s = handlePrimaryAction(s, NOW); // ends the running sleep at NOW (real elapsed)
   const recap = buildNightRecap(s.events);
   assert.equal(recap.sleepRunning, false);
-  assert.equal(recap.longestSleepMin, 72);
-  assert.match(recapSummaryLine(recap) ?? '', /longest sleep 1h 12m/);
+  // The seed sleep began 68m before NOW; finishing at NOW logs the real 68m, not
+  // the old hardcoded 72m "+SLEEP_FINALIZE_MIN" finalize (the fixed audit bug).
+  assert.equal(recap.longestSleepMin, 68);
+  assert.match(recapSummaryLine(recap) ?? '', /longest sleep 1h 08m/);
 });
 
 check('N3. an empty event list yields an empty recap and a null summary line', () => {
@@ -624,4 +729,1860 @@ check('T1. with a null cursor (post-reset) the seeded night shows its catch-up s
   assert.equal(s.hasNew, true);
 });
 
-console.log(`\nAll ${passed} checks passed ✅`);
+// U. Logging v2 foundation (plan Phase 1.1) — discriminated CareEvent model,
+// Clock, id helpers, and validators. These live beside the legacy LogEvent and
+// are not wired into the app yet; this section locks down their behavior.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+check('U1. systemClock.now is a number and nowIso round-trips through Date', () => {
+  assert.equal(typeof systemClock.now(), 'number');
+  assert.ok(!Number.isNaN(Date.parse(systemClock.nowIso())));
+});
+
+check('U2. manual clock reports, sets, and advances a controllable "now"', () => {
+  const clock = createManualClock(NOW);
+  assert.equal(clock.now(), NOW);
+  assert.equal(clock.nowIso(), new Date(NOW).toISOString());
+  clock.advance(60_000);
+  assert.equal(clock.now(), NOW + 60_000);
+  clock.set(NOW);
+  assert.equal(clock.now(), NOW);
+});
+
+check('U3. newUuid is a v4 UUID and successive ids/clientEventIds are unique', () => {
+  const a = newUuid();
+  const b = newUuid();
+  assert.match(a, UUID_RE);
+  assert.match(b, UUID_RE);
+  assert.notEqual(a, b);
+  assert.notEqual(newClientEventId(), newClientEventId());
+});
+
+check('U4. validateBottleAmount accepts a positive amount, rejects 0/negative/garbage/over-max', () => {
+  assert.equal(validateBottleAmount(120).ok, true);
+  assert.equal(validateBottleAmount(0).ok, false);
+  assert.equal(validateBottleAmount(-10).ok, false);
+  assert.equal(validateBottleAmount(Number.NaN).ok, false);
+  assert.equal(validateBottleAmount(Number.POSITIVE_INFINITY).ok, false);
+  assert.equal(validateBottleAmount(99999).ok, false);
+});
+
+check('U5. validateSessionRange enforces ordering, allows still-running, rejects future start', () => {
+  const start = '2026-06-17T00:00:00.000Z';
+  const later = '2026-06-17T00:40:00.000Z';
+  assert.equal(validateSessionRange(start, later).ok, true);
+  assert.equal(validateSessionRange(start, null).ok, true); // still running
+  assert.equal(validateSessionRange(later, start).ok, false); // ends before it starts
+  assert.equal(validateSessionRange('not-a-date', null).ok, false);
+  const future = new Date(NOW + 60_000).toISOString();
+  assert.equal(validateSessionRange(future, null, NOW).ok, false); // started_in_future
+});
+
+check('U6. validateBreastSegments accepts a clean chain and one trailing open segment', () => {
+  const closed: BreastSideSegment = {
+    id: 's1',
+    side: 'left',
+    startedAt: '2026-06-17T00:00:00.000Z',
+    endedAt: '2026-06-17T00:05:00.000Z',
+  };
+  const open: BreastSideSegment = {
+    id: 's2',
+    side: 'right',
+    startedAt: '2026-06-17T00:05:00.000Z',
+    endedAt: null,
+  };
+  assert.equal(validateBreastSegments([]).ok, true); // empty is structurally valid
+  assert.equal(validateBreastSegments([open]).ok, true); // single open
+  assert.equal(validateBreastSegments([closed, open]).ok, true); // switch L→R
+});
+
+check('U7. validateBreastSegments rejects an open non-last segment and overlaps', () => {
+  const openFirst: BreastSideSegment = {
+    id: 's1',
+    side: 'left',
+    startedAt: '2026-06-17T00:00:00.000Z',
+    endedAt: null,
+  };
+  const second: BreastSideSegment = {
+    id: 's2',
+    side: 'right',
+    startedAt: '2026-06-17T00:05:00.000Z',
+    endedAt: '2026-06-17T00:08:00.000Z',
+  };
+  assert.equal(validateBreastSegments([openFirst, second]).ok, false); // open must be last
+
+  const a: BreastSideSegment = {
+    id: 'a',
+    side: 'left',
+    startedAt: '2026-06-17T00:00:00.000Z',
+    endedAt: '2026-06-17T00:05:00.000Z',
+  };
+  const overlapping: BreastSideSegment = {
+    id: 'b',
+    side: 'right',
+    startedAt: '2026-06-17T00:03:00.000Z', // starts before `a` ended
+    endedAt: null,
+  };
+  assert.equal(validateBreastSegments([a, overlapping]).ok, false);
+});
+
+check('U8. validatePumpVolumes: both 50/60 ok, save-without-volume ok, side mismatch rejected', () => {
+  assert.equal(validatePumpVolumes({ side: 'both', leftVolumeMl: 50, rightVolumeMl: 60 }).ok, true);
+  assert.equal(validatePumpVolumes({ side: 'left', leftVolumeMl: null, rightVolumeMl: null }).ok, true);
+  assert.equal(validatePumpVolumes({ side: 'left', leftVolumeMl: 80, rightVolumeMl: null }).ok, true);
+  assert.equal(validatePumpVolumes({ side: 'left', leftVolumeMl: 80, rightVolumeMl: 60 }).ok, false);
+  assert.equal(validatePumpVolumes({ side: 'both', leftVolumeMl: 0, rightVolumeMl: 60 }).ok, false); // 0 not allowed
+});
+
+check('U9. validateDiaperKind accepts the four kinds and rejects legacy "mixed"', () => {
+  assert.equal(validateDiaperKind('wet').ok, true);
+  assert.equal(validateDiaperKind('dirty').ok, true);
+  assert.equal(validateDiaperKind('both').ok, true);
+  assert.equal(validateDiaperKind('dry').ok, true);
+  assert.equal(validateDiaperKind('mixed').ok, false);
+});
+
+check('U10. CareEvent type guards narrow each event to its concrete shape', () => {
+  const base = (over: Partial<CareEventBase> = {}): CareEventBase => ({
+    id: 'evt-1',
+    clientEventId: 'cid-1',
+    familyId: 'fam-1',
+    childId: 'baby-mia',
+    createdByUserId: 'cg-mom',
+    type: 'feed',
+    status: 'completed',
+    occurredAt: '2026-06-17T00:00:00.000Z',
+    startedAt: null,
+    endedAt: null,
+    timezoneOffsetMinutes: 0,
+    createdAt: '2026-06-17T00:00:00.000Z',
+    updatedAt: '2026-06-17T00:00:00.000Z',
+    syncStatus: 'local',
+    version: 1,
+    ...over,
+  });
+
+  const breast: BreastFeedEvent = {
+    ...base({ status: 'active' }),
+    type: 'feed',
+    childId: 'baby-mia',
+    method: 'breast',
+    details: { activeSide: 'left', segments: [], totalLeftMs: 0, totalRightMs: 0 },
+  };
+  const bottle: BottleFeedEvent = {
+    ...base(),
+    type: 'feed',
+    childId: 'baby-mia',
+    status: 'completed',
+    method: 'bottle',
+    details: { amountMl: 120, milkType: 'formula' },
+  };
+  const sleep: SleepEvent = {
+    ...base({ type: 'sleep', status: 'active' }),
+    type: 'sleep',
+    childId: 'baby-mia',
+    details: { sleepType: 'night' },
+  };
+  const diaper: DiaperEvent = {
+    ...base({ type: 'diaper' }),
+    type: 'diaper',
+    childId: 'baby-mia',
+    status: 'completed',
+    details: { kind: 'wet' },
+  };
+  const pump: PumpEvent = {
+    ...base({ type: 'pump', childId: null }),
+    type: 'pump',
+    childId: null,
+    subjectUserId: 'cg-mom',
+    details: { side: 'both', leftVolumeMl: null, rightVolumeMl: null },
+  };
+
+  assert.ok(isBreastFeed(breast) && !isBottleFeed(breast));
+  assert.ok(isBottleFeed(bottle) && !isBreastFeed(bottle));
+  assert.ok(isSleepEvent(sleep) && !isPumpEvent(sleep));
+  assert.ok(isDiaperEvent(diaper) && !isSleepEvent(diaper));
+  assert.ok(isPumpEvent(pump) && pump.childId === null);
+  // The guard narrows: these property accesses are type-checked by tsc.
+  assert.equal(breast.details.activeSide, 'left');
+  assert.equal(bottle.details.amountMl, 120);
+});
+
+// V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are
+// async (the repository contract returns Promises), so they run after the sync
+// checks above and print the final summary on completion.
+async function checkAsync(name: string, fn: () => Promise<void>): Promise<void> {
+  await fn();
+  passed += 1;
+  console.log(`  ✓ ${name}`);
+}
+
+async function runAsyncChecks(): Promise<void> {
+  const iso = (msValue: number) => new Date(msValue).toISOString();
+
+  const careBase = (over: Partial<CareEventBase> = {}): CareEventBase => ({
+    id: 'evt',
+    clientEventId: 'cid',
+    familyId: 'fam-1',
+    childId: 'baby-mia',
+    createdByUserId: 'cg-mom',
+    type: 'diaper',
+    status: 'completed',
+    occurredAt: iso(NOW),
+    startedAt: null,
+    endedAt: null,
+    timezoneOffsetMinutes: 0,
+    createdAt: iso(NOW),
+    updatedAt: iso(NOW),
+    syncStatus: 'local',
+    version: 1,
+    ...over,
+  });
+
+  const makeDiaper = (id: string, cid: string, over: Partial<CareEventBase> = {}): DiaperEvent => ({
+    ...careBase({ id, clientEventId: cid, type: 'diaper', ...over }),
+    type: 'diaper',
+    childId: 'baby-mia',
+    status: 'completed',
+    details: { kind: 'wet' },
+  });
+
+  const makeSleep = (id: string, cid: string, status: 'active' | 'completed'): SleepEvent => ({
+    ...careBase({
+      id,
+      clientEventId: cid,
+      type: 'sleep',
+      status,
+      startedAt: iso(NOW),
+      endedAt: status === 'completed' ? iso(NOW + 60_000) : null,
+    }),
+    type: 'sleep',
+    childId: 'baby-mia',
+    details: { sleepType: 'night' },
+  });
+
+  const makePump = (id: string, cid: string, subjectUserId: string): PumpEvent => ({
+    ...careBase({ id, clientEventId: cid, type: 'pump', status: 'active', childId: null, startedAt: iso(NOW) }),
+    type: 'pump',
+    childId: null,
+    subjectUserId,
+    details: { side: 'both', leftVolumeMl: null, rightVolumeMl: null },
+  });
+
+  const makeBreast = (id: string, cid: string, status: 'active' | 'completed'): BreastFeedEvent => ({
+    ...careBase({
+      id,
+      clientEventId: cid,
+      type: 'feed',
+      status,
+      startedAt: iso(NOW),
+      endedAt: status === 'completed' ? iso(NOW + 8 * 60_000) : null,
+    }),
+    type: 'feed',
+    childId: 'baby-mia',
+    method: 'breast',
+    details: {
+      activeSide: status === 'completed' ? null : 'left',
+      segments: [
+        {
+          id: `${id}-seg1`,
+          side: 'left',
+          startedAt: iso(NOW),
+          endedAt: status === 'completed' ? iso(NOW + 8 * 60_000) : null,
+        },
+      ],
+      totalLeftMs: status === 'completed' ? 8 * 60_000 : 0,
+      totalRightMs: 0,
+    },
+  });
+
+  await checkAsync('V1. createEvent stores an event; getTodayEvents returns it; retry is idempotent by clientEventId', async () => {
+    const repo = createLoggingRepository(createInMemoryLoggingPersistence(), createManualClock(NOW));
+    const diaper = makeDiaper('evt-d1', 'cid-d1');
+    await repo.createEvent(diaper);
+    await repo.createEvent(diaper); // retried create — same clientEventId, must not duplicate
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.length, 1);
+    assert.equal(today[0].id, 'evt-d1');
+  });
+
+  await checkAsync('V2. getActiveSessions returns active sleep (by child) + pump (by caregiver), excludes completed and other caregivers', async () => {
+    const repo = createLoggingRepository(createInMemoryLoggingPersistence(), createManualClock(NOW));
+    await repo.createEvent(makeSleep('evt-s1', 'cid-s1', 'active'));
+    await repo.createEvent(makeSleep('evt-s2', 'cid-s2', 'completed'));
+    await repo.createEvent(makePump('evt-p1', 'cid-p1', 'cg-mom'));
+    await repo.createEvent(makePump('evt-p2', 'cid-p2', 'cg-dad')); // a different caregiver's pump
+    const active = await repo.getActiveSessions({ familyId: 'fam-1', childId: 'baby-mia', userId: 'cg-mom' });
+    assert.deepEqual(active.map((e) => e.id).sort(), ['evt-p1', 'evt-s1']);
+  });
+
+  await checkAsync('V3. updateEvent bumps version/updatedAt; softDeleteEvent hides the event from the timeline', async () => {
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(createInMemoryLoggingPersistence(), clock);
+    const diaper = makeDiaper('evt-d1', 'cid-d1');
+    await repo.createEvent(diaper);
+    clock.advance(60_000);
+    const updated: DiaperEvent = { ...diaper, details: { kind: 'dirty' } };
+    await repo.updateEvent(updated);
+    let today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.length, 1);
+    assert.equal(today[0].version, 2); // bumped from 1
+    assert.equal((today[0] as DiaperEvent).details.kind, 'dirty');
+    assert.equal(today[0].updatedAt, iso(NOW + 60_000));
+    await repo.softDeleteEvent('evt-d1');
+    today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.length, 0); // soft-deleted → not shown in the timeline
+  });
+
+  await checkAsync('V4. enqueueSync queues an id once (deduped)', async () => {
+    const port = createInMemoryLoggingPersistence();
+    const repo = createLoggingRepository(port, createManualClock(NOW));
+    await repo.enqueueSync('evt-d1');
+    await repo.enqueueSync('evt-d1'); // duplicate
+    await repo.enqueueSync('evt-d2');
+    const snap = await port.load();
+    assert.deepEqual(snap.syncQueue, ['evt-d1', 'evt-d2']);
+  });
+
+  await checkAsync('V5. getTodayEvents excludes events from a previous day', async () => {
+    const repo = createLoggingRepository(createInMemoryLoggingPersistence(), createManualClock(NOW));
+    await repo.createEvent(makeDiaper('evt-today', 'cid-today'));
+    await repo.createEvent(makeDiaper('evt-old', 'cid-old', { occurredAt: iso(NOW - 2 * 86_400_000) }));
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.deepEqual(today.map((e) => e.id), ['evt-today']);
+  });
+
+  await checkAsync('V6. legacyEventToCareEvent maps breast/bottle/sleep/diaper/pump and skips notes', async () => {
+    const legacyBreast: LogEvent = {
+      id: 'l-feed-L',
+      babyId: 'baby-mia',
+      caregiverId: 'cg-mom',
+      type: 'feed',
+      startAt: '2026-06-17T00:00:00.000Z',
+      endAt: '2026-06-17T00:10:00.000Z',
+      meta: { side: 'L' },
+      createdAt: '2026-06-17T00:10:00.000Z',
+    };
+    const breast = legacyEventToCareEvent(legacyBreast);
+    assert.ok(breast && isBreastFeed(breast));
+    if (breast && isBreastFeed(breast)) {
+      assert.equal(breast.familyId, 'baby-mia'); // familyId mirrors baby scope (audit §13)
+      assert.equal(breast.clientEventId, 'l-feed-L'); // legacy id → stable idempotency key
+      assert.equal(breast.details.segments.length, 1);
+      assert.equal(breast.details.totalLeftMs, 10 * 60_000);
+      assert.equal(breast.details.totalRightMs, 0);
+      assert.equal(breast.status, 'completed');
+    }
+
+    const bottle = legacyEventToCareEvent({ ...legacyBreast, id: 'l-bottle', meta: { amountMl: 120 } });
+    assert.ok(bottle && isBottleFeed(bottle));
+    if (bottle && isBottleFeed(bottle)) {
+      assert.equal(bottle.details.amountMl, 120);
+      assert.equal(bottle.details.milkType, 'other');
+    }
+
+    const legacySleep: LogEvent = {
+      id: 'l-sleep',
+      babyId: 'baby-mia',
+      caregiverId: 'cg-mom',
+      type: 'sleep',
+      startAt: '2026-06-17T00:00:00.000Z',
+      endAt: null,
+      meta: {},
+      createdAt: '2026-06-17T00:00:00.000Z',
+    };
+    const sleep = legacyEventToCareEvent(legacySleep);
+    assert.ok(sleep && isSleepEvent(sleep) && sleep.status === 'active'); // running sleep → active
+
+    const diaper = legacyEventToCareEvent({ ...legacySleep, id: 'l-diaper', type: 'diaper', meta: { kind: 'both' } });
+    assert.ok(diaper && isDiaperEvent(diaper) && diaper.details.kind === 'both');
+
+    const pump = legacyEventToCareEvent({ ...legacySleep, id: 'l-pump', type: 'pump', endAt: '2026-06-17T00:15:00.000Z', meta: { side: 'R' } });
+    assert.ok(pump && isPumpEvent(pump));
+    if (pump && isPumpEvent(pump)) {
+      assert.equal(pump.details.side, 'right');
+      assert.equal(pump.subjectUserId, 'cg-mom');
+      assert.equal(pump.details.leftVolumeMl, null);
+    }
+
+    const note = legacyEventToCareEvent({ ...legacySleep, id: 'l-note', type: 'note', meta: { label: 'Fussy' } });
+    assert.equal(note, null); // notes are out of scope for the four core flows
+
+    assert.equal(mapLegacyEvents([legacyBreast, legacySleep, { ...legacySleep, id: 'l-note', type: 'note', meta: {} }]).length, 2);
+  });
+
+  await checkAsync('V7. careEventToLegacyEvent preserves what the legacy shape can hold', async () => {
+    const bottle: BottleFeedEvent = {
+      ...careBase({ id: 'c-bottle', clientEventId: 'c-bottle' }),
+      type: 'feed',
+      childId: 'baby-mia',
+      status: 'completed',
+      method: 'bottle',
+      details: { amountMl: 90, milkType: 'formula' },
+    };
+    const bottleBack = careEventToLegacyEvent(bottle);
+    assert.equal(bottleBack.type, 'feed');
+    assert.equal(bottleBack.meta.amountMl, 90);
+    assert.equal(bottleBack.babyId, 'baby-mia');
+
+    const pump: PumpEvent = {
+      ...careBase({ id: 'c-pump', clientEventId: 'c-pump', type: 'pump', childId: null }),
+      type: 'pump',
+      childId: null,
+      subjectUserId: 'cg-mom',
+      details: { side: 'left', leftVolumeMl: 50, rightVolumeMl: null },
+    };
+    assert.equal(careEventToLegacyEvent(pump).meta.side, 'L');
+    assert.equal(careEventToLegacyEvent(pump).babyId, ''); // childId null → placeholder (lossy)
+
+    const diaperDry: DiaperEvent = {
+      ...careBase({ id: 'c-dry', clientEventId: 'c-dry', type: 'diaper' }),
+      type: 'diaper',
+      childId: 'baby-mia',
+      status: 'completed',
+      details: { kind: 'dry' },
+    };
+    assert.equal(careEventToLegacyEvent(diaperDry).meta.kind, undefined); // 'dry' has no legacy kind
+  });
+
+  await checkAsync('V8. logging snapshot serialize → parse round-trips events + queue; bad input degrades safely', async () => {
+    const snapshot = { events: [makeDiaper('evt-d1', 'cid-d1')], syncQueue: ['evt-d1'] };
+    const restored = parseLoggingSnapshot(serializeLoggingSnapshot(snapshot));
+    assert.ok(restored && restored.events.length === 1);
+    assert.deepEqual(restored?.syncQueue, ['evt-d1']);
+    assert.equal(parseLoggingSnapshot(null), null);
+    assert.equal(parseLoggingSnapshot('not json {'), null);
+    // a malformed row is dropped rather than failing the whole load
+    const partial = parseLoggingSnapshot(JSON.stringify({ events: [{ id: 'x' }], syncQueue: [] }));
+    assert.ok(partial && partial.events.length === 0);
+  });
+
+  await checkAsync('V9. loggingV2 flag honors a runtime override and resolves as a flag set', async () => {
+    resetLoggingFlags();
+    assert.equal(typeof isLoggingV2Enabled(), 'boolean');
+    setLoggingV2Enabled(true);
+    assert.equal(isLoggingV2Enabled(), true);
+    assert.equal(resolveLoggingFlags().loggingV2, true);
+    setLoggingV2Enabled(false);
+    assert.equal(isLoggingV2Enabled(), false);
+    resetLoggingFlags();
+  });
+
+  // W. Active-session model + timestamp-based timers (plan §1.3, §6, Phase 4) —
+  // session math, selectors, store transitions, hydration, foreground reconcile.
+  const scope = { familyId: 'fam-1', childId: 'baby-mia', userId: 'cg-mom' };
+
+  await checkAsync('W1. elapsedMs uses now for a running session, endedAt for a completed one, and clamps a reversed range to 0', async () => {
+    assert.equal(elapsedMs(iso(NOW), null, NOW + 42 * 60_000), 42 * 60_000); // running → now − start
+    assert.equal(elapsedMs(iso(NOW), iso(NOW + 10 * 60_000), NOW + 99_000_000), 10 * 60_000); // completed → fixed span
+    assert.equal(elapsedMs(iso(NOW), null, NOW - 60_000), 0); // backwards clock clamps to 0
+    assert.equal(sessionElapsedMs(makeSleep('s', 'cs', 'active'), NOW + 60_000), 60_000);
+    assert.equal(sessionElapsedMs(makeDiaper('d', 'cd'), NOW + 60_000), 0); // instant event → no duration
+  });
+
+  await checkAsync('W2. isReversedRange flags a backwards clock but not a normal running session', async () => {
+    assert.equal(isReversedRange(iso(NOW), null, NOW + 60_000), false);
+    assert.equal(isReversedRange(iso(NOW), null, NOW - 60_000), true);
+    assert.equal(isReversedRange(iso(NOW), iso(NOW - 1), NOW), true);
+  });
+
+  await checkAsync('W3. breastSegmentTotals sums per side and counts the open segment up to now', async () => {
+    const segments: BreastSideSegment[] = [
+      { id: 'g1', side: 'left', startedAt: iso(NOW), endedAt: iso(NOW + 5 * 60_000) },
+      { id: 'g2', side: 'right', startedAt: iso(NOW + 5 * 60_000), endedAt: iso(NOW + 8 * 60_000) },
+      { id: 'g3', side: 'left', startedAt: iso(NOW + 8 * 60_000), endedAt: null }, // still running
+    ];
+    const totals = breastSegmentTotals(segments, NOW + 10 * 60_000); // 2 more min on the open left
+    assert.equal(totals.totalLeftMs, (5 + 2) * 60_000); // 5m closed + 2m open
+    assert.equal(totals.totalRightMs, 3 * 60_000);
+  });
+
+  await checkAsync('W4. duration formatters render stopwatch and compact text', async () => {
+    assert.equal(formatClock(0), '0:00');
+    assert.equal(formatClock(16 * 60_000 + 24_000), '16:24');
+    assert.equal(formatClock(9 * 60_000 + 4_000), '9:04');
+    assert.equal(formatClock(3_723_000), '01:02:03'); // 1h 2m 3s
+    assert.equal(formatClock(42 * 60_000 + 18_000, { alwaysHours: true }), '00:42:18');
+    assert.equal(formatCompactDuration(0), '0m');
+    assert.equal(formatCompactDuration(9 * 60_000), '9m');
+    assert.equal(formatCompactDuration(84 * 60_000), '1h 24m');
+    assert.equal(formatCompactDuration(60 * 60_000), '1h');
+  });
+
+  await checkAsync('W5. selectors pick the active session of each kind; pump is scoped to the caregiver', async () => {
+    const events = [
+      makeSleep('s1', 'cs1', 'active'),
+      makeSleep('s2', 'cs2', 'completed'),
+      makeBreast('b1', 'cb1', 'active'),
+      makePump('p1', 'cp1', 'cg-mom'),
+      makePump('p2', 'cp2', 'cg-dad'),
+    ];
+    assert.equal(selectActiveSleep(events)?.id, 's1');
+    assert.equal(selectActiveBreastFeed(events)?.id, 'b1');
+    assert.equal(selectActivePump(events, 'cg-dad')?.id, 'p2'); // caregiver-scoped, not child-scoped
+    assert.equal(selectActivePump(events, 'cg-nobody'), null);
+  });
+
+  await checkAsync('W6. hydrateLoggingState restores active timers from timestamps and survives a restart', async () => {
+    const port = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(port, clock);
+    await repo.createEvent(makeSleep('evt-s1', 'cid-s1', 'active'));
+    await repo.createEvent(makeDiaper('evt-d1', 'cid-d1'));
+    clock.advance(42 * 60_000); // 42 minutes pass with the session running
+
+    const state = await hydrateLoggingState(repo, scope, clock);
+    assert.equal(state.hydrated, true);
+    assert.equal(state.error, null);
+    assert.equal(state.activeSleep?.id, 'evt-s1');
+    assert.equal(state.activeBreastFeed, null);
+    assert.equal(state.activePump, null);
+    assert.equal(state.todayEvents.length, 2); // active sleep + diaper both in today's window
+    assert.ok(state.activeSleep);
+    if (state.activeSleep) {
+      // Duration is recomputed from the stored startedAt — no persisted counter.
+      assert.equal(sessionElapsedMs(state.activeSleep, clock.now()), 42 * 60_000);
+    }
+
+    // Simulate a full app restart: a brand-new repository over the SAME persisted store.
+    const restarted = await hydrateLoggingState(createLoggingRepository(port, clock), scope, clock);
+    assert.equal(restarted.activeSleep?.id, 'evt-s1'); // session survived the restart
+  });
+
+  await checkAsync('W7. reconcileLoggingState drops a session finished elsewhere and flags a backwards clock', async () => {
+    const port = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(port, clock);
+    await repo.createEvent(makeSleep('evt-s1', 'cid-s1', 'active'));
+    const hydrated = await hydrateLoggingState(repo, scope, clock);
+    assert.equal(hydrated.activeSleep?.id, 'evt-s1');
+
+    // The session is finished on another device.
+    clock.advance(30 * 60_000);
+    await repo.updateEvent({
+      ...makeSleep('evt-s1', 'cid-s1', 'active'),
+      status: 'completed',
+      endedAt: iso(clock.now()),
+    });
+    const reconciled = await reconcileLoggingState(repo, scope, clock, hydrated);
+    assert.equal(reconciled.activeSleep, null); // no longer active
+    assert.ok(reconciled.todayEvents.some((e) => e.id === 'evt-s1')); // completed event stays in the timeline
+
+    // A backwards clock (now before the active start) surfaces a recover/error state.
+    const clock2 = createManualClock(NOW);
+    const repo2 = createLoggingRepository(createInMemoryLoggingPersistence(), clock2);
+    await repo2.createEvent(makeSleep('evt-s9', 'cid-s9', 'active')); // startedAt = NOW
+    clock2.set(NOW - 60_000); // clock jumps backwards before the session start
+    const anomalous = await hydrateLoggingState(repo2, scope, clock2);
+    assert.equal(anomalous.activeSleep?.id, 'evt-s9'); // session still present (real, stored data)
+    assert.equal(anomalous.error?.code, 'started_in_future'); // but flagged for a recover prompt
+  });
+
+  await checkAsync('W8. store transitions are pure (no input mutation) and the initial state is empty', async () => {
+    const s0 = createInitialLoggingState();
+    assert.equal(s0.hydrated, false);
+    assert.deepEqual(s0.todayEvents, []);
+    assert.equal(s0.activeSleep, null);
+
+    const s1 = applyTodayEvents(s0, [makeDiaper('d', 'cd')]);
+    assert.equal(s0.todayEvents.length, 0); // input unchanged
+    assert.equal(s1.todayEvents.length, 1);
+    assert.notEqual(s0, s1);
+
+    const s2 = applyActiveSessions(
+      s1,
+      [makeSleep('s', 'cs', 'active'), makePump('p', 'cp', 'cg-mom')],
+      'cg-mom',
+    );
+    assert.equal(s2.activeSleep?.id, 's');
+    assert.equal(s2.activePump?.id, 'p');
+    assert.equal(selectIsAnySessionActive(s2), true);
+    assert.equal(selectIsAnySessionActive(s1), false);
+
+    const s3 = withError(s2, loggingError('invalid_diaper_kind', 'x'));
+    assert.equal(s3.error?.code, 'invalid_diaper_kind');
+    assert.equal(s2.error, null); // input unchanged
+    assert.equal(clearError(s3).error, null);
+  });
+
+  // X. Feed use-cases (plan Phase 3 Bottle + Phase 5 Breast, task 05). Run over a
+  // fresh in-memory repo + a fake clock, with a fixed actor/scope.
+  const actor: LoggingActor = { familyId: 'fam-1', childId: 'baby-mia', userId: 'cg-mom' };
+  const feedScope = { familyId: 'fam-1', childId: 'baby-mia', userId: 'cg-mom' };
+  const newFeedDeps = () => {
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(createInMemoryLoggingPersistence(), clock);
+    return { repo, clock, deps: { repo, clock, actor } };
+  };
+  const activeBreast = async (repo: ReturnType<typeof createLoggingRepository>) =>
+    selectActiveBreastFeed(await repo.getActiveSessions(feedScope));
+
+  await checkAsync('X1. saveBottleFeed 120 + breast milk creates one completed bottle event', async () => {
+    const { repo, deps } = newFeedDeps();
+    const r = await saveBottleFeed(deps, { amountMl: 120, milkType: 'breast_milk' });
+    assert.ok(r.ok);
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.length, 1);
+    const e = today[0];
+    assert.ok(isBottleFeed(e) && e.details.amountMl === 120 && e.details.milkType === 'breast_milk');
+    assert.equal(e.status, 'completed');
+    assert.equal(e.startedAt, null); // bottle is an instant event, never a session
+  });
+
+  await checkAsync('X2. saveBottleFeed amount 0 is rejected and saves nothing', async () => {
+    const { repo, deps } = newFeedDeps();
+    const r = await saveBottleFeed(deps, { amountMl: 0, milkType: 'formula' });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.error.code, 'invalid_bottle_amount');
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.length, 0);
+  });
+
+  await checkAsync('X3. double saveBottleFeed with the same clientEventId creates one event', async () => {
+    const { repo, deps } = newFeedDeps();
+    const cid = 'cid-bottle-x3';
+    await saveBottleFeed(deps, { amountMl: 90, milkType: 'formula', clientEventId: cid });
+    await saveBottleFeed(deps, { amountMl: 90, milkType: 'formula', clientEventId: cid });
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.length, 1);
+  });
+
+  await checkAsync('X4. startBreastFeed Left creates one open left segment on an active session', async () => {
+    const { repo, deps } = newFeedDeps();
+    const r = await startBreastFeed(deps, { side: 'left' });
+    assert.ok(r.ok);
+    const breast = await activeBreast(repo);
+    assert.ok(breast && breast.status === 'active');
+    assert.equal(breast.details.activeSide, 'left');
+    assert.equal(breast.details.segments.length, 1);
+    assert.equal(breast.details.segments[0].side, 'left');
+    assert.equal(breast.details.segments[0].endedAt, null);
+  });
+
+  await checkAsync('X5. Start Left → +5m switch Right → +3m finish gives Left 5m / Right 3m', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps, { side: 'left' })).ok);
+    clock.advance(5 * 60_000);
+    const open1 = await activeBreast(repo);
+    assert.ok(open1);
+    assert.ok((await switchBreastSide(deps, { event: open1, side: 'right' })).ok);
+    clock.advance(3 * 60_000);
+    const open2 = await activeBreast(repo);
+    assert.ok(open2);
+    const fin = await finishBreastFeed(deps, { event: open2 });
+    assert.ok(fin.ok);
+    if (fin.ok) {
+      assert.equal(fin.event.status, 'completed');
+      assert.equal(fin.event.details.activeSide, null);
+      assert.notEqual(fin.event.endedAt, null);
+      assert.equal(fin.event.details.totalLeftMs, 5 * 60_000);
+      assert.equal(fin.event.details.totalRightMs, 3 * 60_000);
+    }
+    // No longer active; the completed feed is in today's timeline.
+    assert.equal(await activeBreast(repo), null);
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.ok(today.some((e) => isBreastFeed(e) && e.status === 'completed'));
+  });
+
+  await checkAsync('X6. multiple side switches sum correctly (L 4m / R 2m)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps, { side: 'left' })).ok);
+    clock.advance(2 * 60_000);
+    assert.ok((await switchBreastSide(deps, { event: (await activeBreast(repo))!, side: 'right' })).ok);
+    clock.advance(2 * 60_000);
+    assert.ok((await switchBreastSide(deps, { event: (await activeBreast(repo))!, side: 'left' })).ok);
+    clock.advance(2 * 60_000);
+    const fin = await finishBreastFeed(deps, { event: (await activeBreast(repo))! });
+    assert.ok(fin.ok);
+    if (fin.ok) {
+      assert.equal(fin.event.details.totalLeftMs, 4 * 60_000);
+      assert.equal(fin.event.details.totalRightMs, 2 * 60_000);
+    }
+  });
+
+  await checkAsync('X7. a second Start returns the existing session and never creates a duplicate', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps, { side: 'left' })).ok);
+    const r2 = await startBreastFeed(deps, { side: 'right' });
+    assert.ok(r2.ok && r2.resumed === true);
+    if (r2.ok) assert.equal(r2.event.details.activeSide, 'left'); // the original, not a new right one
+    const active = await repo.getActiveSessions(feedScope);
+    assert.equal(active.filter(isBreastFeed).length, 1);
+  });
+
+  await checkAsync('X8. hydration restores the active breast side after a restart', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    assert.ok((await startBreastFeed({ repo, clock, actor }, { side: 'right' })).ok);
+    clock.advance(4 * 60_000);
+    // "Restart": a fresh repository over the same persisted snapshot.
+    const repo2 = createLoggingRepository(persistence, clock);
+    const state = await hydrateLoggingState(repo2, feedScope, clock);
+    assert.ok(state.activeBreastFeed);
+    assert.equal(state.activeBreastFeed?.details.activeSide, 'right');
+  });
+
+  await checkAsync('X9. switching to the already-active side is a no-op', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps, { side: 'left' })).ok);
+    const r = await switchBreastSide(deps, { event: (await activeBreast(repo))!, side: 'left' });
+    assert.ok(r.ok && r.noop === true);
+    const breast = await activeBreast(repo);
+    assert.equal(breast?.details.segments.length, 1); // not split into two
+  });
+
+  await checkAsync('X10. cancel discards the session — never active, never in the timeline', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps, { side: 'left' })).ok);
+    await cancelBreastFeed(deps, { event: (await activeBreast(repo))! });
+    assert.equal(await activeBreast(repo), null);
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.ok(!today.some((e) => isBreastFeed(e)));
+  });
+
+  // Y. Sleep use-cases (plan Phase 6, task 06). Same in-memory repo + fake clock +
+  // actor/scope as the Feed checks above. A sleep is one active session per child,
+  // with durations derived from timestamps — never a hardcoded finalize.
+  const activeSleepOf = async (repo: ReturnType<typeof createLoggingRepository>) =>
+    selectActiveSleep(await repo.getActiveSessions(feedScope));
+
+  await checkAsync('Y1. startSleep creates one active sleep with startedAt set and no endedAt', async () => {
+    const { repo, deps } = newFeedDeps();
+    const r = await startSleep(deps, {});
+    assert.ok(r.ok);
+    const sleep = await activeSleepOf(repo);
+    assert.ok(sleep && sleep.status === 'active');
+    assert.notEqual(sleep.startedAt, null);
+    assert.equal(sleep.endedAt, null);
+  });
+
+  await checkAsync('Y2. Start now → finish after 40m gives a completed 40-minute sleep in the timeline', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    clock.advance(40 * 60_000);
+    const open = await activeSleepOf(repo);
+    assert.ok(open);
+    const fin = await finishSleep(deps, { event: open });
+    assert.ok(fin.ok);
+    if (fin.ok) {
+      assert.equal(fin.event.status, 'completed');
+      assert.notEqual(fin.event.endedAt, null);
+      assert.equal(sessionElapsedMs(fin.event, clock.now()), 40 * 60_000);
+    }
+    assert.equal(await activeSleepOf(repo), null);
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.ok(today.some((e) => isSleepEvent(e) && e.status === 'completed'));
+  });
+
+  await checkAsync('Y3. Started 5m earlier → finish after 20m totals 25 minutes', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    const startedAt = new Date(NOW - 5 * 60_000).toISOString();
+    assert.ok((await startSleep(deps, { startedAt })).ok);
+    clock.advance(20 * 60_000);
+    const open = await activeSleepOf(repo);
+    assert.ok(open);
+    const fin = await finishSleep(deps, { event: open });
+    assert.ok(fin.ok);
+    if (fin.ok) assert.equal(sessionElapsedMs(fin.event, clock.now()), 25 * 60_000);
+  });
+
+  await checkAsync('Y4. a second startSleep returns the existing session and never creates a duplicate', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    const r2 = await startSleep(deps, {});
+    assert.ok(r2.ok && r2.resumed === true);
+    const active = await repo.getActiveSessions(feedScope);
+    assert.equal(active.filter(isSleepEvent).length, 1);
+  });
+
+  await checkAsync('Y5. finishSleep with endedAt before startedAt is rejected and persists nothing', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok); // startedAt = NOW
+    const open = await activeSleepOf(repo);
+    assert.ok(open);
+    const r = await finishSleep(deps, { event: open, at: new Date(NOW - 60_000).toISOString() });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.error.code, 'invalid_session_range');
+    const stillActive = await activeSleepOf(repo);
+    assert.ok(stillActive && stillActive.status === 'active'); // unchanged
+  });
+
+  await checkAsync('Y6. cancelSleep discards the session — never active, never in the timeline', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    await cancelSleep(deps, { event: (await activeSleepOf(repo))! });
+    assert.equal(await activeSleepOf(repo), null);
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.ok(!today.some((e) => isSleepEvent(e)));
+  });
+
+  await checkAsync('Y7. hydration restores the active sleep after a restart', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    assert.ok((await startSleep({ repo, clock, actor }, {})).ok);
+    clock.advance(10 * 60_000);
+    // "Restart": a fresh repository over the same persisted snapshot.
+    const repo2 = createLoggingRepository(persistence, clock);
+    const state = await hydrateLoggingState(repo2, feedScope, clock);
+    assert.ok(state.activeSleep);
+    assert.equal(state.activeSleep?.status, 'active');
+  });
+
+  await checkAsync('Y8. saveCompletedSleep logs a completed sleep without a timer; a future start is rejected', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    const r = await saveCompletedSleep(deps, {
+      startedAt: new Date(NOW - 30 * 60_000).toISOString(),
+      endedAt: new Date(NOW).toISOString(),
+    });
+    assert.ok(r.ok);
+    if (r.ok) {
+      assert.equal(r.event.status, 'completed');
+      assert.equal(sessionElapsedMs(r.event, clock.now()), 30 * 60_000);
+    }
+    assert.equal(await activeSleepOf(repo), null); // never an active session
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.ok(today.some((e) => isSleepEvent(e) && e.status === 'completed'));
+    const bad = await saveCompletedSleep(deps, {
+      startedAt: new Date(NOW + 60 * 60_000).toISOString(),
+      endedAt: new Date(NOW + 90 * 60_000).toISOString(),
+    });
+    assert.equal(bad.ok, false);
+    if (!bad.ok) assert.equal(bad.error.code, 'started_in_future');
+  });
+
+  // Z. Diaper use-case (plan Phase 2 / §11.1, task 07). The simplest flow: an
+  // INSTANT log, never an active session — created `completed` with
+  // `occurredAt = now` and no timer — that a single tap saves (two taps total:
+  // Diaper → Wet). Same in-memory repo + fake clock + actor/scope as above.
+  await checkAsync('Z1. saveDiaper("wet") creates one completed wet diaper with no timer, in the timeline', async () => {
+    const { repo, deps } = newFeedDeps();
+    const r = await saveDiaper(deps, { kind: 'wet' });
+    assert.ok(r.ok);
+    if (r.ok) {
+      assert.equal(r.event.type, 'diaper');
+      assert.equal(r.event.status, 'completed');
+      assert.equal(r.event.details.kind, 'wet');
+      assert.notEqual(r.event.occurredAt, null);
+      assert.equal(r.event.startedAt, null); // instant — no session
+      assert.equal(r.event.endedAt, null);
+    }
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.filter(isDiaperEvent).length, 1);
+  });
+
+  await checkAsync('Z2. every kind — wet / dirty / both / dry — creates a diaper of that exact kind', async () => {
+    for (const kind of ['wet', 'dirty', 'both', 'dry'] as const) {
+      const { repo, deps } = newFeedDeps();
+      const r = await saveDiaper(deps, { kind });
+      assert.ok(r.ok, `kind ${kind} should save`);
+      if (r.ok) assert.equal(r.event.details.kind, kind);
+      const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+      assert.ok(today.some((e) => isDiaperEvent(e) && e.details.kind === kind));
+    }
+  });
+
+  await checkAsync('Z3. an unknown diaper kind is rejected and persists nothing', async () => {
+    const { repo, deps } = newFeedDeps();
+    // The use-case input is typed; cast through to exercise the runtime validator.
+    const r = await saveDiaper(deps, { kind: 'soaked' as unknown as DiaperEvent['details']['kind'] });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.error.code, 'invalid_diaper_kind');
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.filter(isDiaperEvent).length, 0);
+  });
+
+  await checkAsync('Z4. a double saveDiaper with the same clientEventId creates exactly one event', async () => {
+    const { repo, deps } = newFeedDeps();
+    const cid = 'diaper-dup-1';
+    assert.ok((await saveDiaper(deps, { kind: 'dirty', clientEventId: cid })).ok);
+    assert.ok((await saveDiaper(deps, { kind: 'dirty', clientEventId: cid })).ok);
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.filter(isDiaperEvent).length, 1);
+  });
+
+  await checkAsync('Z5. a logged diaper is never an active session', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await saveDiaper(deps, { kind: 'both' })).ok);
+    const active = await repo.getActiveSessions(feedScope);
+    assert.equal(active.filter(isDiaperEvent).length, 0);
+  });
+
+  await checkAsync('Z6. a logged diaper survives a restart (offline-safe, plan Phase 2 acceptance)', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    assert.ok((await saveDiaper({ repo, clock, actor }, { kind: 'dry' })).ok);
+    // "Restart": a fresh repository over the same persisted snapshot.
+    const repo2 = createLoggingRepository(persistence, clock);
+    const state = await hydrateLoggingState(repo2, feedScope, clock);
+    const restored = state.todayEvents.filter(isDiaperEvent);
+    assert.equal(restored.length, 1);
+    assert.equal(restored[0].details.kind, 'dry');
+  });
+
+  // AA. Pump use-cases (plan Phase 7 / §11.1, task 08). The most stateful flow:
+  // a CAREGIVER-scoped session whose finished timer becomes a persisted volume
+  // draft (an `active` event with `endedAt` set) that survives sheet close +
+  // restart, then completes with an OPTIONAL per-side volume. Same in-memory repo
+  // + fake clock + actor/scope as above.
+  const activePumpOf = async (repo: ReturnType<typeof createLoggingRepository>) =>
+    selectActivePump(await repo.getActiveSessions(feedScope), 'cg-mom');
+
+  await checkAsync('AA1. startPump(both) creates one active pump scoped to the caregiver, with no endedAt', async () => {
+    const { repo, deps } = newFeedDeps();
+    const r = await startPump(deps, { side: 'both' });
+    assert.ok(r.ok);
+    const pump = await activePumpOf(repo);
+    assert.ok(pump && isPumpEvent(pump) && pump.status === 'active');
+    assert.equal(pump.subjectUserId, 'cg-mom'); // pump belongs to the caregiver (plan §4.4)
+    assert.equal(pump.details.side, 'both');
+    assert.equal(pump.endedAt, null); // running — not yet a draft
+    assert.equal(pump.details.leftVolumeMl, null);
+    assert.equal(pump.details.rightVolumeMl, null);
+  });
+
+  await checkAsync('AA2. a second startPump returns the existing session and never creates a duplicate', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'left' })).ok);
+    const r2 = await startPump(deps, { side: 'right' });
+    assert.ok(r2.ok && r2.resumed === true);
+    if (r2.ok) assert.equal(r2.event.details.side, 'left'); // the original, not a new right one
+    const active = await repo.getActiveSessions(feedScope);
+    assert.equal(active.filter(isPumpEvent).length, 1);
+  });
+
+  await checkAsync('AA3. finishPump sets endedAt + a fixed duration but keeps the session active (a volume draft, not completed)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'both' })).ok);
+    clock.advance(18 * 60_000);
+    const open = await activePumpOf(repo);
+    assert.ok(open);
+    const fin = await finishPump(deps, { event: open });
+    assert.ok(fin.ok);
+    if (fin.ok) {
+      assert.equal(fin.event.status, 'active'); // NOT completed yet (plan Phase 7.2)
+      assert.notEqual(fin.event.endedAt, null);
+      assert.equal(sessionElapsedMs(fin.event, clock.now()), 18 * 60_000); // fixed once finished
+    }
+    // The store turns the finished-but-active pump into a volume draft.
+    const state = await hydrateLoggingState(repo, feedScope, clock);
+    assert.ok(state.pumpVolumeDraft);
+    assert.equal(state.pumpVolumeDraft?.side, 'both');
+    assert.ok(state.activePump); // full event still held so the provider can complete it
+  });
+
+  await checkAsync('AA4. Both + savePump 50/60 ml completes the pump; the 110 ml total is derived in a selector', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'both' })).ok);
+    clock.advance(10 * 60_000);
+    await finishPump(deps, { event: (await activePumpOf(repo))! });
+    const draftEvent = (await activePumpOf(repo))!;
+    const r = await savePump(deps, { event: draftEvent, leftVolumeMl: 50, rightVolumeMl: 60 });
+    assert.ok(r.ok);
+    if (r.ok) {
+      assert.equal(r.event.status, 'completed');
+      assert.equal(r.event.details.leftVolumeMl, 50);
+      assert.equal(r.event.details.rightVolumeMl, 60);
+      assert.equal(pumpTotalVolumeMl(r.event.details), 110); // derived, not stored (plan §7.3)
+    }
+    assert.equal(await activePumpOf(repo), null); // no longer active or a draft
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.ok(today.some((e) => isPumpEvent(e) && e.status === 'completed'));
+  });
+
+  await checkAsync('AA5. Save without volume stores null volumes and a valid duration-only record', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'left' })).ok);
+    clock.advance(12 * 60_000);
+    await finishPump(deps, { event: (await activePumpOf(repo))! });
+    const draftEvent = (await activePumpOf(repo))!;
+    const r = await savePump(deps, { event: draftEvent, leftVolumeMl: null, rightVolumeMl: null });
+    assert.ok(r.ok);
+    if (r.ok) {
+      assert.equal(r.event.status, 'completed');
+      assert.equal(r.event.details.leftVolumeMl, null);
+      assert.equal(r.event.details.rightVolumeMl, null);
+      assert.equal(pumpTotalVolumeMl(r.event.details), 0);
+      assert.equal(sessionElapsedMs(r.event, clock.now()), 12 * 60_000); // duration preserved
+    }
+  });
+
+  await checkAsync('AA6. a single-side pump cannot record the other side’s volume (rejected, draft unchanged)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'left' })).ok);
+    clock.advance(5 * 60_000);
+    await finishPump(deps, { event: (await activePumpOf(repo))! });
+    const draftEvent = (await activePumpOf(repo))!;
+    const r = await savePump(deps, { event: draftEvent, leftVolumeMl: 40, rightVolumeMl: 50 });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.error.code, 'invalid_pump_volumes');
+    const stillDraft = await activePumpOf(repo);
+    assert.ok(stillDraft && stillDraft.status === 'active'); // unchanged (still a draft)
+  });
+
+  await checkAsync('AA7. the finished volume draft survives a restart (hydration restores it from the persisted session)', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    assert.ok((await startPump({ repo, clock, actor }, { side: 'both' })).ok);
+    clock.advance(18 * 60_000);
+    await finishPump({ repo, clock, actor }, { event: (await activePumpOf(repo))! });
+    // "Restart": a fresh repository over the same persisted snapshot.
+    const repo2 = createLoggingRepository(persistence, clock);
+    const state = await hydrateLoggingState(repo2, feedScope, clock);
+    assert.ok(state.pumpVolumeDraft); // draft not lost on restart (plan Phase 7.2 acceptance)
+    assert.equal(state.pumpVolumeDraft?.side, 'both');
+    assert.equal(sessionElapsedMs(state.activePump!, clock.now()), 18 * 60_000);
+  });
+
+  await checkAsync('AA8. cancelPump discards the session — never active, never in the timeline', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'right' })).ok);
+    await cancelPump(deps, { event: (await activePumpOf(repo))! });
+    assert.equal(await activePumpOf(repo), null);
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.ok(!today.some((e) => isPumpEvent(e)));
+  });
+
+  await checkAsync('AA9. a pump does not block an active sleep — both sessions coexist (plan Phase 7 acceptance)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    assert.ok((await startPump(deps, { side: 'both' })).ok);
+    const state = await hydrateLoggingState(repo, feedScope, clock);
+    assert.ok(state.activeSleep);
+    assert.ok(state.activePump);
+  });
+
+  /* ---------------------------------------------------------------- *
+   * Task 09 — Today timeline integration: the pure §7.4 timeline
+   * formatter + §7.1 quick-log subtitle selectors + the status strip.
+   * Fixtures are built through the real use-cases, then read back.
+   * ---------------------------------------------------------------- */
+
+  await checkAsync('BB1. formatTimelineEvent renders instant events: bottle + diaper (plan §7.4)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    await saveBottleFeed(deps, { amountMl: 120, milkType: 'breast_milk' });
+    await saveDiaper(deps, { kind: 'wet' });
+    const state = await hydrateLoggingState(repo, feedScope, clock);
+    const bottle = state.todayEvents.find((e) => isBottleFeed(e))!;
+    const diaper = state.todayEvents.find((e) => isDiaperEvent(e))!;
+    const b = formatTimelineEvent(bottle, clock.now());
+    assert.equal(b.title, 'Bottle');
+    assert.equal(b.subtitle, '120 ml · breast milk');
+    assert.equal(b.icon, 'feed');
+    assert.ok(typeof b.tint === 'string' && b.tint.length > 0); // §7.4 tint present
+    const d = formatTimelineEvent(diaper, clock.now());
+    assert.equal(d.title, 'Diaper');
+    assert.equal(d.subtitle, 'wet');
+    assert.equal(d.icon, 'diaper');
+  });
+
+  await checkAsync('BB2. formatTimelineEvent: sleep reads "Sleeping" while active, "Sleep" once completed', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    clock.advance(42 * 60_000);
+    const active = selectActiveSleep(await repo.getActiveSessions(feedScope))!;
+    const a = formatTimelineEvent(active, clock.now());
+    assert.equal(a.title, 'Sleeping');
+    assert.equal(a.subtitle, '42m');
+    assert.equal(a.icon, 'sleep');
+    await finishSleep(deps, { event: active });
+    const done = (await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' })).find((e) => isSleepEvent(e))!;
+    const f = formatTimelineEvent(done, clock.now());
+    assert.equal(f.title, 'Sleep');
+    assert.equal(f.subtitle, '42m'); // fixed at endedAt — no longer ticking
+  });
+
+  await checkAsync('BB3. formatTimelineEvent: breastfeed active vs completed per-side summary', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps, { side: 'right' })).ok);
+    clock.advance(12 * 60_000);
+    const running = (await activeBreast(repo))!;
+    const r = formatTimelineEvent(running, clock.now());
+    assert.equal(r.title, 'Breastfeeding');
+    assert.equal(r.subtitle, '12m · right');
+    // A fresh session: left 5m, switch, right 3m, finish → "5m left · 3m right".
+    const { repo: repo2, clock: clock2, deps: deps2 } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps2, { side: 'left' })).ok);
+    clock2.advance(5 * 60_000);
+    await switchBreastSide(deps2, { event: (await activeBreast(repo2))!, side: 'right' });
+    clock2.advance(3 * 60_000);
+    await finishBreastFeed(deps2, { event: (await activeBreast(repo2))! });
+    const done = (await repo2.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' })).find((e) => isBreastFeed(e))!;
+    const f = formatTimelineEvent(done, clock2.now());
+    assert.equal(f.title, 'Breastfeed');
+    assert.equal(f.subtitle, '5m left · 3m right');
+  });
+
+  await checkAsync('BB4. formatTimelineEvent: pump running → draft → completed (110 ml total)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'both' })).ok);
+    clock.advance(18 * 60_000);
+    const running = (await activePumpOf(repo))!;
+    const r = formatTimelineEvent(running, clock.now());
+    assert.equal(r.title, 'Pumping');
+    assert.equal(r.subtitle, '18m · both');
+    await finishPump(deps, { event: running });
+    const draft = (await activePumpOf(repo))!;
+    const d = formatTimelineEvent(draft, clock.now());
+    assert.equal(d.title, 'Pump');
+    assert.equal(d.subtitle, 'finished · add volume'); // survives close/restart as a draft
+    await savePump(deps, { event: draft, leftVolumeMl: 50, rightVolumeMl: 60 });
+    const done = (await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' })).find((e) => isPumpEvent(e))!;
+    const f = formatTimelineEvent(done, clock.now());
+    assert.equal(f.title, 'Pump');
+    assert.equal(f.subtitle, '110 ml · both'); // derived total, never stored (§7.3)
+  });
+
+  await checkAsync('BB5. buildV2QuickLogSubtitles: active sessions lead in the present tense (plan §7.1)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    assert.ok((await startBreastFeed(deps, { side: 'right' })).ok);
+    assert.ok((await startPump(deps, { side: 'both' })).ok);
+    clock.advance(12 * 60_000);
+    const state = await hydrateLoggingState(repo, feedScope, clock);
+    const subs = buildV2QuickLogSubtitles(state, clock.now());
+    assert.equal(subs.feed, 'Feeding · 12m · right');
+    assert.equal(subs.sleep, 'Sleeping · 12m');
+    assert.equal(subs.pump, 'Pumping · 12m · both');
+  });
+
+  await checkAsync('BB6. buildV2QuickLogSubtitles: pump draft "Finished · add volume", then last-pump line', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'left' })).ok);
+    clock.advance(10 * 60_000);
+    await finishPump(deps, { event: (await activePumpOf(repo))! });
+    let state = await hydrateLoggingState(repo, feedScope, clock);
+    assert.equal(buildV2QuickLogSubtitles(state, clock.now()).pump, 'Finished · add volume');
+    await savePump(deps, { event: (await activePumpOf(repo))!, leftVolumeMl: 90, rightVolumeMl: null });
+    clock.advance(5 * 60_000);
+    state = await hydrateLoggingState(repo, feedScope, clock);
+    assert.equal(buildV2QuickLogSubtitles(state, clock.now()).pump, '5m ago · 90 ml');
+  });
+
+  await checkAsync('BB7. buildV2TonightStatus + idle/awake subtitles (plan §7.1)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    // Empty store → calm prompts + "Awake".
+    let state = await hydrateLoggingState(repo, feedScope, clock);
+    let subs = buildV2QuickLogSubtitles(state, clock.now());
+    assert.equal(subs.feed, 'Tap to log');
+    assert.equal(subs.sleep, 'Tap to start');
+    assert.equal(subs.diaper, 'Tap to log');
+    assert.equal(subs.pump, 'Log pump');
+    let status = buildV2TonightStatus(state, clock.now());
+    assert.deepEqual(status.map((s) => `${s.label}:${s.value}`), ['Last feed:None yet', 'Last diaper:None yet', 'Awake:now']);
+    // Log a diaper, sleep 40m then wake → "Awake for 40m" + diaper "ago".
+    await saveDiaper(deps, { kind: 'dirty' });
+    assert.ok((await startSleep(deps, {})).ok);
+    clock.advance(40 * 60_000);
+    await finishSleep(deps, { event: selectActiveSleep(await repo.getActiveSessions(feedScope))! });
+    clock.advance(10 * 60_000);
+    state = await hydrateLoggingState(repo, feedScope, clock);
+    subs = buildV2QuickLogSubtitles(state, clock.now());
+    assert.equal(subs.sleep, 'Awake for 10m'); // 10m since the sleep ended (not since it started)
+    assert.equal(subs.diaper, '50m ago · dirty');
+    status = buildV2TonightStatus(state, clock.now());
+    assert.equal(status.find((s) => s.key === 'sleep')!.label, 'Awake');
+    assert.equal(status.find((s) => s.key === 'diaper')!.value, '50m ago');
+  });
+
+  /* ---------------------------------------------------------------- *
+   * Task 10 — Undo: record a single live mutation + the calm "saved ·
+   * Undo" toast, and apply the inverse on undo — soft-delete a created
+   * event / restore a finished session (plan §8). The toast copy comes
+   * from the saved event, so it matches the timeline.
+   * ---------------------------------------------------------------- */
+
+  await checkAsync('CC1. undo a created diaper soft-deletes it, enqueues sync, and drops it from the timeline', async () => {
+    const port = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(port, clock);
+    const deps = { repo, clock, actor };
+    const r = await saveDiaper(deps, { kind: 'wet' });
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    const m = buildUndoableMutation({ kind: 'create', eventId: r.event.id, previousSnapshot: null, clock });
+    assert.ok((await undoLoggingMutation(deps, m)).ok);
+    const snap = await port.load();
+    assert.equal(snap.events.find((e) => e.id === r.event.id)!.status, 'deleted');
+    assert.ok(snap.syncQueue.includes(r.event.id)); // undo enters the sync queue (plan §8)
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.ok(!today.some((e) => e.id === r.event.id));
+  });
+
+  await checkAsync('CC2. undo a created bottle removes it from the timeline', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    const r = await saveBottleFeed(deps, { amountMl: 120, milkType: 'formula' });
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    const m = buildUndoableMutation({ kind: 'create', eventId: r.event.id, previousSnapshot: null, clock });
+    assert.ok((await undoLoggingMutation(deps, m)).ok);
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(today.length, 0);
+  });
+
+  await checkAsync('CC3. undo finishing a sleep restores the active session (status active, no endedAt)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    clock.advance(40 * 60_000);
+    const before = selectActiveSleep(await repo.getActiveSessions(feedScope))!;
+    assert.ok((await finishSleep(deps, { event: before })).ok);
+    assert.equal(selectActiveSleep(await repo.getActiveSessions(feedScope)), null); // now completed
+    const m = buildUndoableMutation({ kind: 'finish', eventId: before.id, previousSnapshot: before, clock });
+    assert.ok((await undoLoggingMutation(deps, m)).ok);
+    const restored = selectActiveSleep(await repo.getActiveSessions(feedScope));
+    assert.ok(restored && restored.status === 'active' && restored.endedAt === null);
+  });
+
+  await checkAsync('CC4. undo saving a pump restores the volume draft (active pump with endedAt)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'both' })).ok);
+    clock.advance(18 * 60_000);
+    await finishPump(deps, { event: (await activePumpOf(repo))! });
+    const draft = (await activePumpOf(repo))!;
+    assert.ok((await savePump(deps, { event: draft, leftVolumeMl: 50, rightVolumeMl: 60 })).ok);
+    assert.equal(await activePumpOf(repo), null); // completed — no longer active or a draft
+    const m = buildUndoableMutation({ kind: 'finish', eventId: draft.id, previousSnapshot: draft, clock });
+    assert.ok((await undoLoggingMutation(deps, m)).ok);
+    const restored = await activePumpOf(repo);
+    assert.ok(restored && restored.status === 'active' && restored.endedAt !== null); // the draft is back
+  });
+
+  await checkAsync('CC5. undo-finish is refused when a new active session of the same kind appeared (plan §8)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    clock.advance(30 * 60_000);
+    const before = selectActiveSleep(await repo.getActiveSessions(feedScope))!;
+    assert.ok((await finishSleep(deps, { event: before })).ok);
+    assert.ok((await startSleep(deps, {})).ok); // a fresh sleep starts before undo
+    const m = buildUndoableMutation({ kind: 'finish', eventId: before.id, previousSnapshot: before, clock });
+    const u = await undoLoggingMutation(deps, m);
+    assert.equal(u.ok, false);
+    if (!u.ok) assert.equal(u.error.code, 'undo_conflict');
+  });
+
+  await checkAsync('CC6. formatLoggingToast reads the saved event: diaper / bottle / sleep / pump', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    await saveDiaper(deps, { kind: 'wet' });
+    await saveBottleFeed(deps, { amountMl: 120, milkType: 'breast_milk' });
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(formatLoggingToast(today.find(isDiaperEvent)!, clock.now()), 'Diaper logged · wet');
+    assert.equal(formatLoggingToast(today.find(isBottleFeed)!, clock.now()), 'Feed logged · 120 ml');
+    // Sleep (40m) + pump (both, 110 ml) on a fresh store.
+    const { repo: r2, clock: c2, deps: d2 } = newFeedDeps();
+    assert.ok((await startSleep(d2, {})).ok);
+    c2.advance(40 * 60_000);
+    const fin = await finishSleep(d2, { event: selectActiveSleep(await r2.getActiveSessions(feedScope))! });
+    assert.ok(fin.ok);
+    if (fin.ok) assert.equal(formatLoggingToast(fin.event, c2.now()), 'Sleep logged · 40m');
+    assert.ok((await startPump(d2, { side: 'both' })).ok);
+    c2.advance(5 * 60_000);
+    await finishPump(d2, { event: (await activePumpOf(r2))! });
+    const sv = await savePump(d2, { event: (await activePumpOf(r2))!, leftVolumeMl: 50, rightVolumeMl: 60 });
+    assert.ok(sv.ok);
+    if (sv.ok) assert.equal(formatLoggingToast(sv.event, c2.now()), 'Pump saved · 110 ml');
+  });
+
+  await checkAsync('CC7. buildUndoableMutation mints a fresh id + future expiry; a create carries no snapshot', async () => {
+    const clock = createManualClock(NOW);
+    const a = buildUndoableMutation({ kind: 'create', eventId: 'e1', previousSnapshot: null, clock });
+    assert.equal(a.kind, 'create');
+    assert.equal(a.eventId, 'e1');
+    assert.equal(a.previousSnapshot, null);
+    assert.ok(typeof a.mutationId === 'string' && a.mutationId.length > 0);
+    assert.ok(Date.parse(a.expiresAt) > clock.now()); // expires in the future
+    const b = buildUndoableMutation({ kind: 'create', eventId: 'e1', previousSnapshot: null, clock });
+    assert.notEqual(a.mutationId, b.mutationId); // a new action replaces the previous undo context
+  });
+
+  /* ---------------------------------------------------------------- *
+   * Task 11 — active-session recovery after app restart (plan §6
+   * AppState, Phase 4/6.5/7.2 acceptance, §11.2 integration). Each check
+   * drives a real use-case, simulates a force-close by building a FRESH
+   * repository over the SAME persisted snapshot, hydrates, and asserts the
+   * recovered state. There is no persisted counter — every duration is
+   * recomputed from the stored `startedAt`/`endedAt` against the clock.
+   * ---------------------------------------------------------------- */
+
+  await checkAsync('DD1. finish a session → app restart → the completed event remains in the timeline (plan §11.2)', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    assert.ok((await startSleep({ repo, clock, actor }, {})).ok);
+    clock.advance(40 * 60_000);
+    const running = selectActiveSleep(await repo.getActiveSessions(feedScope))!;
+    assert.ok((await finishSleep({ repo, clock, actor }, { event: running })).ok);
+
+    // Force-close + relaunch: a brand-new repository over the same persisted snapshot.
+    const state = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    assert.equal(state.activeSleep, null); // no longer an active session
+    const sleep = state.todayEvents.find(isSleepEvent);
+    assert.ok(sleep && sleep.status === 'completed'); // the completed event survived the restart
+    const view = formatTimelineEvent(sleep!, clock.now());
+    assert.equal(view.title, 'Sleep');
+    assert.equal(view.subtitle, '40m'); // final duration is fixed (from endedAt), not recomputed to "now"
+  });
+
+  await checkAsync('DD2. a running breast + pump session reopens with the correct elapsed time after a restart (plan Phase 4)', async () => {
+    // Breastfeeding: start Left, 9 minutes pass, then force-close.
+    const breastStore = createInMemoryLoggingPersistence();
+    const breastClock = createManualClock(NOW);
+    const breastRepo = createLoggingRepository(breastStore, breastClock);
+    assert.ok((await startBreastFeed({ repo: breastRepo, clock: breastClock, actor }, { side: 'left' })).ok);
+    breastClock.advance(9 * 60_000);
+    const breastState = await hydrateLoggingState(
+      createLoggingRepository(breastStore, breastClock),
+      feedScope,
+      breastClock,
+    );
+    assert.ok(breastState.activeBreastFeed);
+    assert.equal(breastState.activeBreastFeed?.details.activeSide, 'left'); // active side restored
+    const totals = breastSegmentTotals(breastState.activeBreastFeed!.details.segments, breastClock.now());
+    assert.equal(totals.totalLeftMs, 9 * 60_000); // recomputed from the open segment — no stored counter
+
+    // Pump: start Both, 18 minutes pass (still running, NOT finished), then force-close.
+    const pumpStore = createInMemoryLoggingPersistence();
+    const pumpClock = createManualClock(NOW);
+    const pumpRepo = createLoggingRepository(pumpStore, pumpClock);
+    assert.ok((await startPump({ repo: pumpRepo, clock: pumpClock, actor }, { side: 'both' })).ok);
+    pumpClock.advance(18 * 60_000);
+    const pumpState = await hydrateLoggingState(createLoggingRepository(pumpStore, pumpClock), feedScope, pumpClock);
+    assert.ok(pumpState.activePump && pumpState.activePump.endedAt === null); // still running, not a draft
+    assert.equal(pumpState.pumpVolumeDraft, null);
+    assert.equal(sessionElapsedMs(pumpState.activePump!, pumpClock.now()), 18 * 60_000);
+  });
+
+  await checkAsync('DD3. the recovered sleep reads consistently across card + status + timeline (single source of truth, plan Phase 6.5)', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    assert.ok((await startSleep({ repo: createLoggingRepository(persistence, clock), clock, actor }, {})).ok);
+    clock.advance(42 * 60_000);
+    const state = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    assert.ok(state.activeSleep);
+
+    // All three surfaces derive from the SAME restored activeSleep / sessionElapsedMs.
+    const subtitles = buildV2QuickLogSubtitles(
+      {
+        todayEvents: state.todayEvents,
+        activeBreastFeed: state.activeBreastFeed,
+        activeSleep: state.activeSleep,
+        activePump: state.activePump,
+        pumpVolumeDraft: state.pumpVolumeDraft,
+      },
+      clock.now(),
+    );
+    const status = buildV2TonightStatus({ todayEvents: state.todayEvents, activeSleep: state.activeSleep }, clock.now());
+    const timeline = formatTimelineEvent(state.activeSleep!, clock.now());
+
+    assert.equal(subtitles.sleep, 'Sleeping · 42m'); // Quick Log card
+    const sleepStatus = status.find((i) => i.key === 'sleep');
+    assert.equal(sleepStatus?.label, 'Sleeping');
+    assert.equal(sleepStatus?.value, '42m'); // status strip
+    assert.equal(timeline.title, 'Sleeping');
+    assert.equal(timeline.subtitle, '42m'); // timeline — the same 42m on every surface
+  });
+
+  await checkAsync('DD4. a backwards device clock surfaces the recover state for breast + pump, never a negative duration (plan §6)', async () => {
+    // Breastfeeding started "now", then the device clock jumps backwards.
+    const breastStore = createInMemoryLoggingPersistence();
+    const breastClock = createManualClock(NOW);
+    assert.ok(
+      (await startBreastFeed({ repo: createLoggingRepository(breastStore, breastClock), clock: breastClock, actor }, { side: 'right' })).ok,
+    );
+    breastClock.set(NOW - 60_000); // clock moves to before the session start
+    const breastState = await hydrateLoggingState(createLoggingRepository(breastStore, breastClock), feedScope, breastClock);
+    assert.ok(breastState.activeBreastFeed); // the real session is kept (stored data)
+    assert.equal(breastState.error?.code, 'started_in_future'); // but flagged for a recover prompt
+    assert.equal(sessionElapsedMs(breastState.activeBreastFeed!, breastClock.now()), 0); // clamped, never negative
+
+    // The same recover state applies to a pump session.
+    const pumpStore = createInMemoryLoggingPersistence();
+    const pumpClock = createManualClock(NOW);
+    assert.ok((await startPump({ repo: createLoggingRepository(pumpStore, pumpClock), clock: pumpClock, actor }, { side: 'left' })).ok);
+    pumpClock.set(NOW - 60_000);
+    const pumpState = await hydrateLoggingState(createLoggingRepository(pumpStore, pumpClock), feedScope, pumpClock);
+    assert.ok(pumpState.activePump);
+    assert.equal(pumpState.error?.code, 'started_in_future');
+    assert.equal(sessionElapsedMs(pumpState.activePump!, pumpClock.now()), 0);
+  });
+
+  await checkAsync('DD5. foreground reconcile recomputes a running timer from timestamps after time in the background (plan §6, §11.2)', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    assert.ok((await startSleep({ repo, clock, actor }, {})).ok);
+    const hydrated = await hydrateLoggingState(repo, feedScope, clock);
+    assert.equal(sessionElapsedMs(hydrated.activeSleep!, clock.now()), 0);
+    const eventsBefore = hydrated.todayEvents.length;
+
+    // 25 minutes pass with the app backgrounded, then it returns to the foreground.
+    clock.advance(25 * 60_000);
+    const reconciled = await reconcileLoggingState(repo, feedScope, clock, hydrated);
+    assert.ok(reconciled.activeSleep);
+    assert.equal(sessionElapsedMs(reconciled.activeSleep!, clock.now()), 25 * 60_000); // recomputed, not a stored counter
+    assert.equal(reconciled.todayEvents.length, eventsBefore); // reconcile re-reads, it does not create a new event
+    assert.equal(reconciled.error, null);
+  });
+
+  await checkAsync('DD6. the pump volume draft reopens on its volume step after a restart (plan Phase 7.2)', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    assert.ok((await startPump({ repo, clock, actor }, { side: 'both' })).ok);
+    clock.advance(20 * 60_000);
+    const running = selectActivePump(await repo.getActiveSessions(feedScope), 'cg-mom')!;
+    assert.ok((await finishPump({ repo, clock, actor }, { event: running })).ok);
+
+    // Force-close while on the volume step, then relaunch.
+    const state = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    assert.ok(state.pumpVolumeDraft); // the draft is recovered, not lost (plan Phase 7.2 acceptance)
+    assert.equal(state.pumpVolumeDraft?.side, 'both');
+    assert.ok(state.activePump && state.activePump.endedAt !== null); // finished → UI opens the volume body, not the timer
+    const subtitles = buildV2QuickLogSubtitles(
+      {
+        todayEvents: state.todayEvents,
+        activeBreastFeed: state.activeBreastFeed,
+        activeSleep: state.activeSleep,
+        activePump: state.activePump,
+        pumpVolumeDraft: state.pumpVolumeDraft,
+      },
+      clock.now(),
+    );
+    assert.equal(subtitles.pump, 'Finished · add volume'); // the card reopens on the volume step
+  });
+
+  // EE. Validation & edge-case handling (plan §1.1 validators, §6 time validations,
+  // task 12). Drives each flow's FAILURE path through a real repository to prove it
+  // is reachable end-to-end and surfaces a recover/error state WITHOUT persisting a
+  // bad record — complementing the validator unit checks (U4–U9) and the per-flow
+  // happy paths (X/Y/Z/AA). A backwards device clock is the canonical §6 anomaly:
+  // the finish/switch is refused and the session is left untouched.
+  await checkAsync('EE1. finishBreastFeed with a backwards device clock is refused; the session stays active (plan §6)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps, { side: 'left' })).ok);
+    const open = await activeBreast(repo);
+    assert.ok(open);
+    clock.set(NOW - 60_000); // the device clock jumps to before the session started
+    const r = await finishBreastFeed(deps, { event: open });
+    assert.equal(r.ok, false);
+    // The open segment would close before it began → the segment-chain guard catches
+    // the reversed range first (the range guard is the second line of defence).
+    if (!r.ok) assert.equal(r.error.code, 'invalid_breast_segments');
+    const still = await activeBreast(repo);
+    assert.ok(still);
+    assert.equal(still.status, 'active'); // nothing was completed
+    assert.equal(still.details.activeSide, 'left'); // unchanged
+    assert.equal(still.details.segments.length, 1);
+    assert.equal(still.details.segments[0].endedAt, null); // still open
+  });
+
+  await checkAsync('EE2. finishPump with a backwards device clock is refused; the pump stays running, no volume draft (plan §6)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'both' })).ok);
+    const open = await activePumpOf(repo);
+    assert.ok(open);
+    clock.set(NOW - 60_000);
+    const r = await finishPump(deps, { event: open });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.error.code, 'started_in_future');
+    const still = await activePumpOf(repo);
+    assert.ok(still);
+    assert.equal(still.endedAt, null); // never finished → still the running timer, not a draft
+  });
+
+  await checkAsync('EE3. finishSleep with a backwards device clock is refused; the sleep stays active (plan §6, complements Y5)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    const open = await activeSleepOf(repo);
+    assert.ok(open);
+    clock.set(NOW - 60_000);
+    const r = await finishSleep(deps, { event: open });
+    assert.equal(r.ok, false);
+    // Y5 covers the manual "endedAt before startedAt" case; this is the device-clock-
+    // moved-backwards case, which the future-start guard catches first.
+    if (!r.ok) assert.equal(r.error.code, 'started_in_future');
+    const still = await activeSleepOf(repo);
+    assert.ok(still);
+    assert.equal(still.status, 'active');
+    assert.equal(still.endedAt, null);
+  });
+
+  await checkAsync('EE4. switchBreastSide to a time before the open segment began is refused; segments unchanged (plan §5.2/§6)', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps, { side: 'left' })).ok);
+    const open = await activeBreast(repo);
+    assert.ok(open);
+    const r = await switchBreastSide(deps, {
+      event: open,
+      side: 'right',
+      at: new Date(NOW - 60_000).toISOString(),
+    });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.error.code, 'invalid_breast_segments');
+    const still = await activeBreast(repo);
+    assert.ok(still);
+    assert.equal(still.details.activeSide, 'left'); // no side switch persisted
+    assert.equal(still.details.segments.length, 1); // no second segment appended
+    assert.equal(still.details.segments[0].endedAt, null); // first segment still open
+  });
+
+  await checkAsync('EE5. saveCompletedSleep rejects endedAt before startedAt and is idempotent by clientEventId (plan §6/§9)', async () => {
+    // Ordering: a range that ends before it starts is rejected and persists nothing.
+    const a = newFeedDeps();
+    const bad = await saveCompletedSleep(a.deps, {
+      startedAt: new Date(NOW - 30 * 60_000).toISOString(),
+      endedAt: new Date(NOW - 60 * 60_000).toISOString(),
+    });
+    assert.equal(bad.ok, false);
+    if (!bad.ok) assert.equal(bad.error.code, 'invalid_session_range');
+    const todayA = await a.repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(todayA.filter(isSleepEvent).length, 0);
+
+    // Idempotency: a retried save with the same clientEventId lands a single event.
+    const b = newFeedDeps();
+    const input = {
+      startedAt: new Date(NOW - 60 * 60_000).toISOString(),
+      endedAt: new Date(NOW - 30 * 60_000).toISOString(),
+      clientEventId: 'cid-completed-sleep',
+    };
+    assert.ok((await saveCompletedSleep(b.deps, input)).ok);
+    assert.ok((await saveCompletedSleep(b.deps, input)).ok); // retried (double-tap)
+    const todayB = await b.repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(todayB.filter(isSleepEvent).length, 1);
+  });
+
+  await checkAsync('EE6. validator sanity caps are reachable through the use-cases (bottle/pump) and persist nothing (plan §1.1)', async () => {
+    // Bottle: an over-cap amount and a non-finite amount both reject and save nothing.
+    const bottle = newFeedDeps();
+    const overBottle = await saveBottleFeed(bottle.deps, { amountMl: BOTTLE_MAX_ML + 1, milkType: 'formula' });
+    assert.equal(overBottle.ok, false);
+    if (!overBottle.ok) assert.equal(overBottle.error.code, 'invalid_bottle_amount');
+    assert.equal(
+      (await saveBottleFeed(bottle.deps, { amountMl: Number.POSITIVE_INFINITY, milkType: 'formula' })).ok,
+      false,
+    );
+    const todayBottle = await bottle.repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(todayBottle.filter(isBottleFeed).length, 0);
+
+    // Pump: an over-cap or negative side volume rejects and leaves the draft intact.
+    const pump = newFeedDeps();
+    assert.ok((await startPump(pump.deps, { side: 'both' })).ok);
+    pump.clock.advance(10 * 60_000);
+    const finished = await activePumpOf(pump.repo);
+    assert.ok(finished);
+    assert.ok((await finishPump(pump.deps, { event: finished })).ok);
+    const draft = await activePumpOf(pump.repo);
+    assert.ok(draft);
+    assert.equal(
+      (await savePump(pump.deps, { event: draft, leftVolumeMl: PUMP_MAX_ML + 1, rightVolumeMl: 60 })).ok,
+      false,
+    );
+    assert.equal(
+      (await savePump(pump.deps, { event: draft, leftVolumeMl: -10, rightVolumeMl: 60 })).ok,
+      false,
+    );
+    const stillDraft = await activePumpOf(pump.repo);
+    assert.ok(stillDraft);
+    assert.equal(stillDraft.status, 'active'); // not completed
+    assert.notEqual(stillDraft.endedAt, null); // still a finished-awaiting-volume draft
+  });
+
+  await checkAsync('EE7. a use-case failure surfaces as a store recover state, and a later success clears it (the provider flow, plan §6)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    let state = await hydrateLoggingState(repo, feedScope, clock);
+    const open = state.activeSleep;
+    assert.ok(open);
+    assert.equal(state.error, null);
+
+    // Device clock jumps backwards → finishing is refused and (exactly as the
+    // provider does) the failure is dropped into the store as a recover state.
+    clock.set(NOW - 60_000);
+    const bad = await finishSleep(deps, { event: open });
+    assert.equal(bad.ok, false);
+    if (!bad.ok) state = withError(state, bad.error);
+    assert.equal(state.error?.code, 'started_in_future');
+
+    // The clock recovers; finishing now succeeds and a reconcile clears the recover
+    // state, leaving the completed sleep in the timeline.
+    clock.set(NOW + 40 * 60_000);
+    assert.ok((await finishSleep(deps, { event: open })).ok);
+    state = await reconcileLoggingState(repo, feedScope, clock, state);
+    assert.equal(state.error, null);
+    assert.equal(state.activeSleep, null);
+    assert.ok(state.todayEvents.some((e) => isSleepEvent(e) && e.status === 'completed'));
+  });
+
+  /* ---------------------------------------------------------------- *
+   * FF. End-to-end user journeys (plan §11.3 E2E scenarios) expressed
+   * as use-case SEQUENCES, plus the explicit §11.2 "repo create → store
+   * update → timeline render" pipeline. Where the prior sections test one
+   * use-case (X/Y/Z/AA) or one acceptance fact (DD/EE), these string a
+   * whole flow together — start → close/reopen (a real hydrate) → continue
+   * → finish — and then assert the RENDERED surfaces (timeline row, quick-
+   * log subtitle, status strip, toast) the user actually sees, proving the
+   * use-case → repo → store-hydrate → selector pipeline connects per flow.
+   * "Close/reopen" is a fresh repository over the SAME persisted snapshot,
+   * the faithful force-close simulation (the repo is stateless over the
+   * port, so reusing `deps` after the hydrate acts on the same data).
+   * ---------------------------------------------------------------- */
+
+  await checkAsync('FF1. §11.2 pipeline: repository create → store hydrate → timeline render', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    // create (use-case → repo)
+    assert.ok((await saveBottleFeed({ repo, clock, actor }, { amountMl: 90, milkType: 'formula' })).ok);
+    // store update (hydrate reads the repo into LoggingState)
+    const state = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    assert.equal(state.todayEvents.length, 1);
+    const e = state.todayEvents[0];
+    assert.ok(isBottleFeed(e) && e.details.amountMl === 90);
+    // timeline render (the §7.4 formatter over the stored event)
+    const view = formatTimelineEvent(e, clock.now());
+    assert.equal(view.title, 'Bottle');
+    assert.equal(view.subtitle, '90 ml · formula');
+    assert.equal(view.icon, 'feed');
+  });
+
+  await checkAsync('FF2. §11.3 #1: Wet diaper in two taps → it shows on the card + timeline → Undo reverts both', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    const deps = { repo, clock, actor };
+    // "Diaper → Wet" is a single use-case call (two taps, one event).
+    const r = await saveDiaper(deps, { kind: 'wet' });
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    let state = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    assert.equal(state.todayEvents.filter(isDiaperEvent).length, 1); // exactly one event
+    assert.equal(formatTimelineEvent(state.todayEvents[0], clock.now()).subtitle, 'wet');
+    clock.advance(2 * 60_000);
+    const before = buildV2QuickLogSubtitles(
+      {
+        todayEvents: state.todayEvents,
+        activeBreastFeed: state.activeBreastFeed,
+        activeSleep: state.activeSleep,
+        activePump: state.activePump,
+        pumpVolumeDraft: state.pumpVolumeDraft,
+      },
+      clock.now(),
+    );
+    assert.equal(before.diaper, '2m ago · wet'); // the card reflects the save
+
+    // Undo the create → soft-delete; the card + timeline revert to empty.
+    const m = buildUndoableMutation({ kind: 'create', eventId: r.event.id, previousSnapshot: null, clock });
+    assert.ok((await undoLoggingMutation(deps, m)).ok);
+    state = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    assert.ok(!state.todayEvents.some((e) => e.id === r.event.id)); // gone from the timeline
+    const after = buildV2QuickLogSubtitles(
+      {
+        todayEvents: state.todayEvents,
+        activeBreastFeed: state.activeBreastFeed,
+        activeSleep: state.activeSleep,
+        activePump: state.activePump,
+        pumpVolumeDraft: state.pumpVolumeDraft,
+      },
+      clock.now(),
+    );
+    assert.equal(after.diaper, 'Tap to log'); // the card reverts
+  });
+
+  await checkAsync('FF3. §11.3 #2: Bottle 90 ml (presets/steppers, no keyboard) → timeline + card + toast', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    // 90 ml comes from a preset/stepper — at the use-case layer it is just amountMl, no keyboard input.
+    const r = await saveBottleFeed({ repo, clock, actor }, { amountMl: 90, milkType: 'breast_milk' });
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    assert.equal(formatLoggingToast(r.event, clock.now()), 'Feed logged · 90 ml'); // Undo toast
+    clock.advance(3 * 60_000);
+    const state = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    const view = formatTimelineEvent(state.todayEvents[0], clock.now());
+    assert.equal(view.title, 'Bottle');
+    assert.equal(view.subtitle, '90 ml · breast milk');
+    const subtitles = buildV2QuickLogSubtitles(
+      {
+        todayEvents: state.todayEvents,
+        activeBreastFeed: state.activeBreastFeed,
+        activeSleep: state.activeSleep,
+        activePump: state.activePump,
+        pumpVolumeDraft: state.pumpVolumeDraft,
+      },
+      clock.now(),
+    );
+    assert.equal(subtitles.feed, '3m ago · 90 ml'); // the Feed card shows the last bottle + recency
+  });
+
+  await checkAsync('FF4. §11.3 #3: Breast Left → close sheet → reopen → switch Right → finish (timeline 5m left · 3m right)', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    const deps = { repo, clock, actor };
+    assert.ok((await startBreastFeed(deps, { side: 'left' })).ok);
+    clock.advance(5 * 60_000);
+
+    // Close the sheet + reopen (force-close): hydrate a fresh repo over the same snapshot.
+    const reopened = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    assert.ok(reopened.activeBreastFeed);
+    assert.equal(reopened.activeBreastFeed?.details.activeSide, 'left'); // active side restored
+    assert.equal(
+      breastSegmentTotals(reopened.activeBreastFeed!.details.segments, clock.now()).totalLeftMs,
+      5 * 60_000,
+    ); // 5m on Left recomputed from the open segment
+
+    // Switch to Right on the RESTORED session, accrue 3m, then finish.
+    assert.ok((await switchBreastSide(deps, { event: reopened.activeBreastFeed!, side: 'right' })).ok);
+    clock.advance(3 * 60_000);
+    const fin = await finishBreastFeed(deps, { event: (await activeBreast(repo))! });
+    assert.ok(fin.ok);
+    if (fin.ok) {
+      assert.equal(fin.event.details.totalLeftMs, 5 * 60_000);
+      assert.equal(fin.event.details.totalRightMs, 3 * 60_000); // both durations kept across the reopen
+    }
+    // After another restart it is a completed feed in the timeline, no active session.
+    const after = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    assert.equal(after.activeBreastFeed, null);
+    const completed = after.todayEvents.find((e) => isBreastFeed(e) && e.status === 'completed');
+    assert.ok(completed);
+    const view = formatTimelineEvent(completed!, clock.now());
+    assert.equal(view.title, 'Breastfeed');
+    assert.equal(view.subtitle, '5m left · 3m right');
+  });
+
+  await checkAsync('FF5. §11.3 #4: Sleep start (Hero) → close app → reopen → finish (Quick Log) — one session, awake after', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    const deps = { repo, clock, actor };
+    // Hero "Start sleep".
+    assert.ok((await startSleep(deps, {})).ok);
+    clock.advance(10 * 60_000);
+
+    // Close the app + reopen: the same active sleep is restored (single source of truth).
+    const reopened = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    assert.ok(reopened.activeSleep);
+    assert.equal(sessionElapsedMs(reopened.activeSleep!, clock.now()), 10 * 60_000);
+
+    // Finish from the Quick Log card — acts on the SAME restored session.
+    clock.advance(40 * 60_000); // total 50m
+    assert.ok((await finishSleep(deps, { event: reopened.activeSleep! })).ok);
+
+    const after = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    assert.equal(after.activeSleep, null); // back to awake on every surface
+    const sleep = after.todayEvents.find(isSleepEvent);
+    assert.ok(sleep && sleep.status === 'completed');
+    assert.equal(formatTimelineEvent(sleep!, clock.now()).subtitle, '50m'); // fixed final duration
+
+    clock.advance(2 * 60_000);
+    const subtitles = buildV2QuickLogSubtitles(
+      {
+        todayEvents: after.todayEvents,
+        activeBreastFeed: after.activeBreastFeed,
+        activeSleep: after.activeSleep,
+        activePump: after.activePump,
+        pumpVolumeDraft: after.pumpVolumeDraft,
+      },
+      clock.now(),
+    );
+    assert.equal(subtitles.sleep, 'Awake for 2m'); // Quick Log card flips to awake
+    const status = buildV2TonightStatus({ todayEvents: after.todayEvents, activeSleep: after.activeSleep }, clock.now());
+    assert.equal(status.find((i) => i.key === 'sleep')?.label, 'Awake'); // status strip flips too
+  });
+
+  await checkAsync('FF6. §11.3 #5: Pump Both → finish → close sheet → restore draft → save 110 ml', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    const deps = { repo, clock, actor };
+    assert.ok((await startPump(deps, { side: 'both' })).ok);
+    clock.advance(18 * 60_000);
+    assert.ok((await finishPump(deps, { event: (await activePumpOf(repo))! })).ok);
+
+    // Close the sheet + reopen: the volume draft is recovered, the card opens on the volume step.
+    const reopened = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    assert.ok(reopened.pumpVolumeDraft && reopened.pumpVolumeDraft.side === 'both');
+    assert.ok(reopened.activePump && reopened.activePump.endedAt !== null);
+    const draftCard = buildV2QuickLogSubtitles(
+      {
+        todayEvents: reopened.todayEvents,
+        activeBreastFeed: reopened.activeBreastFeed,
+        activeSleep: reopened.activeSleep,
+        activePump: reopened.activePump,
+        pumpVolumeDraft: reopened.pumpVolumeDraft,
+      },
+      clock.now(),
+    );
+    assert.equal(draftCard.pump, 'Finished · add volume');
+
+    // Save 110 ml (50 + 60) on the restored draft → completed.
+    const sv = await savePump(deps, { event: reopened.activePump!, leftVolumeMl: 50, rightVolumeMl: 60 });
+    assert.ok(sv.ok);
+    if (sv.ok) assert.equal(formatLoggingToast(sv.event, clock.now()), 'Pump saved · 110 ml');
+
+    const after = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    assert.equal(after.activePump, null);
+    assert.equal(after.pumpVolumeDraft, null);
+    const pump = after.todayEvents.find(isPumpEvent);
+    assert.ok(pump && pump.status === 'completed');
+    const view = formatTimelineEvent(pump!, clock.now());
+    assert.equal(view.title, 'Pump');
+    assert.equal(view.subtitle, '110 ml · both'); // Both sums left + right in the timeline
+    clock.advance(5 * 60_000);
+    const subtitles = buildV2QuickLogSubtitles(
+      {
+        todayEvents: after.todayEvents,
+        activeBreastFeed: after.activeBreastFeed,
+        activeSleep: after.activeSleep,
+        activePump: after.activePump,
+        pumpVolumeDraft: after.pumpVolumeDraft,
+      },
+      clock.now(),
+    );
+    assert.equal(subtitles.pump, '5m ago · 110 ml'); // last pump + recency on the card
+  });
+
+  await checkAsync('FF7. §11.3 #6/#7 (local portion): instant log survives restart offline + one active sleep per child', async () => {
+    // #6 — Offline: the repository is local-first (no server is wired), so a save is
+    // `syncStatus: 'local'` and survives a restart with no network. The remaining half
+    // — "turn the network on → synced" — needs the server sync worker that is plan
+    // Phase 9 (only `enqueueSync` on Undo exists today), so it is intentionally NOT yet
+    // implemented; this asserts the offline-survives-restart guarantee we DO have.
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    const deps = { repo, clock, actor };
+    const r = await saveDiaper(deps, { kind: 'dirty' });
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    assert.equal(r.event.syncStatus, 'local'); // saved offline, no server round-trip
+    const restarted = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    assert.ok(restarted.todayEvents.some((e) => e.id === r.event.id)); // still there after restart
+
+    // #7 — Two "devices"/caregivers cannot create two active sleeps for one child: this
+    // single-active-session invariant is the data guarantee the cross-device conflict UX
+    // ("Sleep was already started by Dad") rests on. The server-side reconciliation + the
+    // conflict UI itself are plan Phase 9; here we prove the local guard a second Start
+    // reopens the existing session rather than creating a duplicate.
+    const persistence2 = createInMemoryLoggingPersistence();
+    const clock2 = createManualClock(NOW);
+    const repo2 = createLoggingRepository(persistence2, clock2);
+    const deps2 = { repo: repo2, clock: clock2, actor };
+    assert.ok((await startSleep(deps2, {})).ok);
+    assert.ok((await startSleep(deps2, {})).ok); // a "second device" Start
+    const activeSleeps = (await repo2.getActiveSessions(feedScope)).filter(isSleepEvent);
+    assert.equal(activeSleeps.length, 1); // exactly one active sleep per child — never two
+  });
+}
+
+runAsyncChecks()
+  .then(() => {
+    console.log(`\nAll ${passed} checks passed ✅`);
+  })
+  .catch((err) => {
+    console.error(err);
+    process.exitCode = 1;
+  });

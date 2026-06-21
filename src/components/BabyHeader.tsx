@@ -3,14 +3,14 @@ import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg'
 
 import type { Baby, Caregiver } from '@/data/models';
 import { colors, fonts, surfaces, type SurfaceMode } from '@/theme';
-import { ThemeIconButton } from './ThemeIconButton';
+import { ThemeIconButton, type RevealOrigin } from './ThemeIconButton';
 
 type Props = {
   baby: Baby;
   ageWeeks: number;
   caregivers: Caregiver[];
   onPress?: () => void;
-  onThemeToggle?: () => void;
+  onThemeToggle?: (origin?: RevealOrigin) => void;
   themeToggleDisabled?: boolean;
   /** surface palette — 'day' (default) or 'night' for low-glare text */
   surfaceMode?: SurfaceMode;

@@ -11,18 +11,26 @@
  */
 import { Text, View } from 'react-native';
 
-import { buildTonightStatus } from '@/data/currentState';
+import { buildTonightStatus, type TonightStatusItem } from '@/data/currentState';
 import type { LogEvent } from '@/data/models';
 import { fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
 type Props = {
   events: LogEvent[];
+  /** Frozen clock — passed so the "X ago" values don't shift mid theme-reveal. */
+  now?: number;
+  /**
+   * Precomputed status columns. When provided (e.g. the loggingV2 path), these
+   * are rendered instead of deriving from `events`, so the strip can read the v2
+   * store. Omitted → derived from `events` exactly as before.
+   */
+  items?: TonightStatusItem[];
   surfaceMode?: SurfaceMode;
 };
 
-export function TonightStatus({ events, surfaceMode = 'day' }: Props) {
+export function TonightStatus({ events, now, items: itemsProp, surfaceMode = 'day' }: Props) {
   const palette = surfaces[surfaceMode];
-  const items = buildTonightStatus(events);
+  const items = itemsProp ?? buildTonightStatus(events, now);
 
   return (
     <View
