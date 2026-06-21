@@ -58,3 +58,7 @@ debug/
 .env.*
 !.env.example
 .gstack/
+# Claude runtime logs
+.claude/*.log
+.claude/nohup-*.out
+.claude/autopilot-round-*.out
