@@ -33,9 +33,13 @@ closed two real gaps:
    surface→recover→clear store flow (EE7).
 
 No production code outside the v2 sheets changed; the sheets render only when the flag is
-on, so the flag-off MVP is byte-for-byte unchanged. Up next is **task 13** — add/update
-tests (the smoke test is now 147 checks; task 13 reviews the plan §11 matrix for any
-remaining acceptance cases worth encoding).
+on, so the flag-off MVP is byte-for-byte unchanged. As of **task 13**, the tests are
+reviewed and extended: a new test-only `FF` section (FF1–FF7) encodes the plan §11.3
+end-to-end journeys as use-case sequences (start → close/reopen → continue → finish, then
+assert the rendered timeline/card/status/toast) plus the explicit §11.2 repo→store→timeline
+pipeline, taking the smoke test to **154 checks** covering the full §11 matrix. Up next is
+**task 14** — the final verification pass (plan §14 Definition of Done), then task 15
+cleanup + summary.
 
 The timeline integration (task 09) is three purely descriptive pieces (no business
 logic in a formatter, plan §8):
@@ -76,7 +80,7 @@ now exposes `todayEvents`. With the flag OFF every widget reads the legacy
 - [x] 10. Add Undo behavior
 - [x] 11. Add active session recovery after app restart
 - [x] 12. Add validation and edge-case handling
-- [ ] 13. Add or update tests
+- [x] 13. Add or update tests
 - [ ] 14. Run final verification
 - [ ] 15. Final cleanup and implementation summary
 
@@ -467,28 +471,72 @@ now exposes `todayEvents`. With the flag OFF every widget reads the legacy
   - Suite now **147/147** (140 prior + 7 EE). No production code outside the v2 sheets
     changed; the sheets render only behind the flag, so the flag-off MVP is byte-for-byte
     unchanged.
+- **13 — Add or update tests (plan §11 testing matrix).** A review of the §11 matrix
+  found the per-use-case (§11.1) and per-acceptance (DD/EE) layers already covered, but
+  the §11.3 **end-to-end user journeys** and the §11.2 **repo → store → timeline pipeline**
+  were not yet encoded as multi-use-case sequences that assert the RENDERED surfaces.
+  Task 13 is test-only (no production code changed) and adds a new `FF` section — 7
+  integration-style checks that each string a whole flow together (start → close/reopen
+  via a real hydrate → continue → finish) and then assert the timeline row + quick-log
+  subtitle + status strip + Undo toast the user actually sees, proving the
+  use-case → repo → store-hydrate → selector pipeline connects per flow:
+  - **FF1** (§11.2) — the explicit pipeline: `saveBottleFeed` → `hydrateLoggingState`
+    (store update) → `formatTimelineEvent` renders "Bottle" / "90 ml · formula".
+  - **FF2** (§11.3 #1) — Wet diaper in two taps (one use-case) shows on the card
+    ("2m ago · wet") + timeline, then Undo soft-deletes it and BOTH revert (timeline gone,
+    card back to "Tap to log"). Complements CC1 by asserting the rendered card transition.
+  - **FF3** (§11.3 #2) — Bottle 90 ml (preset/stepper, no keyboard) → toast
+    "Feed logged · 90 ml" + timeline "90 ml · breast milk" + Feed card "3m ago · 90 ml".
+  - **FF4** (§11.3 #3) — Breast Left → **close sheet → reopen** (hydrate restores the
+    active Left side + 5m) → switch Right on the restored session → +3m → finish; after a
+    second restart the completed feed renders "Breastfeed" / "5m left · 3m right" (both
+    durations kept across the reopen). Extends DD2 (which only restored) with the
+    switch-then-finish-then-render tail.
+  - **FF5** (§11.3 #4) — Sleep start (Hero) → **close app → reopen** (same active sleep
+    restored, 10m) → finish from the Quick Log card on the SAME session (+40m = 50m); after
+    restart the timeline reads "Sleep" / "50m" and every surface flips to awake (card
+    "Awake for 2m", status strip "Awake").
+  - **FF6** (§11.3 #5) — Pump Both → finish → **close sheet → reopen** (draft restored,
+    card "Finished · add volume") → save 110 ml (50+60) on the restored draft → toast
+    "Pump saved · 110 ml" + timeline "110 ml · both" + card "5m ago · 110 ml". Extends DD6
+    with the save-after-restart tail.
+  - **FF7** (§11.3 #6/#7, local portion) — an instant log saved offline is
+    `syncStatus: 'local'` and survives a restart (the offline-survives-restart half we
+    have); and a second Start reopens the one active sleep per child (the single-session
+    invariant the cross-device conflict UX rests on). Documents that the server-sync tail
+    ("turn network on → synced") and the conflict UI ("started by Dad") are plan **Phase 9**
+    (not yet implemented; only `enqueueSync` on Undo + the local guard exist).
+  - Suite now **154/154** (147 prior + 7 FF). `npm test` is still unavailable (the app has
+    no Jest/RNTL runner to extend); the Node smoke test is the substitute by design
+    (CLAUDE.md: "add tests where the project already has test infrastructure"). No
+    production code changed, so the flag-off MVP is byte-for-byte unchanged.
 
 ## Current task
 
-13. Add or update tests (plan §11 testing matrix). The smoke test
-(`scripts/check-local-interactions.ts`) is now **147 checks** and already covers the
-plan §11.1 unit matrix (breast 5m/3m + multi-switch + hydration, bottle amount/idempotency,
-sleep start/finish/second-start/ordering, diaper each-kind/undo/double-press, pump
-both-110ml/save-without-volume/draft-restore), the §11.2 integration matrix (repo→store→
-timeline, finish→restart→completed, AppState background/active recompute, legacy mapper),
-and now the §6/§1.1 failure matrix (task 12, EE1–EE7). Task 13 reviews the plan §11 matrix
-for any remaining acceptance case worth encoding (e.g. the §11.3 E2E scenarios expressed
-as use-case sequences, or an explicit `repo create → store update → timeline render`
-pipeline check) and documents that there is still no RN test runner (`npm test`
-unavailable) — the Node smoke test is the substitute, by design, since the app has no
-Jest/RNTL infrastructure to extend (CLAUDE.md: "add tests where the project already has
-test infrastructure").
+14. Run final verification (plan §14 Definition of Done). With the tests reviewed and
+extended (task 13), the smoke test (`scripts/check-local-interactions.ts`) is now **154
+checks** and covers the full plan §11 matrix: §11.1 units (breast 5m/3m + multi-switch +
+hydration, bottle amount/idempotency, sleep start/finish/second-start/ordering, diaper
+each-kind/undo/double-press, pump both-110ml/save-without-volume/draft-restore), §11.2
+integration (the explicit repo→store→timeline pipeline FF1, finish→restart→completed,
+AppState background/active recompute, legacy mapper), the §6/§1.1 failure matrix
+(EE1–EE7), and now the §11.3 end-to-end journeys as use-case sequences (FF2–FF7). Task 14
+runs the full verification pass (`npx tsc --noEmit`, `npm run check:local-interactions`,
+`npm run lint`) one more time as the §14 Definition-of-Done sign-off and confirms the
+flag-off MVP is unchanged; `npm test` stays documented as unavailable (no RN runner — the
+Node smoke test is the substitute). Task 15 is then the final cleanup + implementation
+summary.
 
-> Milestone: with validation/edge-case handling hardened (12), **the four flows +
-> timeline + Undo + restart recovery + validation are all complete end-to-end behind the
-> flag,** and every flow's failure path is proven reachable + non-destructive (EE1–EE7).
-> What remains is test review + sign-off (13 tests, 14 final verification, 15 cleanup) —
-> not new behavior.
+> Milestone: with the tests reviewed and extended (13), **the four flows + timeline +
+> Undo + restart recovery + validation are complete end-to-end behind the flag,** every
+> flow's failure path is proven reachable + non-destructive (EE1–EE7), and every plan
+> §11.3 user journey is proven end-to-end through the rendered surfaces (FF2–FF7). What
+> remains is sign-off only (14 final verification, 15 cleanup + summary) — not new
+> behavior.
+>
+> Earlier milestone: with validation/edge-case handling hardened (12), the four flows +
+> timeline + Undo + restart recovery + validation were all complete end-to-end behind the
+> flag, and every flow's failure path was proven reachable + non-destructive (EE1–EE7).
 >
 > Earlier milestone: with restart-recovery proven (11), the four flows + timeline + Undo +
 > restart recovery were all complete end-to-end behind the flag.
@@ -782,6 +830,25 @@ test infrastructure").
 
 ## Last verification
 
+- 2026-06-21 (task 13) — `npx tsc --noEmit` → exit 0. `npm run
+  check:local-interactions` → **all 154 checks pass** (147 prior + 7 new, FF1–FF7, the
+  plan §11.3 end-to-end journeys as use-case sequences + the explicit §11.2
+  repo→store→timeline pipeline: FF1 `saveBottleFeed` → hydrate → `formatTimelineEvent`
+  renders "Bottle"/"90 ml · formula"; FF2 wet diaper in two taps shows on the card
+  ("2m ago · wet") + timeline, then Undo reverts both (timeline gone, card "Tap to log");
+  FF3 bottle 90 ml → toast "Feed logged · 90 ml" + timeline "90 ml · breast milk" + card
+  "3m ago · 90 ml"; FF4 breast Left → close/reopen (restores Left + 5m) → switch Right →
+  +3m → finish → after a second restart renders "Breastfeed"/"5m left · 3m right"; FF5
+  sleep start (Hero) → close app/reopen (same session, 10m) → finish from Quick Log (+40m
+  = 50m) → timeline "Sleep"/"50m" + every surface awake; FF6 pump Both → finish →
+  close/reopen (draft "Finished · add volume") → save 110 ml → toast "Pump saved · 110 ml"
+  + timeline "110 ml · both" + card "5m ago · 110 ml"; FF7 an offline `syncStatus: 'local'`
+  diaper survives a restart, and a second Start keeps exactly one active sleep per child —
+  the server-sync tail + conflict UI documented as plan Phase 9). `npm run lint`
+  (`expo lint`) → exit 0, clean. `npm test` still not available (no RN runner; the Node
+  smoke test is the substitute, by design — the app has no Jest/RNTL infrastructure to
+  extend). **No production code changed** — task 13 is test-only, so the flag-off MVP is
+  byte-for-byte unchanged.
 - 2026-06-21 (task 12) — `npx tsc --noEmit` → exit 0. `npm run
   check:local-interactions` → **all 147 checks pass** (140 prior + 7 new, EE1–EE7, the
   validation/edge-case failure matrix: EE1 a backwards-clock `finishBreastFeed` is refused
