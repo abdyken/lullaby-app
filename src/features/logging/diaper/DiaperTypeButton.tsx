@@ -1,5 +1,5 @@
 /**
- * Logging v2 — one diaper-kind action row (plan Phase 2 UI, Phase 10 a11y).
+ * Logging v2 — one diaper-kind action card (plan Phase 2 UI, Phase 10 a11y).
  *
  * Unlike the Feed flow's `ChoicePill` (a SELECTION pill you toggle, then Save),
  * a diaper button is an ACTION: a single tap saves immediately, so there is no
@@ -16,9 +16,8 @@
  * carry the meaning (plan Phase 10 — do not communicate type by colour only).
  */
 import { Pressable, Text, View } from 'react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
 
-import { colors, fonts, radii } from '@/theme';
+import { colors, fonts } from '@/theme';
 
 import type { DiaperKind } from '../domain/types';
 
@@ -33,44 +32,14 @@ type Props = {
 };
 
 /**
- * A small distinct glyph per kind, mirroring the reference's 💧 ● ◐ ○: a droplet
- * for wet, a filled disc for dirty, a half-filled disc for both, an open ring for
- * dry. Decorative only — the text label is the accessible source of truth.
+ * A distinct decorative glyph per kind, mirroring the reference's instant cards.
+ * The text label remains the accessible source of truth.
  */
-function KindGlyph({ kind, color }: { kind: DiaperKind; color: string }) {
-  if (kind === 'wet') {
-    return (
-      <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-        <Path
-          d="M12 3.5c3.3 4 5.5 6.8 5.5 9.6a5.5 5.5 0 0 1-11 0C6.5 10.3 8.7 7.5 12 3.5Z"
-          stroke={color}
-          strokeWidth={2}
-          strokeLinejoin="round"
-        />
-      </Svg>
-    );
-  }
-  if (kind === 'dirty') {
-    return (
-      <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-        <Circle cx={12} cy={12} r={6.5} fill={color} />
-      </Svg>
-    );
-  }
-  if (kind === 'both') {
-    return (
-      <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-        <Circle cx={12} cy={12} r={6.5} stroke={color} strokeWidth={2} />
-        <Path d="M12 5.5a6.5 6.5 0 0 1 0 13Z" fill={color} />
-      </Svg>
-    );
-  }
-  // dry — an open ring
-  return (
-    <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-      <Circle cx={12} cy={12} r={6.5} stroke={color} strokeWidth={2} />
-    </Svg>
-  );
+function kindGlyph(kind: DiaperKind) {
+  if (kind === 'wet') return '💧';
+  if (kind === 'dirty') return '●';
+  if (kind === 'both') return '◐';
+  return '○';
 }
 
 export function DiaperTypeButton({
@@ -91,37 +60,56 @@ export function DiaperTypeButton({
       onPress={onPress}
       disabled={disabled}
       style={({ pressed }) => ({
+        width: '100%',
+        alignSelf: 'stretch',
         opacity: disabled ? 0.45 : 1,
-        transform: [{ scale: pressed ? 0.98 : 1 }],
+        transform: [{ scale: pressed ? 0.96 : 1 }],
       })}>
       <View
         style={{
-          minHeight: 60,
-          flexDirection: 'row',
+          width: '100%',
+          minHeight: 104,
           alignItems: 'center',
-          gap: 14,
-          paddingHorizontal: 16,
-          borderRadius: radii.medium,
+          justifyContent: 'center',
+          paddingVertical: 16,
+          paddingHorizontal: 12,
+          borderRadius: 20,
           backgroundColor: colors.surfaceSoft,
-          borderWidth: 2,
-          borderColor: 'transparent',
         }}>
         <View
           style={{
-            width: 40,
+            minWidth: 40,
             height: 40,
-            borderRadius: 20,
+            borderRadius: 14,
             alignItems: 'center',
             justifyContent: 'center',
             backgroundColor: accentTint,
+            marginBottom: 8,
           }}>
-          <KindGlyph kind={kind} color={accentColor} />
+          <Text
+            style={{
+              fontFamily: fonts.bodyBold,
+              fontSize: kind === 'wet' ? 29 : 28,
+              lineHeight: 32,
+              color: accentColor,
+              textAlign: 'center',
+            }}>
+            {kindGlyph(kind)}
+          </Text>
         </View>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontFamily: fonts.bodyBold, fontSize: 15.5, color: colors.ink }}>
+        <View style={{ alignItems: 'center' }}>
+          <Text style={{ fontFamily: fonts.display, fontSize: 16, color: colors.ink, textAlign: 'center' }}>
             {label}
           </Text>
-          <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.inkFaint, marginTop: 1 }}>
+          <Text
+            style={{
+              fontFamily: fonts.bodyBold,
+              fontSize: 11,
+              lineHeight: 14,
+              color: colors.inkSoft,
+              marginTop: 3,
+              textAlign: 'center',
+            }}>
             {hint}
           </Text>
         </View>
