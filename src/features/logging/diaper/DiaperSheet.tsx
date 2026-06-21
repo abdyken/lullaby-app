@@ -33,8 +33,11 @@ const KINDS: { kind: DiaperKind; label: string; hint: string }[] = [
   { kind: 'wet', label: 'Wet', hint: 'Tap to save' },
   { kind: 'dirty', label: 'Dirty', hint: 'Tap to save' },
   { kind: 'both', label: 'Both', hint: 'Wet + dirty' },
-  { kind: 'dry', label: 'Dry', hint: 'Checked, all dry' },
+  { kind: 'dry', label: 'Dry', hint: 'Checked only' },
 ];
+
+const SHEET_HORIZONTAL_PADDING = 18;
+const GRID_GAP = 12;
 
 export function DiaperSheet({ onClose }: Props) {
   const insets = useSafeAreaInsets();
@@ -81,12 +84,14 @@ export function DiaperSheet({ onClose }: Props) {
 
         <View
           style={{
+            width: '100%',
             backgroundColor: colors.surface,
             borderTopLeftRadius: radii.large,
             borderTopRightRadius: radii.large,
             paddingTop: 10,
-            paddingHorizontal: 18,
+            paddingHorizontal: SHEET_HORIZONTAL_PADDING,
             paddingBottom: insets.bottom + 18,
+            alignItems: 'stretch',
             ...shadows.soft,
           }}>
           <View
@@ -100,33 +105,90 @@ export function DiaperSheet({ onClose }: Props) {
             }}
           />
 
-          <Text style={{ fontFamily: fonts.display, fontSize: 20, color: colors.ink }}>
+          <Text
+            style={{
+              fontFamily: fonts.display,
+              fontSize: 23,
+              color: colors.ink,
+              textAlign: 'center',
+            }}>
             Log a diaper
           </Text>
-          <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.inkFaint, marginTop: 2 }}>
-            Choose one — it saves instantly
+          <Text
+            style={{
+              fontFamily: fonts.bodyBold,
+              fontSize: 13,
+              color: colors.inkSoft,
+              marginTop: 3,
+              textAlign: 'center',
+            }}>
+            Choose one option — it saves instantly
           </Text>
 
           {error && (
-            <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: accentColor, marginTop: 8 }}>
+            <Text
+              style={{
+                fontFamily: fonts.body,
+                fontSize: 12.5,
+                color: accentColor,
+                marginTop: 8,
+                textAlign: 'center',
+              }}>
               {error.message}
             </Text>
           )}
 
-          <View style={{ gap: 10, marginTop: 16 }}>
-            {KINDS.map((k) => (
-              <DiaperTypeButton
-                key={k.kind}
-                kind={k.kind}
-                label={k.label}
-                hint={k.hint}
-                accentColor={accentColor}
-                accentTint={accentTint}
-                disabled={saving}
-                onPress={() => void handleSave(k.kind)}
-              />
+          <View
+            style={{
+              width: '100%',
+              alignSelf: 'stretch',
+              marginTop: 20,
+            }}>
+            {[KINDS.slice(0, 2), KINDS.slice(2)].map((row, rowIndex) => (
+              <View
+                key={row.map((k) => k.kind).join('-')}
+                style={{
+                  width: '100%',
+                  alignSelf: 'stretch',
+                  flexDirection: 'row',
+                  marginBottom: rowIndex === 0 ? GRID_GAP : 0,
+                }}>
+                {row.map((k, index) => (
+                  <View
+                    key={k.kind}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      marginRight: index === 0 ? GRID_GAP / 2 : 0,
+                      marginLeft: index === 1 ? GRID_GAP / 2 : 0,
+                    }}>
+                    <DiaperTypeButton
+                      kind={k.kind}
+                      label={k.label}
+                      hint={k.hint}
+                      accentColor={accentColor}
+                      accentTint={accentTint}
+                      disabled={saving}
+                      onPress={() => void handleSave(k.kind)}
+                    />
+                  </View>
+                ))}
+              </View>
             ))}
           </View>
+
+          <Text
+            style={{
+              fontFamily: fonts.bodyBold,
+              fontSize: 12.5,
+              lineHeight: 18,
+              color: colors.inkSoft,
+              textAlign: 'center',
+              marginTop: 18,
+              marginHorizontal: 10,
+            }}>
+            No confirmation screen: Quick Log → type → saved. Undo is available in the toast.
+          </Text>
         </View>
       </View>
     </Modal>
