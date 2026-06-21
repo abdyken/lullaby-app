@@ -16,14 +16,15 @@ import { colors, fonts, radii } from '@/theme';
 
 import type { MilkType } from '../domain/types';
 import { ChoicePill } from './ChoicePill';
+import { FeedSegmentedControl, type FeedSegmentedOption } from './FeedSegmentedControl';
 
 const PRESETS_ML = [60, 90, 120, 150] as const;
 const STEP_ML = 10;
 
-const MILK_TYPES: { key: MilkType; label: string }[] = [
-  { key: 'breast_milk', label: 'Breast milk' },
-  { key: 'formula', label: 'Formula' },
-  { key: 'mixed', label: 'Mixed' },
+const MILK_TYPE_OPTIONS: FeedSegmentedOption<MilkType>[] = [
+  { value: 'breast_milk', label: 'Breast milk' },
+  { value: 'formula', label: 'Formula' },
+  { value: 'mixed', label: 'Mixed' },
 ];
 
 // In-memory session preference (resets on app restart). Seeds the form so a
@@ -131,17 +132,8 @@ export function BottleFeedForm({ accentColor, accentTint, onSave }: Props) {
       </View>
 
       {/* Milk type */}
-      <View style={{ flexDirection: 'row', gap: 9, marginTop: 18 }}>
-        {MILK_TYPES.map((m) => (
-          <ChoicePill
-            key={m.key}
-            label={m.label}
-            active={milkType === m.key}
-            accentColor={accentColor}
-            accentTint={accentTint}
-            onPress={() => setMilkType(m.key)}
-          />
-        ))}
+      <View style={{ width: '100%', alignSelf: 'stretch', marginTop: 18 }}>
+        <FeedSegmentedControl value={milkType} options={MILK_TYPE_OPTIONS} onChange={setMilkType} />
       </View>
 
       {/* Save */}
