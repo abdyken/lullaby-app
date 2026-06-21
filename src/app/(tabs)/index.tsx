@@ -6,17 +6,37 @@
  * State now lives in the shared LocalEventProvider (so Log sees the same
  * events); this screen is a pure view over it. The interaction rules still come
  * from the pure helpers in '@/data/localInteractions'.
+ *
+ * Theme: the committed surface mode lives in the global ThemeProvider (persisted
+ * across restarts). Tapping the toggle plays a Telegram-style circular reveal —
+ * the screen body is rendered twice (current theme as the base, the incoming
+ * theme clipped to an expanding circle on top) — and only commits the new mode
+ * to the provider once the circle covers the screen, so there's no flash.
  */
-import { useState } from 'react';
-import { Animated, Easing, View } from 'react-native';
+import { useRef, useState } from 'react';
+import {
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 
 import { AccountSheet } from '@/components/auth/AccountSheet';
 import { BabyHeader } from '@/components/BabyHeader';
 import { HandoffCard } from '@/components/HandoffCard';
 import { LogSheet, type SheetOption } from '@/components/LogSheet';
-import { OrbHero } from '@/components/OrbHero';
+import { isLoggingV2Enabled } from '@/features/logging';
+import { DiaperSheet } from '@/features/logging/diaper/DiaperSheet';
+import { FeedSheet } from '@/features/logging/feed/FeedSheet';
+import { PumpSheet } from '@/features/logging/pump/PumpSheet';
+import { SleepSheet } from '@/features/logging/sleep/SleepSheet';
+import { useV2TodayView } from '@/features/logging/state/useV2TodayView';
+import { OrbHero, useOrbBreathe } from '@/components/OrbHero';
 import { QuickLogRow } from '@/components/QuickLogRow';
 import { Screen } from '@/components/Screen';
+import { type RevealOrigin } from '@/components/ThemeIconButton';
 import { ThemeRevealOverlay } from '@/components/ThemeRevealOverlay';
 import { TimelineCard } from '@/components/TimelineCard';
 import { TonightStatus } from '@/components/TonightStatus';
@@ -31,8 +51,9 @@ import {
 } from '@/data/mock';
 import { useAuth } from '@/state/AuthProvider';
 import { useLocalEvents } from '@/state/LocalEventProvider';
+import { useTheme } from '@/state/ThemeProvider';
 import { useHandoffCursor } from '@/state/useHandoffCursor';
-import { colors, surfaces, type SurfaceMode } from '@/theme';
+import { colors, type SurfaceMode } from '@/theme';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -160,52 +181,83 @@ export default function TonightScreen() {
   // new"). resetNonce never changes in Supabase mode.
   const { cursor, ready: cursorReady, markCaughtUp } = useHandoffCursor(cursorContext, resetNonce);
 
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  // Global, persisted surface mode + the shared reveal (owned by ThemeProvider
+  // so the tab bar can animate the same circle in sync). The base renders
+  // against `surfaceMode`; the mode commits once the circle covers the screen.
+  const { mode: surfaceMode, reveal, revealProgress, isTransitioning, beginReveal } = useTheme();
+
   const [sheet, setSheet] = useState<SheetKind | null>(null);
+  // Logging v2 Feed sheet (breast session + bottle). Behind the loggingV2 flag;
+  // the legacy LogSheet feed path stays the default while the flag is off.
+  const loggingV2 = isLoggingV2Enabled();
+  const [feedV2Open, setFeedV2Open] = useState(false);
+  // Logging v2 Sleep sheet (start/stop active session). Behind the same flag; the
+  // legacy orb/Quick-Log sleep path (handleSleepTap) stays default while off.
+  const [sleepV2Open, setSleepV2Open] = useState(false);
+  // Logging v2 Diaper sheet (instant two-tap log incl. "dry"). Behind the same
+  // flag; the legacy LogSheet diaper path stays default while off.
+  const [diaperV2Open, setDiaperV2Open] = useState(false);
+  // Logging v2 Pump sheet (side + timer + optional volume draft). Behind the same
+  // flag; the legacy LogSheet pump path stays default while off.
+  const [pumpV2Open, setPumpV2Open] = useState(false);
   // Account/sign-out lives behind the baby header (blueprint settings home), but
   // only in real-sync mode — local demo keeps the header inert as before.
   const [accountOpen, setAccountOpen] = useState(false);
-  // Telegram-style direct theme toggle. Local to Tonight for now.
-  const [surfaceMode, setSurfaceMode] = useState<SurfaceMode>('day');
-  const [themeAnimating, setThemeAnimating] = useState(false);
-  const [revealVisible, setRevealVisible] = useState(false);
-  const [revealColor, setRevealColor] = useState(surfaces.day.bg);
-  const [revealProgress] = useState(() => new Animated.Value(0));
-  const [revealOpacity] = useState(() => new Animated.Value(0));
 
-  // Feed / Diaper open a sheet (logging happens on Save); Sleep stays immediate.
-  const handleSelect = (kind: PreviewState) => {
-    if (kind === 'sleep') handleSleepTap();
-    else setSheet(kind);
+  // Scroll offset snapshotted when a reveal starts, so the revealed copy lines
+  // up exactly with the scrolled base layer.
+  const [revealScrollY, setRevealScrollY] = useState(0);
+  // Live scroll offset kept in a ref (no re-render).
+  const scrollYRef = useRef(0);
+
+  // Frozen clock for the live "X ago" labels. Captured (in the toggle handler,
+  // off the render path) the instant a reveal starts and used by every time-based
+  // label for the duration, so the re-renders the toggle triggers can't refresh
+  // stale labels mid-reveal ("content reloading"). Idle (no reveal) → undefined,
+  // so the helpers use their own live clock exactly as before. Both layers share it.
+  const [frozenNow, setFrozenNow] = useState<number | undefined>(undefined);
+  const displayNow = isTransitioning ? frozenNow : undefined;
+
+  // One breathe driver shared by the base orb AND its reveal-overlay copy, so the
+  // orb stays perfectly in phase and never appears to jump where the circle crosses it.
+  const breathe = useOrbBreathe();
+
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    scrollYRef.current = event.nativeEvent.contentOffset.y;
   };
 
-  const handleThemeToggle = () => {
-    if (themeAnimating) return;
+  // Feed / Diaper open a sheet (logging happens on Save); Sleep stays immediate.
+  // With loggingV2 on, Feed opens the new purpose-built FeedSheet instead.
+  const handleSelect = (kind: PreviewState) => {
+    if (kind === 'sleep') {
+      if (loggingV2) setSleepV2Open(true);
+      else handleSleepTap();
+      return;
+    }
+    if (kind === 'feed' && loggingV2) {
+      setFeedV2Open(true);
+      return;
+    }
+    if (kind === 'diaper' && loggingV2) {
+      setDiaperV2Open(true);
+      return;
+    }
+    setSheet(kind);
+  };
 
-    const nextMode: SurfaceMode = surfaceMode === 'night' ? 'day' : 'night';
+  const handleThemeToggle = (origin?: RevealOrigin) => {
+    if (isTransitioning) return;
+    // Fallback origin sits under the toggle (top-right) if measuring missed.
+    const fallbackOrigin: RevealOrigin = { x: width - 41, y: insets.top + 35 };
+    // Snapshot scroll + freeze the clock so the revealed copy lines up with the
+    // base and the time-based labels hold still for the whole reveal.
+    setRevealScrollY(scrollYRef.current);
+    setFrozenNow(Date.now());
     hapticSave();
-    setThemeAnimating(true);
-    setRevealColor(surfaces[nextMode].bg);
-    setRevealVisible(true);
-    revealProgress.setValue(0);
-    revealOpacity.setValue(1);
-
-    Animated.timing(revealProgress, {
-      toValue: 1,
-      duration: 520,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start(() => {
-      setSurfaceMode(nextMode);
-      Animated.timing(revealOpacity, {
-        toValue: 0,
-        duration: 140,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      }).start(() => {
-        setRevealVisible(false);
-        setThemeAnimating(false);
-      });
-    });
+    // ThemeProvider runs the shared circle and commits the new mode at the end.
+    beginReveal(origin ?? fallbackOrigin);
   };
 
   // Only Save creates the event + toast; dismissing the sheet logs nothing.
@@ -218,72 +270,99 @@ export default function TonightScreen() {
   };
 
   // Descriptive secondary lines for the quick-log cards, derived from live events.
-  const quickLogMeta = buildQuickLogMeta(events);
+  // Uses the frozen clock so the labels don't shift during a theme reveal.
+  const quickLogMeta = buildQuickLogMeta(events, displayNow);
+
+  // Logging v2 — the Today view read from the v2 store (orb, timeline, quick-log
+  // cards, status strip). Null when the flag is off, so the legacy useLocalEvents
+  // values below are used unchanged (the production path is byte-for-byte the
+  // same). When on, the Sleep Hero, the Sleep card, and the Sleep sheet all act on
+  // the SAME v2 session — the single source of truth for Sleep (plan Phase 6.5).
+  const v2View = useV2TodayView({ now: displayNow, caregivers });
+  const v2 = loggingV2 ? v2View : null;
+  const heroOrb = v2 ? v2.orb : orb;
+  const heroActiveTile = v2 ? v2.activeTile : activeTile;
+  const heroPrimaryAction = v2 ? v2.onPrimaryAction : handlePrimaryAction;
+  const timelineEntries = v2 ? v2.timeline : tonightTimeline;
+  const cardMeta = v2 ? v2.quickLogMeta : quickLogMeta;
+  // TonightStatus derives from `events` when no items are passed (legacy path).
+  const statusItems = v2 ? v2.tonightStatus : undefined;
+
+  // The whole screen body, parameterised by surface mode so it can be rendered
+  // twice during a theme transition (base = current, reveal overlay = incoming)
+  // with identical data and layout — only the colours differ.
+  const renderBody = (bodyMode: SurfaceMode) => (
+    <>
+      <BabyHeader
+        baby={baby}
+        ageWeeks={ageWeeks}
+        caregivers={caregivers}
+        surfaceMode={bodyMode}
+        onPress={syncMode === 'supabase' ? () => setAccountOpen(true) : undefined}
+        onThemeToggle={handleThemeToggle}
+        themeToggleDisabled={isTransitioning}
+      />
+
+      <View style={{ marginTop: 13 }}>
+        <OrbHero
+          state={heroOrb.state}
+          skyTone={heroOrb.skyTone}
+          eyebrow={heroOrb.eyebrow}
+          timerText={heroOrb.timerText}
+          title={heroOrb.title}
+          description={heroOrb.description}
+          actionLabel={heroOrb.actionLabel}
+          progress={heroOrb.progress}
+          coreKind={heroOrb.coreKind}
+          onActionPress={heroPrimaryAction}
+          surfaceMode={bodyMode}
+          breathe={breathe}
+        />
+      </View>
+
+      {/* "Time since last feed / diaper / current sleep" at a glance (P0.5). */}
+      <View style={{ marginTop: 13 }}>
+        <TonightStatus events={events} now={displayNow} items={statusItems} surfaceMode={bodyMode} />
+      </View>
+
+      <View style={{ marginTop: 13 }}>
+        <QuickLogRow
+          selected={heroActiveTile}
+          onSelect={handleSelect}
+          onPump={() => (loggingV2 ? setPumpV2Open(true) : setSheet('pump'))}
+          meta={cardMeta}
+          surfaceMode={bodyMode}
+        />
+      </View>
+
+      <View style={{ marginTop: 13 }}>
+        <TimelineCard entries={timelineEntries} surfaceMode={bodyMode} />
+      </View>
+
+      {/* P0 partner/handoff card — local-only, below the timeline so it never
+          pushes the orb / quick-log row down on small screens. */}
+      <View style={{ marginTop: 13 }}>
+        <HandoffCard
+          events={events}
+          caregivers={caregivers}
+          babyName={baby.name}
+          surfaceMode={bodyMode}
+          syncMode={syncMode}
+          syncStatus={syncStatus}
+          currentCaregiverId={currentCaregiverId}
+          since={cursor}
+          now={displayNow}
+          cursorReady={cursorReady}
+          onMarkCaughtUp={markCaughtUp}
+        />
+      </View>
+    </>
+  );
 
   return (
     <>
-      <Screen surfaceMode={surfaceMode}>
-        <BabyHeader
-          baby={baby}
-          ageWeeks={ageWeeks}
-          caregivers={caregivers}
-          surfaceMode={surfaceMode}
-          onPress={syncMode === 'supabase' ? () => setAccountOpen(true) : undefined}
-          onThemeToggle={handleThemeToggle}
-          themeToggleDisabled={themeAnimating}
-        />
-
-        <View style={{ marginTop: 13 }}>
-          <OrbHero
-            state={orb.state}
-            skyTone={orb.skyTone}
-            eyebrow={orb.eyebrow}
-            timerText={orb.timerText}
-            title={orb.title}
-            description={orb.description}
-            actionLabel={orb.actionLabel}
-            progress={orb.progress}
-            coreKind={orb.coreKind}
-            onActionPress={handlePrimaryAction}
-            surfaceMode={surfaceMode}
-          />
-        </View>
-
-        {/* "Time since last feed / diaper / current sleep" at a glance (P0.5). */}
-        <View style={{ marginTop: 13 }}>
-          <TonightStatus events={events} surfaceMode={surfaceMode} />
-        </View>
-
-        <View style={{ marginTop: 13 }}>
-          <QuickLogRow
-            selected={activeTile}
-            onSelect={handleSelect}
-            onPump={() => setSheet('pump')}
-            meta={quickLogMeta}
-            surfaceMode={surfaceMode}
-          />
-        </View>
-
-        <View style={{ marginTop: 13 }}>
-          <TimelineCard entries={tonightTimeline} surfaceMode={surfaceMode} />
-        </View>
-
-        {/* P0 partner/handoff card — local-only, below the timeline so it never
-            pushes the orb / quick-log row down on small screens. */}
-        <View style={{ marginTop: 13 }}>
-          <HandoffCard
-            events={events}
-            caregivers={caregivers}
-            babyName={baby.name}
-            surfaceMode={surfaceMode}
-            syncMode={syncMode}
-            syncStatus={syncStatus}
-            currentCaregiverId={currentCaregiverId}
-            since={cursor}
-            cursorReady={cursorReady}
-            onMarkCaughtUp={markCaughtUp}
-          />
-        </View>
+      <Screen surfaceMode={surfaceMode} onScroll={handleScroll} scrollEnabled={!isTransitioning}>
+        {renderBody(surfaceMode)}
       </Screen>
 
       {sheet !== null && (
@@ -295,14 +374,36 @@ export default function TonightScreen() {
         />
       )}
 
+      {feedV2Open && <FeedSheet onClose={() => setFeedV2Open(false)} />}
+
+      {sleepV2Open && <SleepSheet onClose={() => setSleepV2Open(false)} />}
+
+      {diaperV2Open && <DiaperSheet onClose={() => setDiaperV2Open(false)} />}
+
+      {pumpV2Open && <PumpSheet onClose={() => setPumpV2Open(false)} />}
+
       {accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} />}
 
+      {/* Flip the status bar to the incoming theme as the reveal starts (the
+          top edge is covered almost immediately). On commit this unmounts and
+          the root status bar — now on the committed mode — takes over seamlessly. */}
+      {reveal.active && <StatusBar style={reveal.toMode === 'night' ? 'light' : 'dark'} />}
+
+      {/* The incoming theme, rendered through the *same* Screen component as the
+          base (so layout/padding match exactly — no misalignment) and revealed
+          through the expanding circular mask. It's a frozen copy pinned to the
+          base's scroll offset. The floating tab bar reveals the same circle
+          itself (see LullabyTabBar), so coverage is continuous to the corners. */}
       <ThemeRevealOverlay
-        visible={revealVisible}
-        color={revealColor}
-        progress={revealProgress}
-        opacity={revealOpacity}
-      />
+        visible={reveal.active}
+        originX={reveal.origin.x}
+        originY={reveal.origin.y}
+        maxRadius={reveal.maxRadius}
+        progress={revealProgress}>
+        <Screen surfaceMode={reveal.toMode} scrollEnabled={false} contentOffset={{ x: 0, y: revealScrollY }}>
+          {renderBody(reveal.toMode)}
+        </Screen>
+      </ThemeRevealOverlay>
     </>
   );
 }

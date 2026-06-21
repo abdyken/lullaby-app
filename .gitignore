@@ -42,8 +42,13 @@ example
 /ios
 /android
 
+# Local QA/debug artifacts (screen recordings, scratch)
+debug/
+
 # Local AI/tool state
-.claude/
+.claude/settings.local.json
+.claude/autopilot.log
+.claude/nohup-autopilot.out
 
 # Expo local state
 .expo/
@@ -53,3 +58,7 @@ example
 .env.*
 !.env.example
 .gstack/
+# Claude runtime logs
+.claude/*.log
+.claude/nohup-*.out
+.claude/autopilot-round-*.out

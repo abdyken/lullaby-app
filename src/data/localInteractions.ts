@@ -89,7 +89,7 @@ export const handleSleepTap = (state: TonightState, now?: number): TonightState 
 export function handlePrimaryAction(state: TonightState, now: number = Date.now()): TonightState {
   switch (state.orbView) {
     case 'sleep':
-      return { events: endRunningSleep(state.events), orbView: 'calm' };
+      return { events: endRunningSleep(state.events, now), orbView: 'calm' };
     case 'feed':
     case 'diaper':
       return { events: state.events, orbView: 'calm' };

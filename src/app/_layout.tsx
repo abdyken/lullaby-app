@@ -6,6 +6,10 @@
  * Fonts: Fredoka for display/headings, Nunito for body — loaded via expo-font
  * through the @expo-google-fonts packages. We hold the splash screen until they
  * resolve so text never flashes in a fallback face.
+ *
+ * Theme: ThemeProvider owns the global, persisted surface mode. The splash also
+ * waits on it (`hydrated`) so a saved night theme never flashes a day frame on
+ * a cold start. The status bar + stack background follow the committed mode.
  */
 import {
   Fredoka_500Medium,
@@ -19,7 +23,8 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { colors } from '@/theme';
+import { ThemeProvider, useTheme } from '@/state/ThemeProvider';
+import { surfaces } from '@/theme';
 import '../global.css';
 
 SplashScreen.preventAutoHideAsync().catch(() => {
@@ -34,26 +39,41 @@ export default function RootLayout() {
     Nunito_800ExtraBold,
   });
 
+  return (
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <RootShell fontsReady={loaded || !!error} />
+      </ThemeProvider>
+    </SafeAreaProvider>
+  );
+}
+
+function RootShell({ fontsReady }: { fontsReady: boolean }) {
+  const { mode, hydrated } = useTheme();
+  const ready = fontsReady && hydrated;
+
   useEffect(() => {
-    if (loaded || error) {
+    if (ready) {
       SplashScreen.hideAsync().catch(() => {});
     }
-  }, [loaded, error]);
+  }, [ready]);
 
-  if (!loaded && !error) {
+  if (!ready) {
     return null;
   }
 
+  const isNight = mode === 'night';
+
   return (
-    <SafeAreaProvider>
-      <StatusBar style="dark" />
+    <>
+      <StatusBar style={isNight ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: colors.cream },
+          contentStyle: { backgroundColor: surfaces[mode].bg },
         }}>
         <Stack.Screen name="(tabs)" />
       </Stack>
-    </SafeAreaProvider>
+    </>
   );
 }
