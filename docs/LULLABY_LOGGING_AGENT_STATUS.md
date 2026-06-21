@@ -9,13 +9,17 @@ AUTOPILOT_STATUS: RUNNING
 
 ## Current phase
 
-Phase 8 (timeline + Undo) — done. The Today screen RENDERS from the v2 store behind
-the `loggingV2` flag (task 09), and as of **task 10** every completing/instant save
-records a shared single-Undo and shows the calm "{event} logged · Undo" toast
-(`LoggingToast`): Undo soft-deletes a created event or restores the previous active
-snapshot on undo-finish (refused on a fresh same-kind conflict), and enters the sync
-queue (plan §8). Up next is **task 11** — proving the end-to-end active-session
-restart-recovery acceptance on top of the already-wired hydrate/reconcile substrate.
+Phases 4–8 (session engine, four flows, timeline, Undo) — done. The Today screen
+RENDERS from the v2 store behind the `loggingV2` flag (task 09), every
+completing/instant save records a shared single-Undo + calm toast (task 10), and as
+of **task 11** the end-to-end active-session restart-recovery acceptance is proven
+(plan §6 AppState, Phase 4/6.5/7.2, §11.2): a force-closed session reopens with the
+correct elapsed time, the same session reads consistently across card / status /
+timeline after relaunch, a backwards device clock surfaces the `started_in_future`
+recover state instead of a negative duration, and the pump volume draft reopens on its
+volume step. No production code changed — the hydrate/reconcile/clock-anomaly substrate
+was already built and wired in tasks 04–08; task 11 is the additive integration-style
+proof (DD1–DD6). Up next is **task 12** — validation + edge-case hardening.
 
 The timeline integration (task 09) is three purely descriptive pieces (no business
 logic in a formatter, plan §8):
@@ -54,7 +58,7 @@ now exposes `todayEvents`. With the flag OFF every widget reads the legacy
 - [x] 08. Implement Pump flow: side + timer + optional volume
 - [x] 09. Integrate all events into Today timeline
 - [x] 10. Add Undo behavior
-- [ ] 11. Add active session recovery after app restart
+- [x] 11. Add active session recovery after app restart
 - [ ] 12. Add validation and edge-case handling
 - [ ] 13. Add or update tests
 - [ ] 14. Run final verification
@@ -357,24 +361,68 @@ now exposes `todayEvents`. With the flag OFF every widget reads the legacy
     undo-finish refused with `undo_conflict` when a fresh session appeared;
     `formatLoggingToast` copy for diaper/bottle/sleep/pump; `buildUndoableMutation`
     fresh id + future expiry + null create snapshot → suite now **134/134**.
+- **11 — Active-session recovery after app restart (plan §6 AppState, Phase 4/6.5/7.2
+  acceptance, §11.2 integration). The end-to-end proof on top of the already-wired
+  hydrate/reconcile substrate.** The recovery MECHANISM was built incrementally in
+  tasks 04–08 and is live behind the flag: `LoggingProvider` runs `hydrateLoggingState`
+  on mount and `subscribeForeground` → `reconcileLoggingState` on every foreground;
+  `detectClockAnomaly` flags `started_in_future` for ANY active session (sleep / breast
+  / pump); `elapsedMs` clamps a backwards clock to 0; `applyActiveSessions` re-derives
+  the `pumpVolumeDraft` from the persisted finished-but-active pump; and all four flow
+  sheets already surface `error.message` as the recover prompt. **Task 11 added no
+  production code** — an audit confirmed the substrate is complete and correct, so the
+  task is the additive, integration-style acceptance proof (test-only), behind the flag
+  with the legacy path byte-for-byte untouched:
+  - Extended the smoke test with 6 checks (DD1–DD6), each driving a REAL use-case, then
+    simulating a force-close by building a fresh repository over the SAME persisted
+    snapshot and hydrating:
+    - **DD1** — finish a sleep (+40m), restart → it leaves the active slots and remains
+      in the timeline as a completed "Sleep · 40m" (fixed duration from `endedAt`, not
+      recomputed to "now"), proving plan §11.2 "finish session → restart → completed
+      event remains".
+    - **DD2** — a running breastfeed (Left, +9m) and a running pump (Both, +18m, NOT
+      finished) each reopen after a restart with the active side / running state intact
+      and the elapsed recomputed from timestamps (9m / 18m), proving plan Phase 4
+      "session not lost after force close".
+    - **DD3** — after a 42m sleep is restored, the SAME `activeSleep` feeds the Quick Log
+      card ("Sleeping · 42m"), the status strip (Sleeping / 42m), and the timeline
+      ("Sleeping" / "42m") identically — the single source of truth (plan Phase 6.5).
+    - **DD4** — a backwards device clock (now before the start) surfaces
+      `started_in_future` for BOTH breast and pump while keeping the real stored session,
+      with the displayed elapsed clamped to 0 (never negative) — plan §6 recover state.
+    - **DD5** — 25 minutes backgrounded → foreground `reconcileLoggingState` recomputes
+      the running timer to 25m from timestamps (no stored counter), creates no duplicate
+      event, and clears the error — plan §6 / §11.2 "AppState background/active → timer
+      recalculates".
+    - **DD6** — a finished pump (Both, +20m) restart restores the `pumpVolumeDraft`
+      (side `both`, `activePump.endedAt` set) so the UI reopens on the volume body, and
+      the card reads "Finished · add volume" — plan Phase 7.2 acceptance.
+  - Suite now **140/140** (134 prior + 6 DD). These complement the prior per-type
+    recovery checks (W6 sleep restart, W7 reconcile + sleep clock-anomaly, X8 breast
+    restart, Y7 sleep restart, AA7 pump-draft restart) by proving the FOUR acceptance
+    scenarios end-to-end across all three session types.
 
 ## Current task
 
-11. Add active session recovery after app restart (plan §6 AppState, Phase 4
-acceptance, §11.2 integration). The substrate already exists and is unit-covered:
-`hydrateLoggingState` restores every active session (sleep / breast / pump) and the
-pump volume draft purely from stored `startedAt`/`endedAt` on launch, and
-`reconcileLoggingState` (wired to `subscribeForeground` in `LoggingProvider`)
-re-reads on foreground and recomputes durations from timestamps — there is no
-persisted counter. Task 11 hardens and proves the END-TO-END recovery acceptance:
-a session started then force-closed reopens with the correct elapsed time; the same
-session shows consistently across the Hero / Quick Log card / sheet after relaunch;
-a backwards device clock surfaces the `started_in_future` recover state rather than a
-negative duration; and the pump volume draft reopens on its volume step after a
-restart. Likely additive (focused integration-style checks + any small gaps found),
-behind the flag; the legacy path stays untouched.
+12. Add validation and edge-case handling (plan §1.1 validators, §6 time
+validations, Phase 10 interaction safety). The five validators already exist
+(`validateBottleAmount`, `validateSessionRange` with the future-start guard,
+`validateBreastSegments`, `validatePumpVolumes`, `validateDiaperKind`) and the
+use-cases call them before writing, returning `{ ok: false, error }` so the provider
+surfaces a recover/error state rather than crashing. Task 12 audits and closes the
+remaining edge cases end-to-end: that every flow's failure path is reachable and
+surfaced (not just unit-validated), that the double-tap mutation lock + `clientEventId`
+idempotency hold under the actual provider, that a backwards-clock finish is rejected
+without persisting a bad record on every session type, and any small gaps the audit
+finds (likely additive checks + targeted fixes), behind the flag with the legacy path
+untouched.
 
-> Milestone: with Undo (10) done, **every v2 flow is now complete end-to-end behind
+> Milestone: with restart-recovery proven (11), **the four flows + timeline + Undo +
+> restart recovery are all complete end-to-end behind the flag.** What remains is
+> hardening (12 validation/edge cases, 13 tests, 14 final verification, 15 cleanup) —
+> not new flows.
+>
+> Earlier milestone: with Undo (10) done, **every v2 flow is now complete end-to-end behind
 > the flag** — Feed / Sleep / Diaper / Pump write to the v2 store, render on the Today
 > screen (orb / quick-log cards / status strip / timeline), Sleep is one v2 session
 > across the Hero + card + sheet (single source of truth, plan Phase 6.5), and each
@@ -614,6 +662,11 @@ behind the flag; the legacy path stays untouched.
   behind the flag: the provider runs `hydrateLoggingState` on mount and
   `subscribeForeground` → `reconcileLoggingState` on foreground, so every active
   session (and the pump volume draft) is recovered from timestamps after a restart.
+  **Proven end-to-end (task 11):** DD1–DD6 exercise the four acceptance scenarios
+  (force-close reopens with correct elapsed; same session consistent across card /
+  status / timeline; backwards clock → `started_in_future` recover state, never a
+  negative duration; pump volume draft reopens on its volume step) across all three
+  session types. No production gap was found — the substrate is complete.
 - ~~The VISIBLE timeline + quick-log card subtitles/active-ring still read the legacy
   `useLocalEvents` store~~ **FIXED (task 09):** under the flag the orb, quick-log card
   subtitles/active-ring, status strip, and timeline all render from the v2 store via
@@ -639,6 +692,23 @@ behind the flag; the legacy path stays untouched.
 
 ## Last verification
 
+- 2026-06-21 (task 11) — `npx tsc --noEmit` → exit 0. `npm run
+  check:local-interactions` → **all 140 checks pass** (134 prior + 6 new, DD1–DD6,
+  the end-to-end restart-recovery acceptance: DD1 finish a sleep → restart → it leaves
+  the active slots and remains in the timeline as completed "Sleep · 40m" (fixed
+  duration from `endedAt`); DD2 a running breastfeed (Left +9m) and a running pump
+  (Both +18m) each reopen after a restart with the active side / running state and the
+  elapsed recomputed from timestamps; DD3 a restored 42m sleep reads "Sleeping · 42m"
+  identically on the Quick Log card, the status strip, and the timeline (single source
+  of truth); DD4 a backwards clock surfaces `started_in_future` for breast + pump with
+  the elapsed clamped to 0, never negative; DD5 25m backgrounded → foreground reconcile
+  recomputes the timer to 25m with no duplicate event and a cleared error; DD6 a
+  finished pump restart restores the volume draft (side `both`, `endedAt` set) and the
+  card reads "Finished · add volume"). `npm run lint` (`expo lint`) → exit 0, clean.
+  `npm test` still not available (no runner; the smoke test is the substitute). **No
+  production code changed** — task 11 is the additive integration-style proof of the
+  recovery substrate built in tasks 04–08, so MVP behavior with the flag off is
+  byte-for-byte unchanged.
 - 2026-06-21 (task 10) — `npx tsc --noEmit` → exit 0. `npm run
   check:local-interactions` → **all 134 checks pass** (127 prior + 7 new, CC1–CC7,
   for the Undo use-case + toast formatter: undo a created diaper soft-deletes it,

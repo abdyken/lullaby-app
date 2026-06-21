@@ -1994,6 +1994,162 @@ async function runAsyncChecks(): Promise<void> {
     const b = buildUndoableMutation({ kind: 'create', eventId: 'e1', previousSnapshot: null, clock });
     assert.notEqual(a.mutationId, b.mutationId); // a new action replaces the previous undo context
   });
+
+  /* ---------------------------------------------------------------- *
+   * Task 11 — active-session recovery after app restart (plan §6
+   * AppState, Phase 4/6.5/7.2 acceptance, §11.2 integration). Each check
+   * drives a real use-case, simulates a force-close by building a FRESH
+   * repository over the SAME persisted snapshot, hydrates, and asserts the
+   * recovered state. There is no persisted counter — every duration is
+   * recomputed from the stored `startedAt`/`endedAt` against the clock.
+   * ---------------------------------------------------------------- */
+
+  await checkAsync('DD1. finish a session → app restart → the completed event remains in the timeline (plan §11.2)', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    assert.ok((await startSleep({ repo, clock, actor }, {})).ok);
+    clock.advance(40 * 60_000);
+    const running = selectActiveSleep(await repo.getActiveSessions(feedScope))!;
+    assert.ok((await finishSleep({ repo, clock, actor }, { event: running })).ok);
+
+    // Force-close + relaunch: a brand-new repository over the same persisted snapshot.
+    const state = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    assert.equal(state.activeSleep, null); // no longer an active session
+    const sleep = state.todayEvents.find(isSleepEvent);
+    assert.ok(sleep && sleep.status === 'completed'); // the completed event survived the restart
+    const view = formatTimelineEvent(sleep!, clock.now());
+    assert.equal(view.title, 'Sleep');
+    assert.equal(view.subtitle, '40m'); // final duration is fixed (from endedAt), not recomputed to "now"
+  });
+
+  await checkAsync('DD2. a running breast + pump session reopens with the correct elapsed time after a restart (plan Phase 4)', async () => {
+    // Breastfeeding: start Left, 9 minutes pass, then force-close.
+    const breastStore = createInMemoryLoggingPersistence();
+    const breastClock = createManualClock(NOW);
+    const breastRepo = createLoggingRepository(breastStore, breastClock);
+    assert.ok((await startBreastFeed({ repo: breastRepo, clock: breastClock, actor }, { side: 'left' })).ok);
+    breastClock.advance(9 * 60_000);
+    const breastState = await hydrateLoggingState(
+      createLoggingRepository(breastStore, breastClock),
+      feedScope,
+      breastClock,
+    );
+    assert.ok(breastState.activeBreastFeed);
+    assert.equal(breastState.activeBreastFeed?.details.activeSide, 'left'); // active side restored
+    const totals = breastSegmentTotals(breastState.activeBreastFeed!.details.segments, breastClock.now());
+    assert.equal(totals.totalLeftMs, 9 * 60_000); // recomputed from the open segment — no stored counter
+
+    // Pump: start Both, 18 minutes pass (still running, NOT finished), then force-close.
+    const pumpStore = createInMemoryLoggingPersistence();
+    const pumpClock = createManualClock(NOW);
+    const pumpRepo = createLoggingRepository(pumpStore, pumpClock);
+    assert.ok((await startPump({ repo: pumpRepo, clock: pumpClock, actor }, { side: 'both' })).ok);
+    pumpClock.advance(18 * 60_000);
+    const pumpState = await hydrateLoggingState(createLoggingRepository(pumpStore, pumpClock), feedScope, pumpClock);
+    assert.ok(pumpState.activePump && pumpState.activePump.endedAt === null); // still running, not a draft
+    assert.equal(pumpState.pumpVolumeDraft, null);
+    assert.equal(sessionElapsedMs(pumpState.activePump!, pumpClock.now()), 18 * 60_000);
+  });
+
+  await checkAsync('DD3. the recovered sleep reads consistently across card + status + timeline (single source of truth, plan Phase 6.5)', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    assert.ok((await startSleep({ repo: createLoggingRepository(persistence, clock), clock, actor }, {})).ok);
+    clock.advance(42 * 60_000);
+    const state = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    assert.ok(state.activeSleep);
+
+    // All three surfaces derive from the SAME restored activeSleep / sessionElapsedMs.
+    const subtitles = buildV2QuickLogSubtitles(
+      {
+        todayEvents: state.todayEvents,
+        activeBreastFeed: state.activeBreastFeed,
+        activeSleep: state.activeSleep,
+        activePump: state.activePump,
+        pumpVolumeDraft: state.pumpVolumeDraft,
+      },
+      clock.now(),
+    );
+    const status = buildV2TonightStatus({ todayEvents: state.todayEvents, activeSleep: state.activeSleep }, clock.now());
+    const timeline = formatTimelineEvent(state.activeSleep!, clock.now());
+
+    assert.equal(subtitles.sleep, 'Sleeping · 42m'); // Quick Log card
+    const sleepStatus = status.find((i) => i.key === 'sleep');
+    assert.equal(sleepStatus?.label, 'Sleeping');
+    assert.equal(sleepStatus?.value, '42m'); // status strip
+    assert.equal(timeline.title, 'Sleeping');
+    assert.equal(timeline.subtitle, '42m'); // timeline — the same 42m on every surface
+  });
+
+  await checkAsync('DD4. a backwards device clock surfaces the recover state for breast + pump, never a negative duration (plan §6)', async () => {
+    // Breastfeeding started "now", then the device clock jumps backwards.
+    const breastStore = createInMemoryLoggingPersistence();
+    const breastClock = createManualClock(NOW);
+    assert.ok(
+      (await startBreastFeed({ repo: createLoggingRepository(breastStore, breastClock), clock: breastClock, actor }, { side: 'right' })).ok,
+    );
+    breastClock.set(NOW - 60_000); // clock moves to before the session start
+    const breastState = await hydrateLoggingState(createLoggingRepository(breastStore, breastClock), feedScope, breastClock);
+    assert.ok(breastState.activeBreastFeed); // the real session is kept (stored data)
+    assert.equal(breastState.error?.code, 'started_in_future'); // but flagged for a recover prompt
+    assert.equal(sessionElapsedMs(breastState.activeBreastFeed!, breastClock.now()), 0); // clamped, never negative
+
+    // The same recover state applies to a pump session.
+    const pumpStore = createInMemoryLoggingPersistence();
+    const pumpClock = createManualClock(NOW);
+    assert.ok((await startPump({ repo: createLoggingRepository(pumpStore, pumpClock), clock: pumpClock, actor }, { side: 'left' })).ok);
+    pumpClock.set(NOW - 60_000);
+    const pumpState = await hydrateLoggingState(createLoggingRepository(pumpStore, pumpClock), feedScope, pumpClock);
+    assert.ok(pumpState.activePump);
+    assert.equal(pumpState.error?.code, 'started_in_future');
+    assert.equal(sessionElapsedMs(pumpState.activePump!, pumpClock.now()), 0);
+  });
+
+  await checkAsync('DD5. foreground reconcile recomputes a running timer from timestamps after time in the background (plan §6, §11.2)', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    assert.ok((await startSleep({ repo, clock, actor }, {})).ok);
+    const hydrated = await hydrateLoggingState(repo, feedScope, clock);
+    assert.equal(sessionElapsedMs(hydrated.activeSleep!, clock.now()), 0);
+    const eventsBefore = hydrated.todayEvents.length;
+
+    // 25 minutes pass with the app backgrounded, then it returns to the foreground.
+    clock.advance(25 * 60_000);
+    const reconciled = await reconcileLoggingState(repo, feedScope, clock, hydrated);
+    assert.ok(reconciled.activeSleep);
+    assert.equal(sessionElapsedMs(reconciled.activeSleep!, clock.now()), 25 * 60_000); // recomputed, not a stored counter
+    assert.equal(reconciled.todayEvents.length, eventsBefore); // reconcile re-reads, it does not create a new event
+    assert.equal(reconciled.error, null);
+  });
+
+  await checkAsync('DD6. the pump volume draft reopens on its volume step after a restart (plan Phase 7.2)', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    assert.ok((await startPump({ repo, clock, actor }, { side: 'both' })).ok);
+    clock.advance(20 * 60_000);
+    const running = selectActivePump(await repo.getActiveSessions(feedScope), 'cg-mom')!;
+    assert.ok((await finishPump({ repo, clock, actor }, { event: running })).ok);
+
+    // Force-close while on the volume step, then relaunch.
+    const state = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
+    assert.ok(state.pumpVolumeDraft); // the draft is recovered, not lost (plan Phase 7.2 acceptance)
+    assert.equal(state.pumpVolumeDraft?.side, 'both');
+    assert.ok(state.activePump && state.activePump.endedAt !== null); // finished → UI opens the volume body, not the timer
+    const subtitles = buildV2QuickLogSubtitles(
+      {
+        todayEvents: state.todayEvents,
+        activeBreastFeed: state.activeBreastFeed,
+        activeSleep: state.activeSleep,
+        activePump: state.activePump,
+        pumpVolumeDraft: state.pumpVolumeDraft,
+      },
+      clock.now(),
+    );
+    assert.equal(subtitles.pump, 'Finished · add volume'); // the card reopens on the volume step
+  });
 }
 
 runAsyncChecks()
