@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fonts, radii, shadows } from '@/theme';
 
 import { useLogging } from '../state/LoggingProvider';
+import { confirmDiscardSession } from '../ui/confirmDiscardSession';
 import { PumpActive } from './PumpActive';
 import { PumpIdle } from './PumpIdle';
 import { PumpVolumeDraft } from './PumpVolumeDraft';
@@ -54,10 +55,12 @@ export function PumpSheet({ onClose }: Props) {
     void finishPump();
   };
 
-  const handleCancel = async () => {
-    await cancelPump();
-    handleClose();
-  };
+  // Cancel discards an in-progress pump with no Undo, so confirm first (plan §10).
+  // (Cancel is offered while the timer runs; a finished pump shows the volume draft.)
+  const handleCancel = () =>
+    confirmDiscardSession('pump session', () => {
+      void cancelPump().then(handleClose);
+    });
 
   const handleSave = async (leftVolumeMl: number | null, rightVolumeMl: number | null) => {
     const ok = await savePump({ leftVolumeMl, rightVolumeMl });

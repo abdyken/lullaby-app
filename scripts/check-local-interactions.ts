@@ -42,6 +42,8 @@ import { parsePersistedState, serializeState } from '../src/data/persistedState'
 import { createManualClock, systemClock } from '../src/features/logging/timer/clock';
 import { newClientEventId, newUuid } from '../src/features/logging/domain/ids';
 import {
+  BOTTLE_MAX_ML,
+  PUMP_MAX_ML,
   validateBottleAmount,
   validateBreastSegments,
   validateDiaperKind,
@@ -2149,6 +2151,168 @@ async function runAsyncChecks(): Promise<void> {
       clock.now(),
     );
     assert.equal(subtitles.pump, 'Finished · add volume'); // the card reopens on the volume step
+  });
+
+  // EE. Validation & edge-case handling (plan §1.1 validators, §6 time validations,
+  // task 12). Drives each flow's FAILURE path through a real repository to prove it
+  // is reachable end-to-end and surfaces a recover/error state WITHOUT persisting a
+  // bad record — complementing the validator unit checks (U4–U9) and the per-flow
+  // happy paths (X/Y/Z/AA). A backwards device clock is the canonical §6 anomaly:
+  // the finish/switch is refused and the session is left untouched.
+  await checkAsync('EE1. finishBreastFeed with a backwards device clock is refused; the session stays active (plan §6)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps, { side: 'left' })).ok);
+    const open = await activeBreast(repo);
+    assert.ok(open);
+    clock.set(NOW - 60_000); // the device clock jumps to before the session started
+    const r = await finishBreastFeed(deps, { event: open });
+    assert.equal(r.ok, false);
+    // The open segment would close before it began → the segment-chain guard catches
+    // the reversed range first (the range guard is the second line of defence).
+    if (!r.ok) assert.equal(r.error.code, 'invalid_breast_segments');
+    const still = await activeBreast(repo);
+    assert.ok(still);
+    assert.equal(still.status, 'active'); // nothing was completed
+    assert.equal(still.details.activeSide, 'left'); // unchanged
+    assert.equal(still.details.segments.length, 1);
+    assert.equal(still.details.segments[0].endedAt, null); // still open
+  });
+
+  await checkAsync('EE2. finishPump with a backwards device clock is refused; the pump stays running, no volume draft (plan §6)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startPump(deps, { side: 'both' })).ok);
+    const open = await activePumpOf(repo);
+    assert.ok(open);
+    clock.set(NOW - 60_000);
+    const r = await finishPump(deps, { event: open });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.error.code, 'started_in_future');
+    const still = await activePumpOf(repo);
+    assert.ok(still);
+    assert.equal(still.endedAt, null); // never finished → still the running timer, not a draft
+  });
+
+  await checkAsync('EE3. finishSleep with a backwards device clock is refused; the sleep stays active (plan §6, complements Y5)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    const open = await activeSleepOf(repo);
+    assert.ok(open);
+    clock.set(NOW - 60_000);
+    const r = await finishSleep(deps, { event: open });
+    assert.equal(r.ok, false);
+    // Y5 covers the manual "endedAt before startedAt" case; this is the device-clock-
+    // moved-backwards case, which the future-start guard catches first.
+    if (!r.ok) assert.equal(r.error.code, 'started_in_future');
+    const still = await activeSleepOf(repo);
+    assert.ok(still);
+    assert.equal(still.status, 'active');
+    assert.equal(still.endedAt, null);
+  });
+
+  await checkAsync('EE4. switchBreastSide to a time before the open segment began is refused; segments unchanged (plan §5.2/§6)', async () => {
+    const { repo, deps } = newFeedDeps();
+    assert.ok((await startBreastFeed(deps, { side: 'left' })).ok);
+    const open = await activeBreast(repo);
+    assert.ok(open);
+    const r = await switchBreastSide(deps, {
+      event: open,
+      side: 'right',
+      at: new Date(NOW - 60_000).toISOString(),
+    });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.error.code, 'invalid_breast_segments');
+    const still = await activeBreast(repo);
+    assert.ok(still);
+    assert.equal(still.details.activeSide, 'left'); // no side switch persisted
+    assert.equal(still.details.segments.length, 1); // no second segment appended
+    assert.equal(still.details.segments[0].endedAt, null); // first segment still open
+  });
+
+  await checkAsync('EE5. saveCompletedSleep rejects endedAt before startedAt and is idempotent by clientEventId (plan §6/§9)', async () => {
+    // Ordering: a range that ends before it starts is rejected and persists nothing.
+    const a = newFeedDeps();
+    const bad = await saveCompletedSleep(a.deps, {
+      startedAt: new Date(NOW - 30 * 60_000).toISOString(),
+      endedAt: new Date(NOW - 60 * 60_000).toISOString(),
+    });
+    assert.equal(bad.ok, false);
+    if (!bad.ok) assert.equal(bad.error.code, 'invalid_session_range');
+    const todayA = await a.repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(todayA.filter(isSleepEvent).length, 0);
+
+    // Idempotency: a retried save with the same clientEventId lands a single event.
+    const b = newFeedDeps();
+    const input = {
+      startedAt: new Date(NOW - 60 * 60_000).toISOString(),
+      endedAt: new Date(NOW - 30 * 60_000).toISOString(),
+      clientEventId: 'cid-completed-sleep',
+    };
+    assert.ok((await saveCompletedSleep(b.deps, input)).ok);
+    assert.ok((await saveCompletedSleep(b.deps, input)).ok); // retried (double-tap)
+    const todayB = await b.repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(todayB.filter(isSleepEvent).length, 1);
+  });
+
+  await checkAsync('EE6. validator sanity caps are reachable through the use-cases (bottle/pump) and persist nothing (plan §1.1)', async () => {
+    // Bottle: an over-cap amount and a non-finite amount both reject and save nothing.
+    const bottle = newFeedDeps();
+    const overBottle = await saveBottleFeed(bottle.deps, { amountMl: BOTTLE_MAX_ML + 1, milkType: 'formula' });
+    assert.equal(overBottle.ok, false);
+    if (!overBottle.ok) assert.equal(overBottle.error.code, 'invalid_bottle_amount');
+    assert.equal(
+      (await saveBottleFeed(bottle.deps, { amountMl: Number.POSITIVE_INFINITY, milkType: 'formula' })).ok,
+      false,
+    );
+    const todayBottle = await bottle.repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    assert.equal(todayBottle.filter(isBottleFeed).length, 0);
+
+    // Pump: an over-cap or negative side volume rejects and leaves the draft intact.
+    const pump = newFeedDeps();
+    assert.ok((await startPump(pump.deps, { side: 'both' })).ok);
+    pump.clock.advance(10 * 60_000);
+    const finished = await activePumpOf(pump.repo);
+    assert.ok(finished);
+    assert.ok((await finishPump(pump.deps, { event: finished })).ok);
+    const draft = await activePumpOf(pump.repo);
+    assert.ok(draft);
+    assert.equal(
+      (await savePump(pump.deps, { event: draft, leftVolumeMl: PUMP_MAX_ML + 1, rightVolumeMl: 60 })).ok,
+      false,
+    );
+    assert.equal(
+      (await savePump(pump.deps, { event: draft, leftVolumeMl: -10, rightVolumeMl: 60 })).ok,
+      false,
+    );
+    const stillDraft = await activePumpOf(pump.repo);
+    assert.ok(stillDraft);
+    assert.equal(stillDraft.status, 'active'); // not completed
+    assert.notEqual(stillDraft.endedAt, null); // still a finished-awaiting-volume draft
+  });
+
+  await checkAsync('EE7. a use-case failure surfaces as a store recover state, and a later success clears it (the provider flow, plan §6)', async () => {
+    const { repo, clock, deps } = newFeedDeps();
+    assert.ok((await startSleep(deps, {})).ok);
+    let state = await hydrateLoggingState(repo, feedScope, clock);
+    const open = state.activeSleep;
+    assert.ok(open);
+    assert.equal(state.error, null);
+
+    // Device clock jumps backwards → finishing is refused and (exactly as the
+    // provider does) the failure is dropped into the store as a recover state.
+    clock.set(NOW - 60_000);
+    const bad = await finishSleep(deps, { event: open });
+    assert.equal(bad.ok, false);
+    if (!bad.ok) state = withError(state, bad.error);
+    assert.equal(state.error?.code, 'started_in_future');
+
+    // The clock recovers; finishing now succeeds and a reconcile clears the recover
+    // state, leaving the completed sleep in the timeline.
+    clock.set(NOW + 40 * 60_000);
+    assert.ok((await finishSleep(deps, { event: open })).ok);
+    state = await reconcileLoggingState(repo, feedScope, clock, state);
+    assert.equal(state.error, null);
+    assert.equal(state.activeSleep, null);
+    assert.ok(state.todayEvents.some((e) => isSleepEvent(e) && e.status === 'completed'));
   });
 }
 

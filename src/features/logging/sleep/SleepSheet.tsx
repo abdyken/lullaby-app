@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fonts, radii, shadows } from '@/theme';
 
 import { useLogging } from '../state/LoggingProvider';
+import { confirmDiscardSession } from '../ui/confirmDiscardSession';
 import { SleepActive } from './SleepActive';
 import { SleepIdle } from './SleepIdle';
 
@@ -43,10 +44,11 @@ export function SleepSheet({ onClose }: Props) {
     handleClose();
   };
 
-  const handleCancel = async () => {
-    await cancelSleep();
-    handleClose();
-  };
+  // Cancel discards an in-progress sleep with no Undo, so confirm first (plan §10).
+  const handleCancel = () =>
+    confirmDiscardSession('sleep', () => {
+      void cancelSleep().then(handleClose);
+    });
 
   // The sheet expresses the intent (now / N minutes ago); the actual timestamp
   // is resolved here and passed to the use-case, which owns all validation.
