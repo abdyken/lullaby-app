@@ -7,15 +7,18 @@ LOG_FILE=".claude/autopilot.log"
 
 MAX_ROUNDS="${MAX_ROUNDS:-30}"
 
-# Default strongest setup.
 CLAUDE_MODEL="${CLAUDE_MODEL:-opus}"
 CLAUDE_EFFORT="${CLAUDE_EFFORT:-max}"
 
-# If Claude hits usage/session/rate limits, keep waiting and retrying.
 LIMIT_RETRY_SLEEP_SECONDS="${LIMIT_RETRY_SLEEP_SECONDS:-1800}"
 MAX_LIMIT_RETRIES="${MAX_LIMIT_RETRIES:-999}"
 
 mkdir -p .claude
+
+status_is() {
+  local expected="$1"
+  grep -qx "AUTOPILOT_STATUS: ${expected}" "$STATUS_FILE"
+}
 
 echo "==============================" | tee -a "$LOG_FILE"
 echo "Lullaby Claude Autopilot Start" | tee -a "$LOG_FILE"
@@ -45,12 +48,12 @@ while [ "$ROUND" -le "$MAX_ROUNDS" ]; do
   echo "===== AUTOPILOT ROUND $ROUND / $MAX_ROUNDS =====" | tee -a "$LOG_FILE"
   echo "Time: $(date)" | tee -a "$LOG_FILE"
 
-  if grep -q "^AUTOPILOT_STATUS: DONE  "$STATUS_FILE"; then
+  if status_is "DONE"; then
     echo "Autopilot status is DONE. Exiting." | tee -a "$LOG_FILE"
     exit 0
   fi
 
-  if grep -q "^AUTOPILOT_STATUS: BLOCKED  "$STATUS_FILE"; then
+  if status_is "BLOCKED"; then
     echo "Autopilot status is BLOCKED. Exiting." | tee -a "$LOG_FILE"
     exit 2
   fi
@@ -103,12 +106,12 @@ while [ "$ROUND" -le "$MAX_ROUNDS" ]; do
 
   LIMIT_RETRY_COUNT=0
 
-  if grep -q "^AUTOPILOT_STATUS: DONE  "$STATUS_FILE"; then
+  if status_is "DONE"; then
     echo "Autopilot completed all tasks." | tee -a "$LOG_FILE"
     exit 0
   fi
 
-  if grep -q "^AUTOPILOT_STATUS: BLOCKED  "$STATUS_FILE"; then
+  if status_is "BLOCKED"; then
     echo "Autopilot became blocked." | tee -a "$LOG_FILE"
     exit 2
   fi
