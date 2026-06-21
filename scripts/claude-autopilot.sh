@@ -45,12 +45,12 @@ while [ "$ROUND" -le "$MAX_ROUNDS" ]; do
   echo "===== AUTOPILOT ROUND $ROUND / $MAX_ROUNDS =====" | tee -a "$LOG_FILE"
   echo "Time: $(date)" | tee -a "$LOG_FILE"
 
-  if grep -q "AUTOPILOT_STATUS: DONE" "$STATUS_FILE"; then
+  if grep -q "^AUTOPILOT_STATUS: DONE  "$STATUS_FILE"; then
     echo "Autopilot status is DONE. Exiting." | tee -a "$LOG_FILE"
     exit 0
   fi
 
-  if grep -q "AUTOPILOT_STATUS: BLOCKED" "$STATUS_FILE"; then
+  if grep -q "^AUTOPILOT_STATUS: BLOCKED  "$STATUS_FILE"; then
     echo "Autopilot status is BLOCKED. Exiting." | tee -a "$LOG_FILE"
     exit 2
   fi
@@ -103,12 +103,12 @@ while [ "$ROUND" -le "$MAX_ROUNDS" ]; do
 
   LIMIT_RETRY_COUNT=0
 
-  if grep -q "AUTOPILOT_STATUS: DONE" "$STATUS_FILE"; then
+  if grep -q "^AUTOPILOT_STATUS: DONE  "$STATUS_FILE"; then
     echo "Autopilot completed all tasks." | tee -a "$LOG_FILE"
     exit 0
   fi
 
-  if grep -q "AUTOPILOT_STATUS: BLOCKED" "$STATUS_FILE"; then
+  if grep -q "^AUTOPILOT_STATUS: BLOCKED  "$STATUS_FILE"; then
     echo "Autopilot became blocked." | tee -a "$LOG_FILE"
     exit 2
   fi
