@@ -10,115 +10,97 @@
  * Cancel is visually separated from Finish (plan §10): Finish logs a completed
  * feed, Cancel discards the session entirely (never reaches the timeline).
  */
-import { Pressable, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { PrimaryActionButton } from '@/components/PrimaryActionButton';
-import { colors, fonts, radii } from '@/theme';
+import { colors, fonts, shadows } from '@/theme';
 
 import type { BreastFeedEvent, BreastSide } from '../domain/types';
 import { breastSegmentTotals, formatClock, formatCompactDuration } from '../timer/sessionMath';
-import { useElapsedTime } from '../timer/useElapsedTime';
-import { ChoicePill } from './ChoicePill';
+import { FeedSegmentedControl, type FeedSegmentedOption } from './FeedSegmentedControl';
 
 type Props = {
   event: BreastFeedEvent;
   accentColor: string;
-  accentTint: string;
   onSwitch: (side: BreastSide) => void;
   onFinish: () => void;
   onCancel: () => void;
 };
 
 const SIDE_LABEL: Record<BreastSide, string> = { left: 'Left', right: 'Right' };
-
-function StatRow({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'baseline',
-        paddingVertical: 5,
-      }}>
-      <Text
-        style={{
-          fontFamily: strong ? fonts.bodyBold : fonts.body,
-          fontSize: strong ? 15 : 13.5,
-          color: strong ? colors.ink : colors.inkSoft,
-        }}>
-        {label}
-      </Text>
-      <Text
-        style={{
-          fontFamily: fonts.display,
-          fontSize: strong ? 26 : 16,
-          color: strong ? colors.ink : colors.inkSoft,
-          fontVariant: ['tabular-nums'],
-        }}>
-        {value}
-      </Text>
-    </View>
-  );
-}
+const SIDE_OPTIONS: FeedSegmentedOption<BreastSide>[] = [
+  { value: 'left', label: SIDE_LABEL.left, accessibilityLabel: 'Switch to left breast' },
+  { value: 'right', label: SIDE_LABEL.right, accessibilityLabel: 'Switch to right breast' },
+];
 
 export function BreastFeedActive({
   event,
   accentColor,
-  accentTint,
   onSwitch,
   onFinish,
   onCancel,
 }: Props) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => clearInterval(id);
+  }, []);
+
   // Display-only tick; the value is derived from `startedAt`, not stored.
-  const elapsed = useElapsedTime(event.startedAt, true);
-  const startMs = event.startedAt ? Date.parse(event.startedAt) : 0;
-  const now = startMs + elapsed;
-  const { totalLeftMs, totalRightMs } = breastSegmentTotals(event.details.segments, now);
+  const startMs = event.startedAt ? Date.parse(event.startedAt) : nowMs;
+  const elapsed = Math.max(0, nowMs - startMs);
+  const { totalLeftMs, totalRightMs } = breastSegmentTotals(event.details.segments, nowMs);
   const activeSide = event.details.activeSide;
+  const activeSideLabel = activeSide ? SIDE_LABEL[activeSide] : null;
 
   return (
-    <View style={{ marginTop: 12 }}>
-      <View
-        style={{
-          backgroundColor: colors.surfaceSoft,
-          borderRadius: radii.medium,
-          paddingHorizontal: 16,
-          paddingVertical: 10,
-        }}>
-        <StatRow label="Total" value={formatClock(elapsed)} strong />
-        <View style={{ height: 1, backgroundColor: colors.line, marginVertical: 4 }} />
-        <StatRow label="Left" value={formatCompactDuration(totalLeftMs)} />
-        <StatRow label="Right" value={formatCompactDuration(totalRightMs)} />
+    <View style={styles.root}>
+      {activeSideLabel && (
+        <View style={styles.statusChip}>
+          <View style={[styles.statusDot, { backgroundColor: accentColor }]} />
+          <Text style={styles.statusText}>{activeSideLabel} side is active</Text>
+        </View>
+      )}
+
+      <View style={styles.timerCard}>
+        <Text style={styles.timerLabel}>TOTAL FEEDING TIME</Text>
+        <Text style={styles.timerValue}>{formatClock(elapsed)}</Text>
+        <View style={styles.metricRow}>
+          <View style={styles.metric}>
+            <Text style={styles.metricLabel}>LEFT</Text>
+            <Text style={styles.metricValue}>{formatCompactDuration(totalLeftMs)}</Text>
+          </View>
+          <View style={styles.metric}>
+            <Text style={styles.metricLabel}>RIGHT</Text>
+            <Text style={styles.metricValue}>{formatCompactDuration(totalRightMs)}</Text>
+          </View>
+        </View>
       </View>
 
       <Text
-        style={{
-          fontFamily: fonts.bodyBold,
-          fontSize: 11,
-          letterSpacing: 1,
-          color: colors.inkFaint,
-          marginTop: 16,
-          marginBottom: 8,
-        }}>
+        style={styles.kicker}>
         SWITCH SIDE
       </Text>
-      <View style={{ flexDirection: 'row', gap: 9 }}>
-        {(['left', 'right'] as const).map((s) => (
-          <ChoicePill
-            key={s}
-            label={SIDE_LABEL[s]}
-            accessibilityLabel={`Switch to ${SIDE_LABEL[s].toLowerCase()} breast`}
-            active={activeSide === s}
-            accentColor={accentColor}
-            accentTint={accentTint}
-            onPress={() => onSwitch(s)}
-          />
-        ))}
+      <View style={styles.segmentedWrap}>
+        <FeedSegmentedControl value={activeSide} options={SIDE_OPTIONS} onChange={onSwitch} />
       </View>
+      <View style={{ height: 24 }} />
 
-      <View style={{ marginTop: 20, alignItems: 'center' }}>
-        <PrimaryActionButton label="Finish feeding" accentColor={accentColor} onPress={onFinish} />
-      </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Finish feeding"
+        onPress={onFinish}
+        hitSlop={8}
+        style={({ pressed }) => [styles.finishPressable, { transform: [{ scale: pressed ? 0.98 : 1 }] }]}>
+        <View style={[styles.finishSurface, { backgroundColor: accentColor, shadowColor: accentColor }]}>
+          <Text style={styles.finishText}>Finish feeding</Text>
+        </View>
+      </Pressable>
+      <View style={{ height: 28 }} />
 
       <Pressable
         accessibilityRole="button"
@@ -126,18 +108,136 @@ export function BreastFeedActive({
         onPress={onCancel}
         hitSlop={8}
         style={({ pressed }) => ({
-          marginTop: 12,
+          marginTop: 0,
           alignSelf: 'center',
           paddingVertical: 8,
           paddingHorizontal: 14,
           opacity: pressed ? 0.5 : 1,
         })}>
-        <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.inkFaint }}>
-          Cancel session
-        </Text>
+        <Text style={styles.cancelText}>Cancel this session</Text>
       </Pressable>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    marginTop: 14,
+    alignItems: 'stretch',
+  },
+  statusChip: {
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.surfaceSoft,
+    borderRadius: 999,
+    paddingVertical: 7,
+    paddingHorizontal: 11,
+    marginBottom: 16,
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  statusText: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 11.5,
+    color: colors.inkSoft,
+  },
+  timerCard: {
+    backgroundColor: colors.surfaceSoft,
+    borderRadius: 24,
+    paddingVertical: 19,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+  },
+  timerLabel: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 11,
+    letterSpacing: 1,
+    color: colors.inkFaint,
+  },
+  timerValue: {
+    fontFamily: fonts.display,
+    fontSize: 40,
+    lineHeight: 46,
+    color: colors.ink,
+    fontVariant: ['tabular-nums'],
+    marginTop: 4,
+  },
+  metricRow: {
+    width: '100%',
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+  },
+  metric: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    paddingVertical: 11,
+    paddingHorizontal: 8,
+    ...shadows.card,
+  },
+  metricLabel: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 10.5,
+    letterSpacing: 0.6,
+    color: colors.inkFaint,
+  },
+  metricValue: {
+    fontFamily: fonts.displayMedium,
+    fontSize: 20,
+    color: colors.ink,
+    fontVariant: ['tabular-nums'],
+    marginTop: 2,
+  },
+  kicker: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 11,
+    letterSpacing: 1,
+    color: colors.inkFaint,
+    marginTop: 18,
+    marginBottom: 8,
+  },
+  segmentedWrap: {
+    width: '100%',
+    alignSelf: 'stretch',
+  },
+  finishPressable: {
+    width: '100%',
+    alignSelf: 'stretch',
+    marginTop: 0,
+    borderRadius: 20,
+  },
+  finishSurface: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 17,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 5,
+  },
+  finishText: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 15.5,
+    color: colors.white,
+    textAlign: 'center',
+  },
+  cancelText: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 12.5,
+    color: colors.inkSoft,
+    textAlign: 'center',
+  },
+});
 
 export default BreastFeedActive;
