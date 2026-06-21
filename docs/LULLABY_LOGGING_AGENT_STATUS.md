@@ -37,9 +37,13 @@ on, so the flag-off MVP is byte-for-byte unchanged. As of **task 13**, the tests
 reviewed and extended: a new test-only `FF` section (FF1–FF7) encodes the plan §11.3
 end-to-end journeys as use-case sequences (start → close/reopen → continue → finish, then
 assert the rendered timeline/card/status/toast) plus the explicit §11.2 repo→store→timeline
-pipeline, taking the smoke test to **154 checks** covering the full §11 matrix. Up next is
-**task 14** — the final verification pass (plan §14 Definition of Done), then task 15
-cleanup + summary.
+pipeline, taking the smoke test to **154 checks** covering the full §11 matrix. As of
+**task 14**, the final verification pass is signed off: `npx tsc --noEmit` → exit 0,
+`npm run check:local-interactions` → **all 154 checks pass**, `npm run lint` → exit 0
+clean, and every plan §14 Definition-of-Done item is checked against a proving check (see
+the §14 sign-off below). The `loggingV2` flag still defaults to `false` (no `.env` / env
+override), so the flag-off MVP is the shipping path and task 14 changed **zero** production
+code. Up next is the final **task 15** — cleanup + implementation summary.
 
 The timeline integration (task 09) is three purely descriptive pieces (no business
 logic in a formatter, plan §8):
@@ -81,7 +85,7 @@ now exposes `todayEvents`. With the flag OFF every widget reads the legacy
 - [x] 11. Add active session recovery after app restart
 - [x] 12. Add validation and edge-case handling
 - [x] 13. Add or update tests
-- [ ] 14. Run final verification
+- [x] 14. Run final verification
 - [ ] 15. Final cleanup and implementation summary
 
 ## Completed tasks
@@ -510,22 +514,62 @@ now exposes `todayEvents`. With the flag OFF every widget reads the legacy
     no Jest/RNTL runner to extend); the Node smoke test is the substitute by design
     (CLAUDE.md: "add tests where the project already has test infrastructure"). No
     production code changed, so the flag-off MVP is byte-for-byte unchanged.
+- **14 — Run final verification (plan §14 Definition of Done).** The §14 sign-off run.
+  No production code changed — task 14 is verification only. Ran the full check suite one
+  last time and confirmed the safety invariant + every DoD item against a proving check:
+  - `npx tsc --noEmit` → **exit 0**.
+  - `npm run check:local-interactions` → **all 154 checks pass** (the full plan §11 matrix:
+    U domain/clock/ids/validators, V repository/mapper/persistence/flag, W
+    sessionMath/selectors/store/hydration/reconcile, X Feed, Y Sleep, Z Diaper, AA Pump,
+    BB timeline + quick-log selectors, CC Undo, DD restart-recovery acceptance, EE
+    validation/edge-case failure matrix, FF §11.3 E2E journeys + the §11.2 pipeline).
+  - `npm run lint` (`expo lint`) → **exit 0**, clean.
+  - `npm test` → exit 1 / **no `test` script** (genuinely unavailable; documented — the
+    Node smoke test is the substitute by design, the app has no Jest/RNTL runner).
+  - **Safety invariant re-confirmed:** `DEFAULT_LOGGING_FLAGS = { loggingV2: false }`,
+    `EXPO_PUBLIC_LOGGING_V2` is unset, and no `.env` (only `.env.example`) sets it — so the
+    flag resolves to `false` and the flag-off MVP is the shipping path, unchanged.
+  - **Plan §14 Definition of Done — every item ✅ with its proving check:**
+    - ✅ All four cards use separate purpose-built flows — `FeedSheet` / `SleepSheet` /
+      `DiaperSheet` / `PumpSheet`, each gated to its own flow in `(tabs)/index.tsx`
+      (tasks 05–08).
+    - ✅ Diaper logged in two taps — `DiaperTypeButton` → `saveDiaper(kind)`, no Save step
+      (Z1, FF2).
+    - ✅ Bottle logged without a required keyboard — presets + ±10 stepper, no `TextInput`
+      (X1, FF3).
+    - ✅ Breastfeeding calculates Left/Right after multiple switches — totals from segments
+      via `breastSegmentTotals` (X3–X5 incl. the 5m/3m + multi-switch cases, FF4).
+    - ✅ Sleep controlled consistently from Hero and Quick Log — one v2 `activeSleep` via
+      `useV2TodayView`, single source of truth (DD3, FF5).
+    - ✅ Pump saves duration and optional volume — `finishPump` → draft → `savePump`
+      (with/without volume) (AA4–AA6, FF6).
+    - ✅ Active timers survive background and full restart — hydrate-on-mount +
+      foreground reconcile, durations from timestamps (DD1–DD6, W6/W7, X8, Y7, AA7).
+    - ✅ Events appear in the timeline immediately — `refresh()` on success +
+      `formatTimelineEvent` (BB1–BB7, FF1).
+    - ✅ Undo works for the latest mutation — single `UndoableMutation` + `LoggingToast`
+      (CC1–CC7, FF2).
+    - ✅ Offline logging does not lose data — local-first AsyncStorage, `syncStatus:'local'`
+      survives restart (Z6, FF7).
+    - ✅ Retry does not create duplicate events — idempotent by `clientEventId` (X2, Z5, EE5).
+    - ✅ Old MVP data displayed correctly — `LegacyLoggingMapper` (V-series).
+    - ✅ Unit, integration, and core E2E tests pass — 154/154 across U→FF.
+    - ✅ Feature enabled/disabled by a flag without reinstall — `isLoggingV2Enabled()`
+      runtime override + env, default `false`.
 
 ## Current task
 
-14. Run final verification (plan §14 Definition of Done). With the tests reviewed and
-extended (task 13), the smoke test (`scripts/check-local-interactions.ts`) is now **154
-checks** and covers the full plan §11 matrix: §11.1 units (breast 5m/3m + multi-switch +
-hydration, bottle amount/idempotency, sleep start/finish/second-start/ordering, diaper
-each-kind/undo/double-press, pump both-110ml/save-without-volume/draft-restore), §11.2
-integration (the explicit repo→store→timeline pipeline FF1, finish→restart→completed,
-AppState background/active recompute, legacy mapper), the §6/§1.1 failure matrix
-(EE1–EE7), and now the §11.3 end-to-end journeys as use-case sequences (FF2–FF7). Task 14
-runs the full verification pass (`npx tsc --noEmit`, `npm run check:local-interactions`,
-`npm run lint`) one more time as the §14 Definition-of-Done sign-off and confirms the
-flag-off MVP is unchanged; `npm test` stays documented as unavailable (no RN runner — the
-Node smoke test is the substitute). Task 15 is then the final cleanup + implementation
-summary.
+15. Final cleanup and implementation summary. The §14 Definition-of-Done sign-off is
+complete (task 14): all available checks pass (`tsc --noEmit` exit 0, 154/154 smoke
+checks, `expo lint` exit 0), `npm test` is documented unavailable, and every DoD item is
+mapped to a proving check above. The four flows + timeline + Undo + restart recovery +
+validation are complete end-to-end behind the `loggingV2` flag, every failure path is
+proven reachable + non-destructive (EE1–EE7), and every §11.3 journey is proven through
+the rendered surfaces (FF2–FF7). Task 15 is the final pass: write the implementation
+summary (what shipped, the architecture, the documented scope boundaries — HandoffCard on
+the legacy store, Edit UI / caregiver sync deferred to Phase 9), do a light cleanup sweep
+(no stray TODOs / dead code in the v2 module), fill in the `## Final result` section, and
+set `AUTOPILOT_STATUS: DONE`. No new behavior — sign-off + documentation only.
 
 > Milestone: with the tests reviewed and extended (13), **the four flows + timeline +
 > Undo + restart recovery + validation are complete end-to-end behind the flag,** every
@@ -830,6 +874,17 @@ summary.
 
 ## Last verification
 
+- 2026-06-21 (task 14, §14 Definition-of-Done sign-off) — `npx tsc --noEmit` → **exit 0**.
+  `npm run check:local-interactions` → **all 154 checks pass** (the full plan §11 matrix,
+  U→FF: domain/repo/session-math/four-flows/timeline/Undo/restart-recovery/validation/E2E).
+  `npm run lint` (`expo lint`) → **exit 0**, clean. `npm test` → exit 1 / **no `test`
+  script** (genuinely unavailable; the Node smoke test is the documented substitute — no
+  Jest/RNTL runner in the app). **Safety re-confirmed:** `loggingV2` defaults to `false`
+  (`DEFAULT_LOGGING_FLAGS`), `EXPO_PUBLIC_LOGGING_V2` is unset, only `.env.example` exists
+  and does not set it → the flag resolves to `false`, so the flag-off MVP is the shipping
+  path. **No production code changed** — task 14 is verification only, so the MVP is
+  byte-for-byte unchanged. Every plan §14 DoD item is checked against a proving check (see
+  the task-14 entry under Completed tasks).
 - 2026-06-21 (task 13) — `npx tsc --noEmit` → exit 0. `npm run
   check:local-interactions` → **all 154 checks pass** (147 prior + 7 new, FF1–FF7, the
   plan §11.3 end-to-end journeys as use-case sequences + the explicit §11.2
