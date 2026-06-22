@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Pressable, Text, View } from 'react-native';
+import { Animated, Easing, Pressable, Text, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { colors, fonts, radii } from '@/theme';
@@ -10,11 +10,14 @@ type Props = {
   onPress?: () => void;
   animateColor?: boolean;
   pressOpacity?: number;
+  pressScale?: number;
 };
 
 const BUTTON_MIN_WIDTH = 190;
 const BUTTON_HEIGHT = 50;
 const ICON_SLOT_SIZE = 18;
+const PRESS_IN_MS = 105;
+const PRESS_OUT_MS = 165;
 
 function ActionIcon({ label }: { label: string }) {
   if (label === 'Start sleep') {
@@ -58,10 +61,20 @@ function ActionIcon({ label }: { label: string }) {
  * tiles already prove this pattern works on Android), so the Pressable is now a
  * pure touch + opacity wrapper and the View is the actual pill.
  */
-export function PrimaryActionButton({ label, accentColor, onPress, animateColor = true, pressOpacity = 0.95 }: Props) {
+export function PrimaryActionButton({
+  label,
+  accentColor,
+  onPress,
+  animateColor = true,
+  pressOpacity = 0.95,
+  pressScale,
+}: Props) {
   const [colorProgress] = useState(() => new Animated.Value(1));
+  const [pressProgress] = useState(() => new Animated.Value(0));
   const previousAccent = useRef(accentColor);
   const [colorPair, setColorPair] = useState({ from: accentColor, to: accentColor });
+  const usesAnimatedPress = pressScale !== undefined;
+  const tactilePressScale = pressScale ?? 1;
 
   useEffect(() => {
     if (!animateColor) {
@@ -89,34 +102,56 @@ export function PrimaryActionButton({ label, accentColor, onPress, animateColor 
         outputRange: [colorPair.from, colorPair.to],
       })
     : accentColor;
+  const animatedPressScale = pressProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, tactilePressScale],
+  });
+  const animatedPressOpacity = pressProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, pressOpacity],
+  });
+
+  const animatePress = (toValue: number, duration: number, easing: (value: number) => number) => {
+    Animated.timing(pressProgress, {
+      toValue,
+      duration,
+      easing,
+      useNativeDriver: true,
+    }).start();
+  };
 
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
+      onPressIn={usesAnimatedPress ? () => animatePress(1, PRESS_IN_MS, Easing.out(Easing.quad)) : undefined}
+      onPressOut={usesAnimatedPress ? () => animatePress(0, PRESS_OUT_MS, Easing.out(Easing.cubic)) : undefined}
       hitSlop={8}
       style={({ pressed }) => ({
         alignSelf: 'center',
         borderRadius: radii.pill,
-        opacity: pressed ? pressOpacity : 1,
+        opacity: !usesAnimatedPress && pressed ? pressOpacity : 1,
       })}>
       <Animated.View
-        style={{
-          minWidth: BUTTON_MIN_WIDTH,
-          height: BUTTON_HEIGHT,
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor,
-          borderRadius: radii.pill,
-          paddingHorizontal: 24,
-          borderWidth: 0,
-          shadowColor: accentColor,
-          shadowOpacity: 0.42,
-          shadowRadius: 12,
-          shadowOffset: { width: 0, height: 8 },
-          elevation: 8,
-        }}>
+        style={[
+          {
+            minWidth: BUTTON_MIN_WIDTH,
+            height: BUTTON_HEIGHT,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor,
+            borderRadius: radii.pill,
+            paddingHorizontal: 24,
+            borderWidth: 0,
+            shadowColor: accentColor,
+            shadowOpacity: 0.42,
+            shadowRadius: 12,
+            shadowOffset: { width: 0, height: 8 },
+            elevation: 8,
+          },
+          usesAnimatedPress ? { opacity: animatedPressOpacity, transform: [{ scale: animatedPressScale }] } : null,
+        ]}>
         <View
           pointerEvents="none"
           style={{

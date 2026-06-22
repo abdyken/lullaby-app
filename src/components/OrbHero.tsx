@@ -430,7 +430,8 @@ export function OrbHero({
             label={actionLabel}
             accentColor={actionColor}
             animateColor={false}
-            pressOpacity={0.95}
+            pressOpacity={0.97}
+            pressScale={0.98}
             onPress={onActionPress}
           />
         </View>

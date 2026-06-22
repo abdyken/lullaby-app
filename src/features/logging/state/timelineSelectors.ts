@@ -90,13 +90,8 @@ const isRunningPump = (e: PumpEvent): boolean => e.status === 'active' && e.ende
 /** A pump volume draft is a finished-but-unsaved pump (active, with an `endedAt`). */
 const isDraftPump = (e: PumpEvent): boolean => e.status === 'active' && e.endedAt !== null;
 
-/** Completed sleeps shorter than a minute should read as a real saved sleep, not "0m". */
 function sleepDurationLabel(event: SleepEvent, now: number): string {
-  const duration = sessionElapsedMs(event, now);
-  if (event.status === 'completed' && event.startedAt !== null && event.endedAt !== null && duration < 60_000) {
-    return '1m';
-  }
-  return formatCompactDuration(duration);
+  return formatCompactDuration(sessionElapsedMs(event, now));
 }
 
 /* ----------------------------- timeline §7.4 ----------------------------- */
