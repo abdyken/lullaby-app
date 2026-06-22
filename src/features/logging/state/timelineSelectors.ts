@@ -90,6 +90,15 @@ const isRunningPump = (e: PumpEvent): boolean => e.status === 'active' && e.ende
 /** A pump volume draft is a finished-but-unsaved pump (active, with an `endedAt`). */
 const isDraftPump = (e: PumpEvent): boolean => e.status === 'active' && e.endedAt !== null;
 
+/** Completed sleeps shorter than a minute should read as a real saved sleep, not "0m". */
+function sleepDurationLabel(event: SleepEvent, now: number): string {
+  const duration = sessionElapsedMs(event, now);
+  if (event.status === 'completed' && event.startedAt !== null && event.endedAt !== null && duration < 60_000) {
+    return '1m';
+  }
+  return formatCompactDuration(duration);
+}
+
 /* ----------------------------- timeline §7.4 ----------------------------- */
 
 /** The plan §7.4 timeline view-model for one event. `icon` keys the row glyph/tint. */
@@ -144,7 +153,7 @@ export function formatTimelineEvent(event: CareEvent, now: number): TimelineEven
   }
 
   if (isSleepEvent(event)) {
-    const dur = formatCompactDuration(sessionElapsedMs(event, now));
+    const dur = sleepDurationLabel(event, now);
     return { title: event.status === 'active' ? 'Sleeping' : 'Sleep', subtitle: dur, icon: 'sleep', tint };
   }
 
@@ -189,7 +198,7 @@ export function formatLoggingToast(event: CareEvent, now: number): string {
     const { totalLeftMs, totalRightMs } = breastSegmentTotals(event.details.segments, now);
     return `Feed logged · ${formatCompactDuration(totalLeftMs + totalRightMs)}`;
   }
-  if (isSleepEvent(event)) return `Sleep logged · ${formatCompactDuration(sessionElapsedMs(event, now))}`;
+  if (isSleepEvent(event)) return `Sleep logged · ${sleepDurationLabel(event, now)}`;
   if (isPumpEvent(event)) {
     const total = pumpTotalVolumeMl(event.details);
     const detail = total > 0 ? `${total} ml` : formatCompactDuration(sessionElapsedMs(event, now));
