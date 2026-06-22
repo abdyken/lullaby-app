@@ -24,7 +24,7 @@ const KIND_TINT: Record<TimelineEntry['kind'], string> = {
   feed: colors.feedTint,
   sleep: colors.sleepTint,
   diaper: colors.diaperTint,
-  pump: colors.sleepTint,
+  pump: colors.pumpTint,
   note: colors.sleepTint,
 };
 
@@ -32,7 +32,7 @@ const KIND_COLOR: Record<TimelineEntry['kind'], string> = {
   feed: colors.feed,
   sleep: colors.sleep,
   diaper: colors.diaper,
-  pump: colors.sleep,
+  pump: colors.pump,
   note: colors.sleep,
 };
 
@@ -56,7 +56,19 @@ function DotIcon({ kind, color }: { kind: TimelineEntry['kind']; color: string }
       </Svg>
     );
   }
-  // sleep + pump fall back to the moon glyph
+  if (kind === 'pump') {
+    return (
+      <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
+        <Path
+          d="M7 21h10M8 21V11h8v10M6 11h12M9 11V7a3 3 0 0 1 6 0v4"
+          stroke={color}
+          strokeWidth={sw}
+          strokeLinejoin="round"
+        />
+      </Svg>
+    );
+  }
+  // sleep + note fall back to the moon glyph
   return (
     <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
       <Path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke={color} strokeWidth={sw} />
@@ -112,6 +124,11 @@ export function TimelineItem({ entry, isLast, surfaceMode = 'day' }: Props) {
           <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, color: palette.ink }}>
             {entry.label}
           </Text>
+          {entry.detail ? (
+            <Text style={{ marginTop: 2, fontFamily: fonts.body, fontSize: 11.5, color: palette.inkSoft }}>
+              {entry.detail}
+            </Text>
+          ) : null}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
             {entry.caregiverName && entry.caregiverColor ? (
               <>

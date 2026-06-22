@@ -14,12 +14,16 @@
  * lives in the use-cases behind `useLogging()`. Built on RN's Modal in the
  * existing design language, mirroring `SleepSheet`/`FeedSheet`.
  */
+import { useMemo, useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fonts, radii, shadows } from '@/theme';
 
+import { isPumpEvent, type PumpEvent, type PumpSide } from '../domain/types';
 import { useLogging } from '../state/LoggingProvider';
+import { pumpTotalVolumeMl } from '../state/loggingSelectors';
+import { elapsedMs, formatCompactDuration } from '../timer/sessionMath';
 import { confirmDiscardSession } from '../ui/confirmDiscardSession';
 import { PumpActive } from './PumpActive';
 import { PumpIdle } from './PumpIdle';
@@ -29,9 +33,36 @@ type Props = {
   onClose: () => void;
 };
 
+function sideLabel(side: PumpSide): string {
+  return side === 'both' ? 'Both' : side === 'left' ? 'Left' : 'Right';
+}
+
+function clockLabel(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getHours()}:${d.getMinutes().toString().padStart(2, '0')}`;
+}
+
+function agoLabel(iso: string, now: number): string {
+  const mins = Math.max(0, Math.floor((now - Date.parse(iso)) / 60_000));
+  if (mins >= 60) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return `${h}h ${m.toString().padStart(2, '0')}m ago`;
+  }
+  return `${mins}m ago`;
+}
+
+function pumpSummary(event: PumpEvent, now: number): string {
+  const total = pumpTotalVolumeMl(event.details);
+  if (total > 0) return `${total} ml`;
+  return formatCompactDuration(elapsedMs(event.startedAt ?? event.occurredAt, event.endedAt, now));
+}
+
 export function PumpSheet({ onClose }: Props) {
   const insets = useSafeAreaInsets();
+  const [openedAt] = useState(() => Date.now());
   const {
+    todayEvents,
     activePump,
     pumpVolumeDraft,
     error,
@@ -77,14 +108,25 @@ export function PumpSheet({ onClose }: Props) {
   // Draft first (a finished pump must reopen on its volume step), then a running
   // timer, otherwise idle.
   const mode = pumpVolumeDraft ? 'draft' : activePump ? 'active' : 'idle';
+  const lastPump = useMemo(
+    () =>
+      [...todayEvents]
+        .filter((event): event is PumpEvent => isPumpEvent(event) && event.status === 'completed')
+        .sort((a, b) => Date.parse(b.endedAt ?? b.occurredAt) - Date.parse(a.endedAt ?? a.occurredAt))[0],
+    [todayEvents],
+  );
   const title =
-    mode === 'draft' ? 'Add pumped volume' : mode === 'active' ? 'Pumping in progress' : 'Log a pump';
+    mode === 'draft' ? 'Add pumped volume' : mode === 'active' ? 'Pumping in progress' : 'Start pumping';
   const subtitle =
-    mode === 'draft'
-      ? 'Add how much you pumped, or skip it'
-      : mode === 'active'
-        ? 'We’ll keep the time for you'
-        : 'Pick a side and start the timer';
+    mode === 'draft' && pumpVolumeDraft
+      ? `${sideLabel(pumpVolumeDraft.side)} · ${formatCompactDuration(
+          elapsedMs(pumpVolumeDraft.startedAt, pumpVolumeDraft.endedAt, Date.parse(pumpVolumeDraft.endedAt)),
+        )}`
+      : mode === 'active' && activePump?.startedAt
+        ? `Started ${clockLabel(activePump.startedAt)} · ${sideLabel(activePump.details.side)}`
+        : lastPump
+          ? `Last pump ${agoLabel(lastPump.endedAt ?? lastPump.occurredAt, openedAt)} · ${pumpSummary(lastPump, openedAt)}`
+          : 'No pump logged yet';
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={handleClose} statusBarTranslucent>

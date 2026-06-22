@@ -16,10 +16,10 @@ import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { PrimaryActionButton } from '@/components/PrimaryActionButton';
-import { colors, fonts, radii } from '@/theme';
+import { colors, fonts } from '@/theme';
 
 import type { PumpVolumeDraft as PumpVolumeDraftModel } from '../domain/types';
-import { elapsedMs, formatClock } from '../timer/sessionMath';
+import { elapsedMs, formatCompactDuration } from '../timer/sessionMath';
 
 const STEP_ML = 5;
 
@@ -50,14 +50,19 @@ function StepButton({
       style={({ pressed }) => ({ transform: [{ scale: pressed ? 0.94 : 1 }] })}>
       <View
         style={{
-          width: 46,
-          height: 46,
+          width: 42,
+          height: 42,
           alignItems: 'center',
           justifyContent: 'center',
-          borderRadius: radii.medium,
-          backgroundColor: colors.surfaceSoft,
+          borderRadius: 14,
+          backgroundColor: colors.surface,
+          shadowColor: 'rgb(60,40,30)',
+          shadowOpacity: 0.18,
+          shadowRadius: 9,
+          shadowOffset: { width: 0, height: 7 },
+          elevation: 3,
         }}>
-        <Text style={{ fontFamily: fonts.bodyBold, fontSize: 20, color: colors.inkSoft }}>{label}</Text>
+        <Text style={{ fontFamily: fonts.bodyBold, fontSize: 22, color: colors.ink }}>{label}</Text>
       </View>
     </Pressable>
   );
@@ -79,33 +84,52 @@ function VolumeRow({
         alignItems: 'center',
         justifyContent: 'space-between',
         marginTop: 12,
+        gap: 8,
       }}>
-      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.inkSoft, width: 52 }}>
+      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, color: colors.inkSoft, width: 72 }}>
         {label}
       </Text>
-      <StepButton
-        label="–"
-        accessibilityLabel={`Decrease ${label} by ${STEP_ML} millilitres`}
-        onPress={() => onChange(Math.max(0, value - STEP_ML))}
-      />
-      <View style={{ alignItems: 'center', minWidth: 64 }}>
-        <Text style={{ fontFamily: fonts.display, fontSize: 26, color: colors.ink }}>{value}</Text>
-        <Text style={{ fontFamily: fonts.body, fontSize: 12, color: colors.inkFaint, marginTop: -2 }}>
-          ml
+      <View
+        style={{
+          flex: 1,
+          minHeight: 52,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          borderRadius: 18,
+          backgroundColor: colors.surfaceSoft,
+          padding: 5,
+        }}>
+        <StepButton
+          label="–"
+          accessibilityLabel={`Decrease ${label} by ${STEP_ML} millilitres`}
+          onPress={() => onChange(Math.max(0, value - STEP_ML))}
+        />
+        <Text
+          style={{
+            minWidth: 88,
+            textAlign: 'center',
+            fontFamily: fonts.display,
+            fontSize: 24,
+            color: colors.ink,
+            fontVariant: ['tabular-nums'],
+          }}>
+          {value}
+          <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12, color: colors.inkSoft }}> ml</Text>
         </Text>
+        <StepButton
+          label="+"
+          accessibilityLabel={`Increase ${label} by ${STEP_ML} millilitres`}
+          onPress={() => onChange(value + STEP_ML)}
+        />
       </View>
-      <StepButton
-        label="+"
-        accessibilityLabel={`Increase ${label} by ${STEP_ML} millilitres`}
-        onPress={() => onChange(value + STEP_ML)}
-      />
     </View>
   );
 }
 
 export function PumpVolumeDraft({ draft, accentColor, onSave, onSaveWithoutVolume }: Props) {
-  const [left, setLeft] = useState(0);
-  const [right, setRight] = useState(0);
+  const [left, setLeft] = useState(draft.leftVolumeMl ?? 0);
+  const [right, setRight] = useState(draft.rightVolumeMl ?? 0);
   const [saving, setSaving] = useState(false);
 
   const showLeft = draft.side === 'left' || draft.side === 'both';
@@ -137,21 +161,31 @@ export function PumpVolumeDraft({ draft, accentColor, onSave, onSaveWithoutVolum
 
   return (
     <View style={{ marginTop: 16 }}>
-      <View
+      <Text
         style={{
-          backgroundColor: colors.surfaceSoft,
-          borderRadius: radii.medium,
-          paddingHorizontal: 16,
-          paddingVertical: 12,
-          alignItems: 'center',
+          fontFamily: fonts.bodyBold,
+          fontSize: 11,
+          letterSpacing: 1,
+          color: colors.inkFaint,
+          marginTop: 2,
+          marginBottom: 2,
         }}>
-        <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.inkFaint }}>
-          Pumped for {formatClock(durationMs)}
-        </Text>
-      </View>
+        VOLUME
+      </Text>
 
       {showLeft && <VolumeRow label="Left" value={left} onChange={setLeft} />}
       {showRight && <VolumeRow label="Right" value={right} onChange={setRight} />}
+
+      <Text
+        style={{
+          marginTop: 12,
+          textAlign: 'center',
+          fontFamily: fonts.bodyBold,
+          fontSize: 12,
+          color: colors.inkFaint,
+        }}>
+        Pumped for {formatCompactDuration(durationMs)}
+      </Text>
 
       <View style={{ marginTop: 20, alignItems: 'center', opacity: canSaveVolume ? 1 : 0.45 }}>
         <PrimaryActionButton

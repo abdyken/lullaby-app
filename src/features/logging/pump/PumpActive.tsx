@@ -26,11 +26,6 @@ type Props = {
   onCancel: () => void;
 };
 
-/** "Left" / "Right" / "Both" for the active side. */
-function sideLabel(side: PumpEvent['details']['side']): string {
-  return side === 'both' ? 'Both' : side === 'left' ? 'Left' : 'Right';
-}
-
 export function PumpActive({ event, accentColor, onFinish, onCancel }: Props) {
   // Display-only tick; the value is derived from `startedAt`, not stored.
   const elapsed = useElapsedTime(event.startedAt, true);
@@ -47,15 +42,27 @@ export function PumpActive({ event, accentColor, onFinish, onCancel }: Props) {
         }}>
         <Text
           style={{
+            fontFamily: fonts.bodyBold,
+            fontSize: 11,
+            letterSpacing: 0.8,
+            textTransform: 'uppercase',
+            color: colors.inkFaint,
+          }}>
+          Pumping time
+        </Text>
+        <Text
+          style={{
             fontFamily: fonts.display,
             fontSize: 40,
             color: colors.ink,
             fontVariant: ['tabular-nums'],
+            lineHeight: 46,
+            marginTop: 4,
           }}>
           {formatClock(elapsed)}
         </Text>
-        <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.inkFaint, marginTop: 4 }}>
-          {sideLabel(event.details.side)}
+        <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12, color: colors.inkSoft, marginTop: 4 }}>
+          Volume is entered after finishing
         </Text>
       </View>
 
@@ -76,7 +83,7 @@ export function PumpActive({ event, accentColor, onFinish, onCancel }: Props) {
           opacity: pressed ? 0.5 : 1,
         })}>
         <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.inkFaint }}>
-          Cancel session
+          Cancel this session
         </Text>
       </Pressable>
     </View>

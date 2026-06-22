@@ -189,11 +189,13 @@ export function useV2TodayView(params: { now?: number; caregivers: Caregiver[] }
       .map((event) => {
         const view = formatTimelineEvent(event, now);
         const cg = byId.get(event.createdByUserId);
+        const splitPumpDetail = event.type === 'pump' && event.status === 'completed';
         return {
           id: event.id,
           time: timelineTime(event, now),
           kind: view.icon,
-          label: view.subtitle ? `${view.title} · ${view.subtitle}` : view.title,
+          label: splitPumpDetail ? view.title : view.subtitle ? `${view.title} · ${view.subtitle}` : view.title,
+          detail: splitPumpDetail ? view.subtitle : undefined,
           caregiverName: cg?.displayName ?? null,
           caregiverColor: cg?.colorHex ?? null,
         };

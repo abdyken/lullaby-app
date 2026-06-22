@@ -68,6 +68,7 @@ function recencyIso(event: CareEvent): ISODateTime {
 
 const sideWord = (side: BreastSide): string => side; // 'left' | 'right'
 const pumpSideWord = (side: PumpSide): string => side; // 'left' | 'right' | 'both'
+const pumpSideTitle = (side: PumpSide): string => (side === 'both' ? 'Both' : side === 'left' ? 'Left' : 'Right');
 const diaperWord = (kind: DiaperKind): string => kind; // wet | dirty | both | dry
 
 const MILK_WORD: Record<MilkType, string> = {
@@ -92,6 +93,28 @@ const isDraftPump = (e: PumpEvent): boolean => e.status === 'active' && e.endedA
 
 function sleepDurationLabel(event: SleepEvent, now: number): string {
   return formatCompactDuration(sessionElapsedMs(event, now));
+}
+
+function pumpVolumeDetail(event: PumpEvent, now: number): { title: string; subtitle: string } {
+  const duration = formatCompactDuration(sessionElapsedMs(event, now));
+  const total = pumpTotalVolumeMl(event.details);
+  if (total <= 0) {
+    return { title: `Pump · ${duration}`, subtitle: pumpSideTitle(event.details.side) };
+  }
+
+  if (event.details.side === 'both') {
+    const left = event.details.leftVolumeMl ?? 0;
+    const right = event.details.rightVolumeMl ?? 0;
+    return {
+      title: `Pump · ${total} ml`,
+      subtitle: `L ${left} ml · R ${right} ml · ${duration}`,
+    };
+  }
+
+  return {
+    title: `Pump · ${total} ml`,
+    subtitle: `${pumpSideTitle(event.details.side)} · ${duration}`,
+  };
 }
 
 /* ----------------------------- timeline §7.4 ----------------------------- */
@@ -168,9 +191,8 @@ export function formatTimelineEvent(event: CareEvent, now: number): TimelineEven
     if (isDraftPump(event)) {
       return { title: 'Pump', subtitle: 'finished · add volume', icon: 'pump', tint };
     }
-    const total = pumpTotalVolumeMl(event.details);
-    const detail = total > 0 ? `${total} ml` : formatCompactDuration(sessionElapsedMs(event, now));
-    return { title: 'Pump', subtitle: `${detail} · ${pumpSideWord(event.details.side)}`, icon: 'pump', tint };
+    const view = pumpVolumeDetail(event, now);
+    return { ...view, icon: 'pump', tint };
   }
 
   // Unreachable for the closed union, but keeps the formatter total + type-safe.
@@ -183,7 +205,7 @@ export function formatTimelineEvent(event: CareEvent, now: number): TimelineEven
  * The calm save-confirmation line for the Undo toast (plan §8, Phase 2/3/5/6
  * "Show Undo"). Built from the SAVED event so it matches the timeline copy:
  * "Diaper logged · wet", "Feed logged · 120 ml", "Nap logged · 40m",
- * "Pump saved · 110 ml" (or its duration when no volume was recorded). The
+ * "Pump logged · 110 ml" (or "Pump logged without volume"). The
  * trailing " · Undo" affordance is added by the toast component, not here.
  */
 export function formatLoggingToast(event: CareEvent, now: number): string {
@@ -196,8 +218,8 @@ export function formatLoggingToast(event: CareEvent, now: number): string {
   if (isSleepEvent(event)) return `Nap logged · ${sleepDurationLabel(event, now)}`;
   if (isPumpEvent(event)) {
     const total = pumpTotalVolumeMl(event.details);
-    const detail = total > 0 ? `${total} ml` : formatCompactDuration(sessionElapsedMs(event, now));
-    return `Pump saved · ${detail}`;
+    if (total > 0) return `Pump logged · ${total} ml`;
+    return 'Pump logged without volume';
   }
   return 'Logged';
 }
