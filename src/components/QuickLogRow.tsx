@@ -4,15 +4,15 @@
  * rounded card with a tinted icon block on the left and a label + secondary line
  * on the right.
  *
- * Feed / Sleep / Diaper are live preview actions; the active one shows an accent
- * ring and agrees with the orb above. Pump is an instant side-log (no orb
- * state), so it never reads as "active". Two rows of two cards (each flex:1) keep
- * the grid from ever overflowing a narrow phone.
+ * Feed / Sleep / Diaper are live preview actions; Pump also reads active while a
+ * v2 pump timer or volume draft is open. Two rows of two cards (each flex:1)
+ * keep the grid from ever overflowing a narrow phone.
  */
 import { useWindowDimensions, View } from 'react-native';
 
 import { QuickLogButton } from '@/components/QuickLogButton';
 import type { PreviewState, QuickLogMeta } from '@/data/currentState';
+import type { QuickLogKind } from '@/components/QuickLogButton';
 import type { SurfaceMode } from '@/theme';
 
 const SCREEN_HORIZONTAL_PADDING = 18;
@@ -20,7 +20,7 @@ const COLUMN_GAP = 9;
 
 type Props = {
   /** the currently active state, so the matching card reads as active (null = none) */
-  selected: PreviewState | null;
+  selected: QuickLogKind | null;
   onSelect: (state: PreviewState) => void;
   /** open the Pump sheet (instant side-log, no orb state) */
   onPump: () => void;
@@ -80,6 +80,7 @@ export function QuickLogRow({ selected, onSelect, onPump, meta, surfaceMode = 'd
           kind="pump"
           label="Pump"
           secondary={meta.pump}
+          active={selected === 'pump'}
           cardWidth={cardWidth}
           surfaceMode={surfaceMode}
           onPress={onPump}

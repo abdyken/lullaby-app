@@ -22,13 +22,15 @@
  */
 import { useMemo } from 'react';
 
-import type { CurrentBabyState, PreviewState, QuickLogMeta, TonightStatusItem } from '@/data/currentState';
+import type { CurrentBabyState, QuickLogMeta, TonightStatusItem } from '@/data/currentState';
 import { TIMELINE_LIMIT } from '@/data/localInteractions';
 import type { TimelineEntry } from '@/data/mock';
 import type { Caregiver } from '@/data/models';
+import type { QuickLogKind } from '@/components/QuickLogButton';
 
 import type { CareEvent } from '../domain/types';
-import { formatCompactDuration, sessionElapsedMs } from '../timer/sessionMath';
+import { formatClock, sessionElapsedMs } from '../timer/sessionMath';
+import { useElapsedTime } from '../timer/useElapsedTime';
 import { useLogging } from './LoggingProvider';
 import {
   buildV2QuickLogSubtitles,
@@ -40,7 +42,7 @@ import {
 export interface V2TodayView {
   orb: CurrentBabyState;
   /** Quick-log card that reads as active (feed when breastfeeding, sleep when asleep). */
-  activeTile: PreviewState | null;
+  activeTile: QuickLogKind | null;
   timeline: TimelineEntry[];
   quickLogMeta: QuickLogMeta;
   tonightStatus: TonightStatusItem[];
@@ -75,7 +77,32 @@ function timelineTime(event: CareEvent, now: number): string {
 }
 
 /** Full-scale minutes for the sleep progress ring (matches the legacy orb). */
-const SLEEP_PROGRESS_FULL_MS = 200 * 60_000;
+const WAKE_WINDOW_MS = 2 * 60 * 60_000;
+
+/** Reference hero format: "42m" below an hour, "1:24" once hours are present. */
+function heroDuration(msValue: number): string {
+  const totalMinutes = Math.max(0, Math.floor(msValue / 60_000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}:${minutes.toString().padStart(2, '0')}` : `${totalMinutes}m`;
+}
+
+/** Latest completed sleep end is the beginning of the current awake window. */
+function latestCompletedSleepEndedAt(events: CareEvent[]): string | null {
+  let latest: string | null = null;
+  for (const event of events) {
+    if (event.type !== 'sleep' || event.status !== 'completed' || event.endedAt === null) continue;
+    if (latest === null || ms(event.endedAt) > ms(latest)) latest = event.endedAt;
+  }
+  return latest;
+}
+
+function nextNapLabel(wakeStartedAt: string | null, now: number): string {
+  if (wakeStartedAt === null) return 'Log the first sleep to build the nap rhythm';
+  const target = ms(wakeStartedAt) + WAKE_WINDOW_MS;
+  if (target <= now) return 'Nap window is open now';
+  return `Next nap around ${clockLabel(new Date(target).toISOString())}`;
+}
 
 /**
  * Today view-model from the v2 store, or `null` when the flag is off. `now` is the
@@ -85,10 +112,24 @@ const SLEEP_PROGRESS_FULL_MS = 200 * 60_000;
 export function useV2TodayView(params: { now?: number; caregivers: Caregiver[] }): V2TodayView | null {
   const { now: nowParam, caregivers } = params;
   const logging = useLogging();
+  const wakeStartedAt = useMemo(
+    () => latestCompletedSleepEndedAt(logging.todayEvents),
+    [logging.todayEvents],
+  );
+  const runningPumpStartedAt =
+    logging.activePump && logging.activePump.endedAt === null ? logging.activePump.startedAt : null;
+  const tickStartedAt =
+    logging.activeSleep?.startedAt ??
+    logging.activeBreastFeed?.startedAt ??
+    runningPumpStartedAt ??
+    wakeStartedAt;
+  const tickElapsed = useElapsedTime(tickStartedAt, logging.enabled && nowParam === undefined);
+  const tickStartMs = tickStartedAt === null ? NaN : Date.parse(tickStartedAt);
+  const tickNow = Number.isFinite(tickStartMs) ? tickStartMs + tickElapsed : undefined;
 
   return useMemo<V2TodayView | null>(() => {
     if (!logging.enabled) return null;
-    const now = resolveNow(nowParam);
+    const now = nowParam ?? tickNow ?? resolveNow(undefined);
     const { todayEvents, activeBreastFeed, activeSleep, activePump, pumpVolumeDraft } = logging;
 
     // Quick-log subtitles + status strip (plan §7.1).
@@ -107,32 +148,37 @@ export function useV2TodayView(params: { now?: number; caregivers: Caregiver[] }
         state: 'sleep',
         skyTone: 'night',
         eyebrow: 'Asleep',
-        timerText: formatCompactDuration(elapsed),
+        timerText: formatClock(elapsed),
         title: 'Sleep started',
-        description: `Started ${clockLabel(activeSleep.startedAt)} · we'll keep the night quiet`,
+        description: `Started ${clockLabel(activeSleep.startedAt)} · timer is live`,
         actionLabel: 'Baby woke up',
-        progress: Math.min(1, elapsed / SLEEP_PROGRESS_FULL_MS),
+        progress: Math.min(1, elapsed / WAKE_WINDOW_MS),
+        stateIcon: 'moon',
       };
     } else {
-      const feedVal = tonightStatus.find((i) => i.key === 'feed')?.value;
-      const diaperVal = tonightStatus.find((i) => i.key === 'diaper')?.value;
-      const parts: string[] = [];
-      if (feedVal && feedVal !== 'None yet') parts.push(`Last feed ${feedVal}`);
-      if (diaperVal && diaperVal !== 'None yet') parts.push(`Last diaper ${diaperVal}`);
+      const awakeElapsed = wakeStartedAt === null ? 0 : Math.max(0, now - ms(wakeStartedAt));
       orb = {
-        state: 'sleep',
+        state: 'feed',
         skyTone: 'day',
-        eyebrow: 'All quiet',
-        timerText: 'Calm',
-        title: 'All caught up',
-        description: parts.length > 0 ? parts.join(' · ') : 'Tap a tile to log the next feed, sleep, or change.',
+        eyebrow: 'Awake',
+        timerText: wakeStartedAt === null ? 'Ready' : heroDuration(awakeElapsed),
+        title: 'Awake',
+        description: nextNapLabel(wakeStartedAt, now),
         actionLabel: 'Start sleep',
-        progress: 0,
+        progress: Math.min(1, awakeElapsed / WAKE_WINDOW_MS),
+        stateIcon: 'clock',
       };
     }
 
-    // Active ring: feed while breastfeeding, otherwise sleep while asleep.
-    const activeTile: PreviewState | null = activeBreastFeed ? 'feed' : activeSleep ? 'sleep' : null;
+    // Active ring: feed while breastfeeding, sleep while asleep, pump while
+    // running or waiting for volume. Diaper stays instant-only in the preview.
+    const activeTile: QuickLogKind | null = activeBreastFeed
+      ? 'feed'
+      : activeSleep
+        ? 'sleep'
+        : activePump || pumpVolumeDraft
+          ? 'pump'
+          : null;
 
     // Timeline (plan §7.4) — newest first, capped to the Tonight home limit. The
     // formatter is purely descriptive; the row's icon/tint come from `kind`.
@@ -158,5 +204,5 @@ export function useV2TodayView(params: { now?: number; caregivers: Caregiver[] }
     };
 
     return { orb, activeTile, timeline, quickLogMeta, tonightStatus, onPrimaryAction };
-  }, [logging, nowParam, caregivers]);
+  }, [logging, nowParam, tickNow, caregivers, wakeStartedAt]);
 }

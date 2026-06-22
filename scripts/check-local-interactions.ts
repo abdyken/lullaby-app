@@ -1779,7 +1779,7 @@ async function runAsyncChecks(): Promise<void> {
     assert.equal(d.icon, 'diaper');
   });
 
-  await checkAsync('BB2. formatTimelineEvent: sleep reads "Sleeping" while active, "Sleep" once completed', async () => {
+  await checkAsync('BB2. formatTimelineEvent: sleep reads "Sleeping" while active, "Nap" once completed', async () => {
     const { repo, clock, deps } = newFeedDeps();
     assert.ok((await startSleep(deps, {})).ok);
     clock.advance(42 * 60_000);
@@ -1791,7 +1791,7 @@ async function runAsyncChecks(): Promise<void> {
     await finishSleep(deps, { event: active });
     const done = (await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' })).find((e) => isSleepEvent(e))!;
     const f = formatTimelineEvent(done, clock.now());
-    assert.equal(f.title, 'Sleep');
+    assert.equal(f.title, 'Nap');
     assert.equal(f.subtitle, '42m'); // fixed at endedAt — no longer ticking
   });
 
@@ -1864,11 +1864,11 @@ async function runAsyncChecks(): Promise<void> {
 
   await checkAsync('BB7. buildV2TonightStatus + idle/awake subtitles (plan §7.1)', async () => {
     const { repo, clock, deps } = newFeedDeps();
-    // Empty store → calm prompts + "Awake".
+    // Empty store → calm prompts + truthful empty awake state.
     let state = await hydrateLoggingState(repo, feedScope, clock);
     let subs = buildV2QuickLogSubtitles(state, clock.now());
     assert.equal(subs.feed, 'Tap to log');
-    assert.equal(subs.sleep, 'Tap to start');
+    assert.equal(subs.sleep, 'Awake · no sleep yet');
     assert.equal(subs.diaper, 'Tap to log');
     assert.equal(subs.pump, 'Log pump');
     let status = buildV2TonightStatus(state, clock.now());
@@ -1976,7 +1976,7 @@ async function runAsyncChecks(): Promise<void> {
     c2.advance(40 * 60_000);
     const fin = await finishSleep(d2, { event: selectActiveSleep(await r2.getActiveSessions(feedScope))! });
     assert.ok(fin.ok);
-    if (fin.ok) assert.equal(formatLoggingToast(fin.event, c2.now()), 'Sleep logged · 40m');
+    if (fin.ok) assert.equal(formatLoggingToast(fin.event, c2.now()), 'Nap logged · 40m');
     assert.ok((await startPump(d2, { side: 'both' })).ok);
     c2.advance(5 * 60_000);
     await finishPump(d2, { event: (await activePumpOf(r2))! });
@@ -2021,7 +2021,7 @@ async function runAsyncChecks(): Promise<void> {
     const sleep = state.todayEvents.find(isSleepEvent);
     assert.ok(sleep && sleep.status === 'completed'); // the completed event survived the restart
     const view = formatTimelineEvent(sleep!, clock.now());
-    assert.equal(view.title, 'Sleep');
+    assert.equal(view.title, 'Nap');
     assert.equal(view.subtitle, '40m'); // final duration is fixed (from endedAt), not recomputed to "now"
   });
 
