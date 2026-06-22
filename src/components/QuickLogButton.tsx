@@ -6,7 +6,7 @@
  *
  * The card surface lives on an inner View — not the Pressable — because on real
  * Android the Pressable's own background doesn't paint reliably (see the project
- * memory note). The Pressable only carries the press scale + opacity.
+ * memory note). The Pressable only carries calm opacity feedback.
  */
 import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, Text, View } from 'react-native';
@@ -38,11 +38,21 @@ const ACCENT: Record<QuickLogKind, string> = {
   pump: colors.pump,
 };
 
+const CARD_HEIGHT = 82;
+const ICON_SIZE = 46;
+
 const ACTIVE_BORDER: Record<QuickLogKind, string> = {
-  feed: 'rgba(255,122,61,0.17)',
-  sleep: 'rgba(85,96,198,0.16)',
-  diaper: 'rgba(35,183,158,0.18)',
-  pump: 'rgba(255,177,46,0.20)',
+  feed: 'rgba(255,122,61,0.38)',
+  sleep: 'rgba(85,96,198,0.36)',
+  diaper: 'rgba(35,183,158,0.36)',
+  pump: 'rgba(255,177,46,0.42)',
+};
+
+const ACTIVE_SURFACE: Record<QuickLogKind, string> = {
+  feed: 'rgba(255,122,61,0.06)',
+  sleep: 'rgba(85,96,198,0.06)',
+  diaper: 'rgba(35,183,158,0.06)',
+  pump: 'rgba(255,177,46,0.08)',
 };
 
 // Tinted icon-block gradients, verbatim from the reference's `.qbtn .qicon`.
@@ -119,6 +129,7 @@ export function QuickLogButton({
   const accent = ACCENT[kind];
   const iconColor = accent;
   const labelColor = active ? accent : palette.ink;
+  const secondaryLabel = secondary.replace(/^Awake for /, 'Awake ');
   // Visible inactive boundary so the card reads as raised on Android, where the
   // warm iOS box-shadow is ignored (only `elevation` renders, faint on cream).
   // Day uses a soft warm rim; night a white hairline above the palette border.
@@ -128,7 +139,7 @@ export function QuickLogButton({
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
-      accessibilityLabel={`${label}. ${secondary}`}
+      accessibilityLabel={`${label}. ${secondaryLabel}`}
       onPress={onPress}
       style={({ pressed }) => ({
         // Native ScrollView measurement can collapse flex-only children. A
@@ -138,53 +149,83 @@ export function QuickLogButton({
         flexGrow: 0,
         flexShrink: 0,
         minWidth: 0,
-        transform: [{ scale: pressed ? 0.97 : 1 }],
+        opacity: pressed ? 0.82 : 1,
       })}>
       <View
         style={{
           // Fill the Pressable's measured half-row width, and pin a stable
           // height so all four cards match regardless of secondary-line length.
           width: cardWidth ?? '100%',
-          height: 82,
+          height: CARD_HEIGHT,
           flexDirection: 'row',
           alignItems: 'center',
-          gap: 12,
+          gap: 11,
           backgroundColor: palette.card,
           borderRadius: radii.medium,
-          paddingVertical: 14,
-          paddingHorizontal: 14,
+          paddingVertical: 13,
+          paddingHorizontal: 13,
           // 2px ring at all times so selection never changes the card's size.
           borderWidth: 2,
           borderColor: active ? ACTIVE_BORDER[kind] : inactiveBorder,
           ...shadows.card,
           elevation: 9,
         }}>
+        {active ? (
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              top: 0,
+              right: 0,
+              bottom: 0,
+              left: 0,
+              borderRadius: radii.medium - 2,
+              backgroundColor: ACTIVE_SURFACE[kind],
+            }}
+          />
+        ) : null}
         <LinearGradient
           colors={TILE_GRADIENT[kind]}
           start={{ x: 0.15, y: 0 }}
           end={{ x: 0.85, y: 1 }}
           style={{
-            width: 46,
-            height: 46,
+            width: ICON_SIZE,
+            height: ICON_SIZE,
             borderRadius: 16,
             alignItems: 'center',
             justifyContent: 'center',
+            flexShrink: 0,
           }}>
           <TileIcon kind={kind} color={iconColor} />
         </LinearGradient>
 
-        <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={{ flex: 1, minWidth: 0, justifyContent: 'center' }}>
           <Text
             numberOfLines={1}
-            style={{ fontFamily: fonts.displayMedium, fontSize: 15.5, color: labelColor }}>
+            ellipsizeMode="tail"
+            style={{
+              fontFamily: fonts.displayMedium,
+              fontSize: 15.5,
+              lineHeight: 19,
+              color: labelColor,
+              includeFontPadding: false,
+            }}>
             {label}
           </Text>
           <Text
             numberOfLines={1}
+            ellipsizeMode="tail"
             adjustsFontSizeToFit
-            minimumFontScale={0.72}
-            style={{ fontFamily: fonts.bodyBold, fontSize: 11, color: palette.inkFaint, marginTop: 2 }}>
-            {secondary}
+            minimumFontScale={0.82}
+            style={{
+              fontFamily: fonts.bodyBold,
+              fontSize: 11,
+              lineHeight: 15,
+              color: active ? palette.inkSoft : palette.inkFaint,
+              marginTop: 3,
+              includeFontPadding: false,
+            }}>
+            {secondaryLabel}
           </Text>
         </View>
       </View>
