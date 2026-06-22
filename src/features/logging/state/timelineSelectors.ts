@@ -154,7 +154,7 @@ export function formatTimelineEvent(event: CareEvent, now: number): TimelineEven
 
   if (isSleepEvent(event)) {
     const dur = sleepDurationLabel(event, now);
-    return { title: event.status === 'active' ? 'Sleeping' : 'Sleep', subtitle: dur, icon: 'sleep', tint };
+    return { title: event.status === 'active' ? 'Sleeping' : 'Nap', subtitle: dur, icon: 'sleep', tint };
   }
 
   if (isDiaperEvent(event)) {
@@ -187,7 +187,7 @@ export function formatTimelineEvent(event: CareEvent, now: number): TimelineEven
 /**
  * The calm save-confirmation line for the Undo toast (plan §8, Phase 2/3/5/6
  * "Show Undo"). Built from the SAVED event so it matches the timeline copy:
- * "Diaper logged · wet", "Feed logged · 120 ml", "Sleep logged · 40m",
+ * "Diaper logged · wet", "Feed logged · 120 ml", "Nap logged · 40m",
  * "Pump saved · 110 ml" (or its duration when no volume was recorded). The
  * trailing " · Undo" affordance is added by the toast component, not here.
  */
@@ -198,7 +198,7 @@ export function formatLoggingToast(event: CareEvent, now: number): string {
     const { totalLeftMs, totalRightMs } = breastSegmentTotals(event.details.segments, now);
     return `Feed logged · ${formatCompactDuration(totalLeftMs + totalRightMs)}`;
   }
-  if (isSleepEvent(event)) return `Sleep logged · ${sleepDurationLabel(event, now)}`;
+  if (isSleepEvent(event)) return `Nap logged · ${sleepDurationLabel(event, now)}`;
   if (isPumpEvent(event)) {
     const total = pumpTotalVolumeMl(event.details);
     const detail = total > 0 ? `${total} ml` : formatCompactDuration(sessionElapsedMs(event, now));
@@ -252,7 +252,7 @@ function sleepSubtitle(input: V2QuickLogInput, now: number): string {
   if (input.activeSleep) return `Sleeping · ${formatCompactDuration(sessionElapsedMs(input.activeSleep, now))}`;
   const last = newest(input.todayEvents, (e) => e.type === 'sleep' && e.status === 'completed');
   if (last && last.endedAt) return `Awake for ${formatCompactDuration(Math.max(0, now - ms(last.endedAt)))}`;
-  return 'Tap to start';
+  return 'Awake · no sleep yet';
 }
 
 function diaperSubtitle(input: V2QuickLogInput, now: number): string {

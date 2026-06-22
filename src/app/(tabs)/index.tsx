@@ -13,7 +13,7 @@
  * theme clipped to an expanding circle on top) — and only commits the new mode
  * to the provider once the circle covers the screen, so there's no flash.
  */
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -56,6 +56,20 @@ import { useHandoffCursor } from '@/state/useHandoffCursor';
 import { colors, type SurfaceMode } from '@/theme';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const HOME_CLOCK_TICK_MS = 1000;
+
+function useHomeNowMs(): number {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setNowMs(Date.now());
+    }, HOME_CLOCK_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
+
+  return nowMs;
+}
 
 /** Whole-week age from an ISO birth date (Supabase baby has a real birthDate). */
 function ageInWeeks(birthDate: string): number {
@@ -212,13 +226,12 @@ export default function TonightScreen() {
   // Live scroll offset kept in a ref (no re-render).
   const scrollYRef = useRef(0);
 
-  // Frozen clock for the live "X ago" labels. Captured (in the toggle handler,
-  // off the render path) the instant a reveal starts and used by every time-based
-  // label for the duration, so the re-renders the toggle triggers can't refresh
-  // stale labels mid-reveal ("content reloading"). Idle (no reveal) → undefined,
-  // so the helpers use their own live clock exactly as before. Both layers share it.
+  // Live render-only clock for elapsed labels and the hero progress ring. During
+  // a theme reveal we freeze it so both rendered layers keep identical text and
+  // progress until the reveal commits.
   const [frozenNow, setFrozenNow] = useState<number | undefined>(undefined);
-  const displayNow = isTransitioning ? frozenNow : undefined;
+  const liveNow = useHomeNowMs();
+  const displayNow = isTransitioning ? (frozenNow ?? liveNow) : liveNow;
 
   // One breathe driver shared by the base orb AND its reveal-overlay copy, so the
   // orb stays perfectly in phase and never appears to jump where the circle crosses it.
@@ -314,6 +327,7 @@ export default function TonightScreen() {
           actionLabel={heroOrb.actionLabel}
           progress={heroOrb.progress}
           coreKind={heroOrb.coreKind}
+          stateIcon={heroOrb.stateIcon}
           onActionPress={heroPrimaryAction}
           surfaceMode={bodyMode}
           breathe={breathe}

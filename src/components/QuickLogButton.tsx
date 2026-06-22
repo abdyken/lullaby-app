@@ -2,8 +2,7 @@
  * QuickLogButton — one large quick-log card, in the spirit of the Hush
  * reference's `.qbtn`: a soft white card with a rounded tinted icon block on the
  * LEFT and a two-line text column on the right (a label plus a smaller secondary
- * line). Active cards get an accent ring (no layout shift) and an accent label;
- * Pump never reads as active (it owns no orb state).
+ * line). Active cards get a faint accent ring (no layout shift) and an accent label.
  *
  * The card surface lives on an inner View — not the Pressable — because on real
  * Android the Pressable's own background doesn't paint reliably (see the project
@@ -37,6 +36,13 @@ const ACCENT: Record<QuickLogKind, string> = {
   sleep: colors.sleep,
   diaper: colors.diaper,
   pump: colors.pump,
+};
+
+const ACTIVE_BORDER: Record<QuickLogKind, string> = {
+  feed: 'rgba(255,122,61,0.17)',
+  sleep: 'rgba(85,96,198,0.16)',
+  diaper: 'rgba(35,183,158,0.18)',
+  pump: 'rgba(255,177,46,0.20)',
 };
 
 // Tinted icon-block gradients, verbatim from the reference's `.qbtn .qicon`.
@@ -149,7 +155,7 @@ export function QuickLogButton({
           paddingHorizontal: 14,
           // 2px ring at all times so selection never changes the card's size.
           borderWidth: 2,
-          borderColor: active ? accent : inactiveBorder,
+          borderColor: active ? ACTIVE_BORDER[kind] : inactiveBorder,
           ...shadows.card,
           elevation: 9,
         }}>
@@ -163,7 +169,6 @@ export function QuickLogButton({
             borderRadius: 16,
             alignItems: 'center',
             justifyContent: 'center',
-            transform: [{ scale: active ? 1.05 : 1 }],
           }}>
           <TileIcon kind={kind} color={iconColor} />
         </LinearGradient>
@@ -176,6 +181,8 @@ export function QuickLogButton({
           </Text>
           <Text
             numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.72}
             style={{ fontFamily: fonts.bodyBold, fontSize: 11, color: palette.inkFaint, marginTop: 2 }}>
             {secondary}
           </Text>
