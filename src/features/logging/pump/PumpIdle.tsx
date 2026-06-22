@@ -55,6 +55,19 @@ export function PumpIdle({ accentColor, accentTint, onStart }: Props) {
         ))}
       </View>
 
+      <Text
+        style={{
+          marginTop: 16,
+          marginHorizontal: 10,
+          textAlign: 'center',
+          fontFamily: fonts.bodyBold,
+          fontSize: 12.5,
+          lineHeight: 18,
+          color: colors.inkSoft,
+        }}>
+        First track duration. Enter left/right volume only when the session ends.
+      </Text>
+
       <View style={{ marginTop: 20, alignItems: 'center' }}>
         <PrimaryActionButton label="Start pumping" accentColor={accentColor} onPress={() => onStart(side)} />
       </View>
