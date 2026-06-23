@@ -121,6 +121,7 @@ import {
   formatTimelineEvent,
 } from '../src/features/logging/state/timelineSelectors';
 import { buildInsightsViewModel } from '../src/features/insights/insightSelectors';
+import { getInsightsViewModel } from '../src/features/insights/getInsightsViewModel';
 import { loggingError } from '../src/features/logging/domain/errors';
 // Logging v2 Feed use-cases (plan Phase 3 & 5, task 05) — pure async functions
 // over an in-memory repository + a fake clock.
@@ -1118,6 +1119,40 @@ async function runAsyncChecks(): Promise<void> {
     );
 
     assert.deepEqual(history.map((event) => event.id), ['ih-helper-now', 'ih-helper-boundary']);
+  });
+
+  await checkAsync('IH4. getInsightsViewModel builds the view model from repository-backed 7-day history', async () => {
+    const now = Date.parse('2026-06-23T10:00:00.000Z');
+    const repo = createLoggingRepository(createInMemoryLoggingPersistence(), createManualClock(now));
+    const scope = { familyId: 'fam-1', childId: 'baby-mia' };
+    const todayFeed = makeBottleAt('ih-vm-today-feed', 'ih-cid-vm-today-feed', now - 60 * 60_000);
+    const recentFeed = makeBottleAt('ih-vm-recent-feed', 'ih-cid-vm-recent-feed', now - 2 * 86_400_000);
+    const weekFeed = makeBottleAt('ih-vm-week-feed', 'ih-cid-vm-week-feed', now - 6 * 86_400_000);
+    const olderFeed = makeBottleAt(
+      'ih-vm-older-feed',
+      'ih-cid-vm-older-feed',
+      now - INSIGHTS_HISTORY_WINDOW_MS - 1,
+    );
+    const futureFeed = makeBottleAt('ih-vm-future-feed', 'ih-cid-vm-future-feed', now + 2 * 86_400_000);
+    const beforeJson = JSON.stringify([todayFeed, recentFeed, weekFeed, olderFeed, futureFeed]);
+
+    for (const event of [todayFeed, recentFeed, weekFeed, olderFeed, futureFeed]) {
+      await repo.createEvent(event);
+    }
+
+    const vm = await getInsightsViewModel({ repo, scope, nowMs: now });
+    const history = await getInsightsSevenDayHistory(repo, scope, now);
+    const expected = buildInsightsViewModel({ events: history, now });
+    const today = await repo.getTodayEvents(scope);
+
+    assert.deepEqual(history.map((event) => event.id), [
+      'ih-vm-today-feed',
+      'ih-vm-recent-feed',
+      'ih-vm-week-feed',
+    ]);
+    assert.deepEqual(vm, expected);
+    assert.deepEqual(today.map((event) => event.id), ['ih-vm-today-feed']);
+    assert.equal(JSON.stringify([todayFeed, recentFeed, weekFeed, olderFeed, futureFeed]), beforeJson);
   });
 
   await checkAsync('IG1. Insights selectors return seven empty chart days and fallback copy', async () => {
