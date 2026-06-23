@@ -1,5 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
-import { useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -16,6 +17,7 @@ import { InsightCard } from '@/features/insights/components/InsightCard';
 import { InsightStatCard } from '@/features/insights/components/InsightStatCard';
 import { InsightsSectionCard } from '@/features/insights/components/InsightsSectionCard';
 import { WeeklySleepBars } from '@/features/insights/components/WeeklySleepBars';
+import { getInsightsViewModel } from '@/features/insights/getInsightsViewModel';
 import { buildInsightsViewModel } from '@/features/insights/insightSelectors';
 import type { InsightStatViewModel, InsightsViewModel } from '@/features/insights/types';
 import { useLogging } from '@/features/logging/state/LoggingProvider';
@@ -96,7 +98,7 @@ function statForDataState(
 
 export function InsightsScreen() {
   const { mode, reveal, revealProgress, isTransitioning, beginReveal } = useTheme();
-  const { todayEvents } = useLogging();
+  const { loadInsightsHistory } = useLogging();
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const isShortDesktop = width >= 700 && height <= 760;
@@ -104,10 +106,27 @@ export function InsightsScreen() {
   const statsGap = isShortDesktop ? 18 : 22;
   const [revealScrollY, setRevealScrollY] = useState(0);
   const scrollYRef = useRef(0);
-  const viewModel = useMemo(
-    () => buildInsightsViewModel({ events: todayEvents, now: resolveInsightsNow() }),
-    [todayEvents],
+  const initialViewModel = useMemo(() => buildInsightsViewModel({ events: [], now: resolveInsightsNow() }), []);
+  const [loadedViewModel, setLoadedViewModel] = useState<InsightsViewModel | null>(null);
+  // Reload on tab focus so backdated logs inside the 7-day window are picked up from persisted history.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+
+      void getInsightsViewModel({
+        loadHistory: loadInsightsHistory,
+        nowMs: resolveInsightsNow(),
+      }).then((next) => {
+        if (!cancelled) setLoadedViewModel(next);
+      });
+
+      return () => {
+        cancelled = true;
+      };
+    }, [loadInsightsHistory]),
   );
+
+  const viewModel = loadedViewModel ?? initialViewModel;
   const stateCopy = getInsightsStateCopy(viewModel);
   const sleepSummaryLabel = getSleepSummaryLabel(viewModel);
   const feedsPerDay = statForDataState(viewModel.stats.feedsPerDay, viewModel.dataDays, {

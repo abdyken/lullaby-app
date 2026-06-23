@@ -1140,7 +1140,10 @@ async function runAsyncChecks(): Promise<void> {
       await repo.createEvent(event);
     }
 
-    const vm = await getInsightsViewModel({ repo, scope, nowMs: now });
+    const vm = await getInsightsViewModel({
+      loadHistory: (requestedNowMs) => getInsightsSevenDayHistory(repo, scope, requestedNowMs),
+      nowMs: now,
+    });
     const history = await getInsightsSevenDayHistory(repo, scope, now);
     const expected = buildInsightsViewModel({ events: history, now });
     const today = await repo.getTodayEvents(scope);
