@@ -61,6 +61,7 @@ import type {
   BottleFeedEvent,
   BreastFeedEvent,
   BreastSideSegment,
+  CareEvent,
   CareEventBase,
   DiaperEvent,
   PumpEvent,
@@ -119,6 +120,7 @@ import {
   formatLoggingToast,
   formatTimelineEvent,
 } from '../src/features/logging/state/timelineSelectors';
+import { buildInsightsViewModel } from '../src/features/insights/insightSelectors';
 import { loggingError } from '../src/features/logging/domain/errors';
 // Logging v2 Feed use-cases (plan Phase 3 & 5, task 05) — pure async functions
 // over an in-memory repository + a fake clock.
@@ -995,6 +997,95 @@ async function runAsyncChecks(): Promise<void> {
       totalRightMs: 0,
     },
   });
+
+  const localTime = (daysAgo: number, hour: number, minute = 0): number => {
+    const date = new Date(NOW);
+    date.setHours(hour, minute, 0, 0);
+    date.setDate(date.getDate() - daysAgo);
+    return date.getTime();
+  };
+
+  const makeBottleAt = (id: string, cid: string, at: number): BottleFeedEvent => ({
+    ...careBase({
+      id,
+      clientEventId: cid,
+      type: 'feed',
+      status: 'completed',
+      occurredAt: iso(at),
+      startedAt: null,
+      endedAt: null,
+      createdAt: iso(at),
+      updatedAt: iso(at),
+    }),
+    type: 'feed',
+    childId: 'baby-mia',
+    status: 'completed',
+    method: 'bottle',
+    details: { amountMl: 120, milkType: 'formula' },
+  });
+
+  const makeCompletedSleepAt = (id: string, cid: string, startedAt: number, endedAt: number): SleepEvent => ({
+    ...careBase({
+      id,
+      clientEventId: cid,
+      type: 'sleep',
+      status: 'completed',
+      occurredAt: iso(startedAt),
+      startedAt: iso(startedAt),
+      endedAt: iso(endedAt),
+      createdAt: iso(startedAt),
+      updatedAt: iso(endedAt),
+    }),
+    type: 'sleep',
+    childId: 'baby-mia',
+    details: { sleepType: 'night' },
+  });
+
+  await checkAsync('IG1. Insights selectors return seven empty chart days and fallback copy', async () => {
+    const vm = buildInsightsViewModel({ events: [], now: NOW });
+    assert.equal(vm.updatedAt, NOW);
+    assert.equal(vm.hasEnoughData, false);
+    assert.equal(vm.dataDays, 0);
+    assert.equal(vm.weeklySleep.length, 7);
+    assert.ok(vm.weeklySleep.every((day) => day.minutes === 0));
+    assert.equal(vm.cards[0].text, 'Feed rhythm will appear after a few more logs.');
+    assert.equal(vm.cards[0].source, 'Keep logging');
+    assert.equal(vm.cards[1].text, 'Sleep patterns will build as you log more completed sleeps.');
+    assert.equal(vm.cards[1].source, 'Building pattern');
+    assert.equal(vm.cards[2].text, 'Wake windows need a few completed sleeps to estimate.');
+    assert.equal(vm.cards[2].source, 'A few more logs needed');
+    assert.equal(vm.stats.feedsPerDay.value, '0');
+    assert.equal(vm.stats.sleepPerDay.value, '0');
+    assert.equal(vm.stats.diapersPerDay.value, '0');
+  });
+
+  await checkAsync(
+    'IG2. Insights selectors derive feed rhythm, sleep bars, and wake windows deterministically',
+    async () => {
+      const now = localTime(0, 12);
+      const events: CareEvent[] = [
+        makeBottleAt('ins-feed-1', 'ins-cid-feed-1', localTime(0, 6)),
+        makeBottleAt('ins-feed-2', 'ins-cid-feed-2', localTime(0, 8, 45)),
+        makeBottleAt('ins-feed-3', 'ins-cid-feed-3', localTime(0, 11, 30)),
+        makeCompletedSleepAt('ins-sleep-1', 'ins-cid-sleep-1', localTime(1, 20), localTime(1, 23)),
+        makeCompletedSleepAt('ins-sleep-2', 'ins-cid-sleep-2', localTime(0, 1), localTime(0, 7, 10)),
+        makeDiaper('ins-diaper-1', 'ins-cid-diaper-1', { occurredAt: iso(localTime(2, 9)) }),
+        makeDiaper('ins-diaper-2', 'ins-cid-diaper-2', { occurredAt: iso(localTime(3, 9)) }),
+      ];
+
+      const vm = buildInsightsViewModel({ events, now });
+      assert.equal(vm.hasEnoughData, true);
+      assert.equal(vm.weeklySleep.length, 7);
+      assert.ok(vm.weeklySleep.some((day) => day.minutes === 370));
+      assert.equal(vm.cards[0].text, 'Feeds are settling into a 2h 45m rhythm based on recent logs.');
+      assert.equal(vm.cards[0].source, 'From 3 recent feeds');
+      assert.equal(vm.cards[1].text, 'Longest sleep stretch is around 6h 10m based on recent sleep logs.');
+      assert.equal(vm.cards[2].text, 'Wake windows are around 2h based on recent sleep times.');
+      assert.equal(vm.stats.feedsPerDay.label, 'Feeds / day');
+      assert.equal(vm.stats.sleepPerDay.unit, 'h');
+      assert.equal(vm.stats.diapersPerDay.label, 'Diapers / day');
+    },
+  );
 
   await checkAsync('V1. createEvent stores an event; getTodayEvents returns it; retry is idempotent by clientEventId', async () => {
     const repo = createLoggingRepository(createInMemoryLoggingPersistence(), createManualClock(NOW));
