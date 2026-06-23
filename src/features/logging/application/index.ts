@@ -25,3 +25,4 @@ export * from './finishPump';
 export * from './savePump';
 export * from './cancelPump';
 export * from './undoLoggingMutation';
+export * from './getInsightsSevenDayHistory';
