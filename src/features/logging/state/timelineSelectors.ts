@@ -34,7 +34,7 @@ import {
   type PumpVolumeDraft,
   type SleepEvent,
 } from '../domain/types';
-import { breastSegmentTotals, formatCompactDuration, sessionElapsedMs } from '../timer/sessionMath';
+import { breastSegmentTotals, formatClock, formatCompactDuration, sessionElapsedMs } from '../timer/sessionMath';
 import { pumpTotalVolumeMl } from './loggingSelectors';
 
 /* --------------------------- small label helpers --------------------------- */
@@ -280,14 +280,14 @@ function diaperSubtitle(input: V2QuickLogInput, now: number): string {
 
 function pumpSubtitle(input: V2QuickLogInput, now: number): string {
   if (input.activePump && isRunningPump(input.activePump)) {
-    return `Pumping · ${formatCompactDuration(sessionElapsedMs(input.activePump, now))} · ${pumpSideWord(input.activePump.details.side)}`;
+    return `Pumping · ${formatClock(sessionElapsedMs(input.activePump, now))}`;
   }
   if (input.pumpVolumeDraft) return 'Finished · add volume';
   const last = newest(input.todayEvents, (e) => e.type === 'pump' && e.status === 'completed');
   if (last && isPumpEvent(last)) {
     const total = pumpTotalVolumeMl(last.details);
     const detail = total > 0 ? `${total} ml` : formatCompactDuration(sessionElapsedMs(last, now));
-    return `${agoLabel(recencyIso(last), now)} · ${detail}`;
+    return `Last · ${detail}`;
   }
   return 'Log pump';
 }

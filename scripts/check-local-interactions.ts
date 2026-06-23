@@ -1846,7 +1846,7 @@ async function runAsyncChecks(): Promise<void> {
     const subs = buildV2QuickLogSubtitles(state, clock.now());
     assert.equal(subs.feed, 'Feeding · 12m · right');
     assert.equal(subs.sleep, 'Sleeping · 12m');
-    assert.equal(subs.pump, 'Pumping · 12m · both');
+    assert.equal(subs.pump, 'Pumping · 12:00');
   });
 
   await checkAsync('BB6. buildV2QuickLogSubtitles: pump draft "Finished · add volume", then last-pump line', async () => {
@@ -1859,7 +1859,7 @@ async function runAsyncChecks(): Promise<void> {
     await savePump(deps, { event: (await activePumpOf(repo))!, leftVolumeMl: 90, rightVolumeMl: null });
     clock.advance(5 * 60_000);
     state = await hydrateLoggingState(repo, feedScope, clock);
-    assert.equal(buildV2QuickLogSubtitles(state, clock.now()).pump, '5m ago · 90 ml');
+    assert.equal(buildV2QuickLogSubtitles(state, clock.now()).pump, 'Last · 90 ml');
   });
 
   await checkAsync('BB7. buildV2TonightStatus + idle/awake subtitles (plan §7.1)', async () => {
@@ -2542,7 +2542,7 @@ async function runAsyncChecks(): Promise<void> {
       },
       clock.now(),
     );
-    assert.equal(subtitles.pump, '5m ago · 110 ml'); // last pump + recency on the card
+    assert.equal(subtitles.pump, 'Last · 110 ml'); // last pump on the card
   });
 
   await checkAsync('FF7. §11.3 #6/#7 (local portion): instant log survives restart offline + one active sleep per child', async () => {
