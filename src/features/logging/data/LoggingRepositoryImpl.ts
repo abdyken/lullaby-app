@@ -17,12 +17,17 @@ import type { Clock } from '../timer/clock';
 import type { CareEvent } from '../domain/types';
 import type {
   ActiveSessionsQuery,
+  EventsInRangeQuery,
   LoggingRepository,
   TodayEventsQuery,
 } from './LoggingRepository';
 import type { LoggingPersistencePort, LoggingSnapshot } from './loggingPersistence';
 
 const ms = (iso: string): number => Date.parse(iso);
+
+function occurredAtMs(event: CareEvent): number {
+  return ms(event.occurredAt);
+}
 
 /** Same local calendar day — used for the "today" timeline window. */
 function isSameLocalDay(aMs: number, bMs: number): boolean {
@@ -39,6 +44,21 @@ function isSameLocalDay(aMs: number, bMs: number): boolean {
 function belongsToChildTimeline(event: CareEvent, childId: string): boolean {
   if (event.type === 'pump') return true;
   return event.childId === childId;
+}
+
+function isTimelineVisible(event: CareEvent): boolean {
+  return event.status !== 'deleted' && event.status !== 'cancelled';
+}
+
+function timelineEventsForScope(
+  events: CareEvent[],
+  familyId: string,
+  childId: string,
+): CareEvent[] {
+  return events
+    .filter((e) => e.familyId === familyId)
+    .filter((e) => belongsToChildTimeline(e, childId))
+    .filter(isTimelineVisible);
 }
 
 /**
@@ -65,12 +85,26 @@ export function createLoggingRepository(
     async getTodayEvents({ familyId, childId }: TodayEventsQuery): Promise<CareEvent[]> {
       const { events } = await port.load();
       const now = clock.now();
-      return events
-        .filter((e) => e.familyId === familyId)
-        .filter((e) => belongsToChildTimeline(e, childId))
-        .filter((e) => e.status !== 'deleted' && e.status !== 'cancelled')
-        .filter((e) => isSameLocalDay(ms(e.occurredAt), now))
-        .sort((a, b) => ms(b.occurredAt) - ms(a.occurredAt));
+      return timelineEventsForScope(events, familyId, childId)
+        .filter((e) => isSameLocalDay(occurredAtMs(e), now))
+        .sort((a, b) => occurredAtMs(b) - occurredAtMs(a));
+    },
+
+    async getEventsInRange({
+      familyId,
+      childId,
+      fromMs,
+      toMs,
+    }: EventsInRangeQuery): Promise<CareEvent[]> {
+      if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs > toMs) return [];
+
+      const { events } = await port.load();
+      return timelineEventsForScope(events, familyId, childId)
+        .filter((event) => {
+          const timestamp = occurredAtMs(event);
+          return Number.isFinite(timestamp) && timestamp >= fromMs && timestamp <= toMs;
+        })
+        .sort((a, b) => occurredAtMs(b) - occurredAtMs(a));
     },
 
     async getActiveSessions({
