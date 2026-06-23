@@ -74,7 +74,6 @@ export function PumpSheet({ onClose }: Props) {
   } = useLogging();
 
   const accentColor = colors.pump;
-  const accentTint = colors.pumpTint;
 
   const handleClose = () => {
     clearError();
@@ -130,7 +129,7 @@ export function PumpSheet({ onClose }: Props) {
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={handleClose} statusBarTranslucent>
-      <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+      <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'transparent' }}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Dismiss"
@@ -142,17 +141,20 @@ export function PumpSheet({ onClose }: Props) {
             right: 0,
             bottom: 0,
             backgroundColor: 'rgba(46,42,64,0.35)',
+            zIndex: 0,
           }}
         />
 
         <View
           style={{
-            backgroundColor: colors.surface,
+            backgroundColor: '#FFFFFF',
             borderTopLeftRadius: radii.large,
             borderTopRightRadius: radii.large,
             paddingTop: 10,
-            paddingHorizontal: 18,
-            paddingBottom: insets.bottom + 18,
+            paddingHorizontal: 22,
+            paddingBottom: Math.max(insets.bottom + 22, 30),
+            opacity: 1,
+            zIndex: 1,
             ...shadows.soft,
           }}>
           <View
@@ -162,12 +164,22 @@ export function PumpSheet({ onClose }: Props) {
               height: 4,
               borderRadius: 2,
               backgroundColor: colors.line,
-              marginBottom: 14,
+              marginBottom: 16,
             }}
           />
 
-          <Text style={{ fontFamily: fonts.display, fontSize: 20, color: colors.ink }}>{title}</Text>
-          <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.inkFaint, marginTop: 2 }}>
+          <Text style={{ fontFamily: fonts.display, fontSize: 23, lineHeight: 28, color: colors.ink, textAlign: 'center' }}>
+            {title}
+          </Text>
+          <Text
+            style={{
+              fontFamily: fonts.bodyBold,
+              fontSize: 13,
+              lineHeight: 18,
+              color: colors.inkSoft,
+              marginTop: 3,
+              textAlign: 'center',
+            }}>
             {subtitle}
           </Text>
 
@@ -192,7 +204,7 @@ export function PumpSheet({ onClose }: Props) {
               onCancel={handleCancel}
             />
           ) : (
-            <PumpIdle accentColor={accentColor} accentTint={accentTint} onStart={(side) => void startPump(side)} />
+            <PumpIdle accentColor={accentColor} onStart={(side) => void startPump(side)} />
           )}
         </View>
       </View>

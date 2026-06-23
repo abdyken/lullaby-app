@@ -10,14 +10,14 @@
  * is visually separated from finish (plan §10): Cancel discards the session
  * entirely (never reaches the timeline). Mirrors `SleepActive`.
  */
-import { Pressable, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Text, View } from 'react-native';
 
-import { PrimaryActionButton } from '@/components/PrimaryActionButton';
 import { colors, fonts, radii } from '@/theme';
 
 import type { PumpEvent } from '../domain/types';
-import { formatClock } from '../timer/sessionMath';
-import { useElapsedTime } from '../timer/useElapsedTime';
+import { elapsedMs, formatClock } from '../timer/sessionMath';
+import { PumpActionStack } from './PumpActionStack';
 
 type Props = {
   event: PumpEvent;
@@ -27,24 +27,33 @@ type Props = {
 };
 
 export function PumpActive({ event, accentColor, onFinish, onCancel }: Props) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
   // Display-only tick; the value is derived from `startedAt`, not stored.
-  const elapsed = useElapsedTime(event.startedAt, true);
+  const elapsed = event.startedAt === null ? 0 : elapsedMs(event.startedAt, null, nowMs);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => clearInterval(id);
+  }, [event.startedAt]);
 
   return (
-    <View style={{ marginTop: 16 }}>
+    <View style={{ marginTop: 20 }}>
       <View
         style={{
           backgroundColor: colors.surfaceSoft,
           borderRadius: radii.medium,
-          paddingHorizontal: 16,
-          paddingVertical: 18,
+          paddingHorizontal: 18,
+          paddingVertical: 22,
           alignItems: 'center',
         }}>
         <Text
           style={{
             fontFamily: fonts.bodyBold,
             fontSize: 11,
-            letterSpacing: 0.8,
+            letterSpacing: 1,
             textTransform: 'uppercase',
             color: colors.inkFaint,
           }}>
@@ -53,39 +62,27 @@ export function PumpActive({ event, accentColor, onFinish, onCancel }: Props) {
         <Text
           style={{
             fontFamily: fonts.display,
-            fontSize: 40,
+            fontSize: 42,
             color: colors.ink,
             fontVariant: ['tabular-nums'],
-            lineHeight: 46,
+            lineHeight: 48,
             marginTop: 4,
           }}>
           {formatClock(elapsed)}
         </Text>
-        <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12, color: colors.inkSoft, marginTop: 4 }}>
+        <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, lineHeight: 17, color: colors.inkSoft, marginTop: 4 }}>
           Volume is entered after finishing
         </Text>
       </View>
 
-      <View style={{ marginTop: 20, alignItems: 'center' }}>
-        <PrimaryActionButton label="Finish pumping" accentColor={accentColor} onPress={onFinish} />
-      </View>
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Cancel pump session"
-        onPress={onCancel}
-        hitSlop={8}
-        style={({ pressed }) => ({
-          marginTop: 12,
-          alignSelf: 'center',
-          paddingVertical: 8,
-          paddingHorizontal: 14,
-          opacity: pressed ? 0.5 : 1,
-        })}>
-        <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.inkFaint }}>
-          Cancel this session
-        </Text>
-      </Pressable>
+      <PumpActionStack
+        primaryLabel="Finish pumping"
+        accentColor={accentColor}
+        onPrimaryPress={onFinish}
+        secondaryLabel="Cancel this session"
+        onSecondaryPress={onCancel}
+        marginTop={18}
+      />
     </View>
   );
 }
