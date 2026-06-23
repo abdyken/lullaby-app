@@ -18,6 +18,12 @@ export interface TodayEventsQuery {
   childId: string;
 }
 
+/** Scope for a read-only timeline-history range. Uses the same child timeline rules. */
+export interface EventsInRangeQuery extends TodayEventsQuery {
+  fromMs: number;
+  toMs: number;
+}
+
 /**
  * Scope for active-session recovery. `userId` is the current caregiver, needed
  * because a pump session belongs to the caregiver (`subjectUserId`), not the
@@ -36,6 +42,12 @@ export interface LoggingRepository {
    * badge them.
    */
   getTodayEvents(params: TodayEventsQuery): Promise<CareEvent[]>;
+
+  /**
+   * Timeline-visible events in an inclusive occurredAt range, newest first.
+   * Read-only foundation for consumers that need history beyond today's slice.
+   */
+  getEventsInRange(params: EventsInRangeQuery): Promise<CareEvent[]>;
 
   /**
    * Active (`status === 'active'`) sessions in scope: sleep/breast for the child,
