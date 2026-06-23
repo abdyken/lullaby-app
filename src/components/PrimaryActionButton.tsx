@@ -19,6 +19,10 @@ const ICON_SLOT_SIZE = 18;
 const PRESS_IN_MS = 105;
 const PRESS_OUT_MS = 165;
 
+function hasActionIcon(label: string): boolean {
+  return label === 'Start sleep' || label === 'Wake baby' || label === 'Baby woke up';
+}
+
 function ActionIcon({ label }: { label: string }) {
   if (label === 'Start sleep') {
     return (
@@ -75,6 +79,7 @@ export function PrimaryActionButton({
   const [colorPair, setColorPair] = useState({ from: accentColor, to: accentColor });
   const usesAnimatedPress = pressScale !== undefined;
   const tactilePressScale = pressScale ?? 1;
+  const showIcon = hasActionIcon(label);
 
   useEffect(() => {
     if (!animateColor) {
@@ -160,15 +165,17 @@ export function PrimaryActionButton({
             justifyContent: 'center',
             gap: 8,
           }}>
-          <View
-            style={{
-              width: ICON_SLOT_SIZE,
-              height: ICON_SLOT_SIZE,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}>
-            <ActionIcon label={label} />
-          </View>
+          {showIcon ? (
+            <View
+              style={{
+                width: ICON_SLOT_SIZE,
+                height: ICON_SLOT_SIZE,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+              <ActionIcon label={label} />
+            </View>
+          ) : null}
           <Text
             numberOfLines={1}
             style={{
