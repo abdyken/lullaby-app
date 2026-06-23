@@ -25,6 +25,7 @@ import { surfaces, tabbar } from '@/theme';
 // The tabs, in navigator order. Kept in sync with app/(tabs)/_layout.tsx.
 const TAB_ROUTES: { name: string; label: string; iconName: TabName; isActive: (p: string) => boolean }[] = [
   { name: 'index', label: 'Tonight', iconName: 'tonight', isActive: (p) => p === '/' || p === '' },
+  { name: 'insights', label: 'Insights', iconName: 'insights', isActive: (p) => p.startsWith('/insights') },
   { name: 'log', label: 'Log', iconName: 'log', isActive: (p) => p.startsWith('/log') },
   { name: 'reassure', label: 'Reassure', iconName: 'reassure', isActive: (p) => p.startsWith('/reassure') },
 ];
