@@ -15,11 +15,10 @@
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
-import { PrimaryActionButton } from '@/components/PrimaryActionButton';
 import { colors, fonts } from '@/theme';
 
 import type { PumpVolumeDraft as PumpVolumeDraftModel } from '../domain/types';
-import { elapsedMs, formatCompactDuration } from '../timer/sessionMath';
+import { PumpActionStack } from './PumpActionStack';
 
 const STEP_ML = 5;
 
@@ -47,7 +46,7 @@ function StepButton({
       accessibilityLabel={accessibilityLabel}
       onPress={onPress}
       hitSlop={8}
-      style={({ pressed }) => ({ transform: [{ scale: pressed ? 0.94 : 1 }] })}>
+      style={({ pressed }) => ({ opacity: pressed ? 0.62 : 1 })}>
       <View
         style={{
           width: 42,
@@ -137,8 +136,6 @@ export function PumpVolumeDraft({ draft, accentColor, onSave, onSaveWithoutVolum
 
   // Only the visible side(s) contribute to the total.
   const total = (showLeft ? left : 0) + (showRight ? right : 0);
-  const durationMs = elapsedMs(draft.startedAt, draft.endedAt, Date.parse(draft.endedAt));
-
   const canSaveVolume = total > 0 && !saving;
 
   // A side left at 0 (or not pumped) is "not recorded" → null, never 0.
@@ -176,42 +173,16 @@ export function PumpVolumeDraft({ draft, accentColor, onSave, onSaveWithoutVolum
       {showLeft && <VolumeRow label="Left" value={left} onChange={setLeft} />}
       {showRight && <VolumeRow label="Right" value={right} onChange={setRight} />}
 
-      <Text
-        style={{
-          marginTop: 12,
-          textAlign: 'center',
-          fontFamily: fonts.bodyBold,
-          fontSize: 12,
-          color: colors.inkFaint,
-        }}>
-        Pumped for {formatCompactDuration(durationMs)}
-      </Text>
-
-      <View style={{ marginTop: 20, alignItems: 'center', opacity: canSaveVolume ? 1 : 0.45 }}>
-        <PrimaryActionButton
-          label={`Save pump · ${total} ml`}
-          accentColor={accentColor}
-          onPress={canSaveVolume ? handleSave : undefined}
-        />
-      </View>
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Save pump without volume"
-        onPress={handleSaveWithout}
-        hitSlop={8}
-        disabled={saving}
-        style={({ pressed }) => ({
-          marginTop: 12,
-          alignSelf: 'center',
-          paddingVertical: 8,
-          paddingHorizontal: 14,
-          opacity: pressed || saving ? 0.5 : 1,
-        })}>
-        <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13.5, color: accentColor }}>
-          Save without volume
-        </Text>
-      </Pressable>
+      <PumpActionStack
+        primaryLabel={`Save pump · ${total} ml`}
+        accentColor={accentColor}
+        onPrimaryPress={handleSave}
+        primaryDisabled={!canSaveVolume}
+        secondaryLabel="Save without volume"
+        onSecondaryPress={handleSaveWithout}
+        secondaryDisabled={saving}
+        marginTop={22}
+      />
     </View>
   );
 }
