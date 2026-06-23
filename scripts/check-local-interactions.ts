@@ -121,10 +121,12 @@ import {
   formatTimelineEvent,
 } from '../src/features/logging/state/timelineSelectors';
 import { buildInsightsViewModel } from '../src/features/insights/insightSelectors';
+import { getInsightsViewModel } from '../src/features/insights/getInsightsViewModel';
 import { loggingError } from '../src/features/logging/domain/errors';
 // Logging v2 Feed use-cases (plan Phase 3 & 5, task 05) — pure async functions
 // over an in-memory repository + a fake clock.
 import {
+  INSIGHTS_HISTORY_WINDOW_MS,
   buildUndoableMutation,
   cancelBreastFeed,
   cancelPump,
@@ -136,6 +138,7 @@ import {
   saveCompletedSleep,
   saveDiaper,
   savePump,
+  getInsightsSevenDayHistory,
   startBreastFeed,
   startPump,
   startSleep,
@@ -1039,6 +1042,120 @@ async function runAsyncChecks(): Promise<void> {
     type: 'sleep',
     childId: 'baby-mia',
     details: { sleepType: 'night' },
+  });
+
+  await checkAsync(
+    'IH1. getEventsInRange includes the 7-day boundaries and excludes older/future/invalid events',
+    async () => {
+      const now = Date.parse('2026-06-23T10:00:00.000Z');
+      const fromMs = now - INSIGHTS_HISTORY_WINDOW_MS;
+      const repo = createLoggingRepository(createInMemoryLoggingPersistence(), createManualClock(now));
+      const inside = makeDiaper('ih-inside', 'ih-cid-inside', { occurredAt: iso(now - 2 * 86_400_000) });
+      const atWindowStart = makeDiaper('ih-window-start', 'ih-cid-window-start', { occurredAt: iso(fromMs) });
+      const older = makeDiaper('ih-older', 'ih-cid-older', { occurredAt: iso(fromMs - 1) });
+      const future = makeDiaper('ih-future', 'ih-cid-future', { occurredAt: iso(now + 1) });
+      const atNow = makeDiaper('ih-now', 'ih-cid-now', { occurredAt: iso(now) });
+      const invalid = makeDiaper('ih-invalid', 'ih-cid-invalid', { occurredAt: 'not-a-date' });
+      const beforeJson = JSON.stringify([atNow, inside, atWindowStart]);
+
+      for (const event of [inside, atWindowStart, older, future, atNow, invalid]) {
+        await repo.createEvent(event);
+      }
+
+      const history = await repo.getEventsInRange({
+        familyId: 'fam-1',
+        childId: 'baby-mia',
+        fromMs,
+        toMs: now,
+      });
+
+      assert.deepEqual(history.map((event) => event.id), ['ih-now', 'ih-inside', 'ih-window-start']);
+      assert.deepEqual(history[0], atNow);
+      assert.deepEqual(history[1], inside);
+      assert.deepEqual(history[2], atWindowStart);
+      assert.ok(!history.includes(older), 'older-than-window event should be excluded');
+      assert.ok(!history.includes(future), 'future event should be excluded');
+      assert.ok(!history.includes(invalid), 'invalid timestamp event should be excluded');
+      assert.equal(JSON.stringify([atNow, inside, atWindowStart]), beforeJson);
+    },
+  );
+
+  await checkAsync('IH2. getEventsInRange does not change getTodayEvents today-only behavior', async () => {
+    const now = Date.parse('2026-06-23T10:00:00.000Z');
+    const fromMs = now - INSIGHTS_HISTORY_WINDOW_MS;
+    const repo = createLoggingRepository(createInMemoryLoggingPersistence(), createManualClock(now));
+    await repo.createEvent(makeDiaper('ih-today-only', 'ih-cid-today-only', { occurredAt: iso(now) }));
+    await repo.createEvent(makeDiaper('ih-yesterday', 'ih-cid-yesterday', { occurredAt: iso(now - 86_400_000) }));
+    await repo.createEvent(makeDiaper('ih-range-start', 'ih-cid-range-start', { occurredAt: iso(fromMs) }));
+
+    const history = await repo.getEventsInRange({
+      familyId: 'fam-1',
+      childId: 'baby-mia',
+      fromMs,
+      toMs: now,
+    });
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+
+    assert.deepEqual(history.map((event) => event.id), ['ih-today-only', 'ih-yesterday', 'ih-range-start']);
+    assert.deepEqual(today.map((event) => event.id), ['ih-today-only']);
+  });
+
+  await checkAsync('IH3. getInsightsSevenDayHistory reads the last 7 days through the repository range path', async () => {
+    const now = Date.parse('2026-06-23T10:00:00.000Z');
+    const repo = createLoggingRepository(createInMemoryLoggingPersistence(), createManualClock(now));
+    await repo.createEvent(makeDiaper('ih-helper-now', 'ih-cid-helper-now', { occurredAt: iso(now) }));
+    await repo.createEvent(makeDiaper('ih-helper-boundary', 'ih-cid-helper-boundary', {
+      occurredAt: iso(now - INSIGHTS_HISTORY_WINDOW_MS),
+    }));
+    await repo.createEvent(makeDiaper('ih-helper-old', 'ih-cid-helper-old', {
+      occurredAt: iso(now - INSIGHTS_HISTORY_WINDOW_MS - 1),
+    }));
+    await repo.createEvent(makeDiaper('ih-helper-future', 'ih-cid-helper-future', { occurredAt: iso(now + 1) }));
+
+    const history = await getInsightsSevenDayHistory(
+      repo,
+      { familyId: 'fam-1', childId: 'baby-mia' },
+      now,
+    );
+
+    assert.deepEqual(history.map((event) => event.id), ['ih-helper-now', 'ih-helper-boundary']);
+  });
+
+  await checkAsync('IH4. getInsightsViewModel builds the view model from repository-backed 7-day history', async () => {
+    const now = Date.parse('2026-06-23T10:00:00.000Z');
+    const repo = createLoggingRepository(createInMemoryLoggingPersistence(), createManualClock(now));
+    const scope = { familyId: 'fam-1', childId: 'baby-mia' };
+    const todayFeed = makeBottleAt('ih-vm-today-feed', 'ih-cid-vm-today-feed', now - 60 * 60_000);
+    const recentFeed = makeBottleAt('ih-vm-recent-feed', 'ih-cid-vm-recent-feed', now - 2 * 86_400_000);
+    const weekFeed = makeBottleAt('ih-vm-week-feed', 'ih-cid-vm-week-feed', now - 6 * 86_400_000);
+    const olderFeed = makeBottleAt(
+      'ih-vm-older-feed',
+      'ih-cid-vm-older-feed',
+      now - INSIGHTS_HISTORY_WINDOW_MS - 1,
+    );
+    const futureFeed = makeBottleAt('ih-vm-future-feed', 'ih-cid-vm-future-feed', now + 2 * 86_400_000);
+    const beforeJson = JSON.stringify([todayFeed, recentFeed, weekFeed, olderFeed, futureFeed]);
+
+    for (const event of [todayFeed, recentFeed, weekFeed, olderFeed, futureFeed]) {
+      await repo.createEvent(event);
+    }
+
+    const vm = await getInsightsViewModel({
+      loadHistory: (requestedNowMs) => getInsightsSevenDayHistory(repo, scope, requestedNowMs),
+      nowMs: now,
+    });
+    const history = await getInsightsSevenDayHistory(repo, scope, now);
+    const expected = buildInsightsViewModel({ events: history, now });
+    const today = await repo.getTodayEvents(scope);
+
+    assert.deepEqual(history.map((event) => event.id), [
+      'ih-vm-today-feed',
+      'ih-vm-recent-feed',
+      'ih-vm-week-feed',
+    ]);
+    assert.deepEqual(vm, expected);
+    assert.deepEqual(today.map((event) => event.id), ['ih-vm-today-feed']);
+    assert.equal(JSON.stringify([todayFeed, recentFeed, weekFeed, olderFeed, futureFeed]), beforeJson);
   });
 
   await checkAsync('IG1. Insights selectors return seven empty chart days and fallback copy', async () => {
