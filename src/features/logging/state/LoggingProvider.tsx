@@ -57,6 +57,7 @@ import {
   finishBreastFeed,
   finishPump as runFinishPump,
   finishSleep as runFinishSleep,
+  getInsightsSevenDayHistory,
   saveBottleFeed,
   saveCompletedSleep as runSaveCompletedSleep,
   saveDiaper as runSaveDiaper,
@@ -109,6 +110,8 @@ type LoggingContextValue = {
   /** Recover/error state from the last action (plan §6); null when clear. */
   error: LoggingError | null;
   clearError: () => void;
+  /** Read-only persisted logging history for Insights. */
+  loadInsightsHistory: (nowMs?: number) => Promise<CareEvent[]>;
 
   /** The live "saved · Undo" toast for the last completing/instant save (plan §8). */
   toast: LoggingToastState | null;
@@ -509,6 +512,14 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
 
   const clearError = useCallback(() => setState((prev) => clearErrorTransition(prev)), []);
 
+  const loadInsightsHistory = useCallback(
+    async (nowMs = clock.now()) => {
+      if (!enabled || !scope) return [];
+      return getInsightsSevenDayHistory(repo, scope, nowMs);
+    },
+    [enabled, repo, scope, clock],
+  );
+
   const value = useMemo<LoggingContextValue>(
     () => ({
       enabled,
@@ -521,6 +532,7 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       pumpVolumeDraft: state.pumpVolumeDraft,
       error: state.error,
       clearError,
+      loadInsightsHistory,
       toast,
       undo,
       dismissToast,
@@ -550,6 +562,7 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       state.pumpVolumeDraft,
       state.error,
       clearError,
+      loadInsightsHistory,
       toast,
       undo,
       dismissToast,
