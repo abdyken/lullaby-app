@@ -1779,7 +1779,7 @@ async function runAsyncChecks(): Promise<void> {
     assert.equal(d.icon, 'diaper');
   });
 
-  await checkAsync('BB2. formatTimelineEvent: sleep reads "Sleeping" while active, "Sleep" once completed', async () => {
+  await checkAsync('BB2. formatTimelineEvent: sleep reads "Sleeping" while active, "Nap" once completed', async () => {
     const { repo, clock, deps } = newFeedDeps();
     assert.ok((await startSleep(deps, {})).ok);
     clock.advance(42 * 60_000);
@@ -1791,7 +1791,7 @@ async function runAsyncChecks(): Promise<void> {
     await finishSleep(deps, { event: active });
     const done = (await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' })).find((e) => isSleepEvent(e))!;
     const f = formatTimelineEvent(done, clock.now());
-    assert.equal(f.title, 'Sleep');
+    assert.equal(f.title, 'Nap');
     assert.equal(f.subtitle, '42m'); // fixed at endedAt — no longer ticking
   });
 
@@ -1832,8 +1832,8 @@ async function runAsyncChecks(): Promise<void> {
     await savePump(deps, { event: draft, leftVolumeMl: 50, rightVolumeMl: 60 });
     const done = (await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' })).find((e) => isPumpEvent(e))!;
     const f = formatTimelineEvent(done, clock.now());
-    assert.equal(f.title, 'Pump');
-    assert.equal(f.subtitle, '110 ml · both'); // derived total, never stored (§7.3)
+    assert.equal(f.title, 'Pump · 110 ml');
+    assert.equal(f.subtitle, 'L 50 ml · R 60 ml · 18m'); // derived total, never stored (§7.3)
   });
 
   await checkAsync('BB5. buildV2QuickLogSubtitles: active sessions lead in the present tense (plan §7.1)', async () => {
@@ -1846,7 +1846,7 @@ async function runAsyncChecks(): Promise<void> {
     const subs = buildV2QuickLogSubtitles(state, clock.now());
     assert.equal(subs.feed, 'Feeding · 12m · right');
     assert.equal(subs.sleep, 'Sleeping · 12m');
-    assert.equal(subs.pump, 'Pumping · 12m · both');
+    assert.equal(subs.pump, 'Pumping · 12:00');
   });
 
   await checkAsync('BB6. buildV2QuickLogSubtitles: pump draft "Finished · add volume", then last-pump line', async () => {
@@ -1859,16 +1859,16 @@ async function runAsyncChecks(): Promise<void> {
     await savePump(deps, { event: (await activePumpOf(repo))!, leftVolumeMl: 90, rightVolumeMl: null });
     clock.advance(5 * 60_000);
     state = await hydrateLoggingState(repo, feedScope, clock);
-    assert.equal(buildV2QuickLogSubtitles(state, clock.now()).pump, '5m ago · 90 ml');
+    assert.equal(buildV2QuickLogSubtitles(state, clock.now()).pump, 'Last · 90 ml');
   });
 
   await checkAsync('BB7. buildV2TonightStatus + idle/awake subtitles (plan §7.1)', async () => {
     const { repo, clock, deps } = newFeedDeps();
-    // Empty store → calm prompts + "Awake".
+    // Empty store → calm prompts + truthful empty awake state.
     let state = await hydrateLoggingState(repo, feedScope, clock);
     let subs = buildV2QuickLogSubtitles(state, clock.now());
     assert.equal(subs.feed, 'Tap to log');
-    assert.equal(subs.sleep, 'Tap to start');
+    assert.equal(subs.sleep, 'Awake · no sleep yet');
     assert.equal(subs.diaper, 'Tap to log');
     assert.equal(subs.pump, 'Log pump');
     let status = buildV2TonightStatus(state, clock.now());
@@ -1976,13 +1976,13 @@ async function runAsyncChecks(): Promise<void> {
     c2.advance(40 * 60_000);
     const fin = await finishSleep(d2, { event: selectActiveSleep(await r2.getActiveSessions(feedScope))! });
     assert.ok(fin.ok);
-    if (fin.ok) assert.equal(formatLoggingToast(fin.event, c2.now()), 'Sleep logged · 40m');
+    if (fin.ok) assert.equal(formatLoggingToast(fin.event, c2.now()), 'Nap logged · 40m');
     assert.ok((await startPump(d2, { side: 'both' })).ok);
     c2.advance(5 * 60_000);
     await finishPump(d2, { event: (await activePumpOf(r2))! });
     const sv = await savePump(d2, { event: (await activePumpOf(r2))!, leftVolumeMl: 50, rightVolumeMl: 60 });
     assert.ok(sv.ok);
-    if (sv.ok) assert.equal(formatLoggingToast(sv.event, c2.now()), 'Pump saved · 110 ml');
+    if (sv.ok) assert.equal(formatLoggingToast(sv.event, c2.now()), 'Pump logged · 110 ml');
   });
 
   await checkAsync('CC7. buildUndoableMutation mints a fresh id + future expiry; a create carries no snapshot', async () => {
@@ -2021,7 +2021,7 @@ async function runAsyncChecks(): Promise<void> {
     const sleep = state.todayEvents.find(isSleepEvent);
     assert.ok(sleep && sleep.status === 'completed'); // the completed event survived the restart
     const view = formatTimelineEvent(sleep!, clock.now());
-    assert.equal(view.title, 'Sleep');
+    assert.equal(view.title, 'Nap');
     assert.equal(view.subtitle, '40m'); // final duration is fixed (from endedAt), not recomputed to "now"
   });
 
@@ -2521,7 +2521,7 @@ async function runAsyncChecks(): Promise<void> {
     // Save 110 ml (50 + 60) on the restored draft → completed.
     const sv = await savePump(deps, { event: reopened.activePump!, leftVolumeMl: 50, rightVolumeMl: 60 });
     assert.ok(sv.ok);
-    if (sv.ok) assert.equal(formatLoggingToast(sv.event, clock.now()), 'Pump saved · 110 ml');
+    if (sv.ok) assert.equal(formatLoggingToast(sv.event, clock.now()), 'Pump logged · 110 ml');
 
     const after = await hydrateLoggingState(createLoggingRepository(persistence, clock), feedScope, clock);
     assert.equal(after.activePump, null);
@@ -2529,8 +2529,8 @@ async function runAsyncChecks(): Promise<void> {
     const pump = after.todayEvents.find(isPumpEvent);
     assert.ok(pump && pump.status === 'completed');
     const view = formatTimelineEvent(pump!, clock.now());
-    assert.equal(view.title, 'Pump');
-    assert.equal(view.subtitle, '110 ml · both'); // Both sums left + right in the timeline
+    assert.equal(view.title, 'Pump · 110 ml');
+    assert.equal(view.subtitle, 'L 50 ml · R 60 ml · 18m'); // Both sums left + right in the timeline
     clock.advance(5 * 60_000);
     const subtitles = buildV2QuickLogSubtitles(
       {
@@ -2542,7 +2542,7 @@ async function runAsyncChecks(): Promise<void> {
       },
       clock.now(),
     );
-    assert.equal(subtitles.pump, '5m ago · 110 ml'); // last pump + recency on the card
+    assert.equal(subtitles.pump, 'Last · 110 ml'); // last pump on the card
   });
 
   await checkAsync('FF7. §11.3 #6/#7 (local portion): instant log survives restart offline + one active sleep per child', async () => {

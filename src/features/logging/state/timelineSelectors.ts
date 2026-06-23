@@ -34,7 +34,7 @@ import {
   type PumpVolumeDraft,
   type SleepEvent,
 } from '../domain/types';
-import { breastSegmentTotals, formatCompactDuration, sessionElapsedMs } from '../timer/sessionMath';
+import { breastSegmentTotals, formatClock, formatCompactDuration, sessionElapsedMs } from '../timer/sessionMath';
 import { pumpTotalVolumeMl } from './loggingSelectors';
 
 /* --------------------------- small label helpers --------------------------- */
@@ -68,6 +68,7 @@ function recencyIso(event: CareEvent): ISODateTime {
 
 const sideWord = (side: BreastSide): string => side; // 'left' | 'right'
 const pumpSideWord = (side: PumpSide): string => side; // 'left' | 'right' | 'both'
+const pumpSideTitle = (side: PumpSide): string => (side === 'both' ? 'Both' : side === 'left' ? 'Left' : 'Right');
 const diaperWord = (kind: DiaperKind): string => kind; // wet | dirty | both | dry
 
 const MILK_WORD: Record<MilkType, string> = {
@@ -89,6 +90,32 @@ function breastSummary(totalLeftMs: number, totalRightMs: number): string {
 const isRunningPump = (e: PumpEvent): boolean => e.status === 'active' && e.endedAt === null;
 /** A pump volume draft is a finished-but-unsaved pump (active, with an `endedAt`). */
 const isDraftPump = (e: PumpEvent): boolean => e.status === 'active' && e.endedAt !== null;
+
+function sleepDurationLabel(event: SleepEvent, now: number): string {
+  return formatCompactDuration(sessionElapsedMs(event, now));
+}
+
+function pumpVolumeDetail(event: PumpEvent, now: number): { title: string; subtitle: string } {
+  const duration = formatCompactDuration(sessionElapsedMs(event, now));
+  const total = pumpTotalVolumeMl(event.details);
+  if (total <= 0) {
+    return { title: `Pump · ${duration}`, subtitle: pumpSideTitle(event.details.side) };
+  }
+
+  if (event.details.side === 'both') {
+    const left = event.details.leftVolumeMl ?? 0;
+    const right = event.details.rightVolumeMl ?? 0;
+    return {
+      title: `Pump · ${total} ml`,
+      subtitle: `L ${left} ml · R ${right} ml · ${duration}`,
+    };
+  }
+
+  return {
+    title: `Pump · ${total} ml`,
+    subtitle: `${pumpSideTitle(event.details.side)} · ${duration}`,
+  };
+}
 
 /* ----------------------------- timeline §7.4 ----------------------------- */
 
@@ -144,8 +171,8 @@ export function formatTimelineEvent(event: CareEvent, now: number): TimelineEven
   }
 
   if (isSleepEvent(event)) {
-    const dur = formatCompactDuration(sessionElapsedMs(event, now));
-    return { title: event.status === 'active' ? 'Sleeping' : 'Sleep', subtitle: dur, icon: 'sleep', tint };
+    const dur = sleepDurationLabel(event, now);
+    return { title: event.status === 'active' ? 'Sleeping' : 'Nap', subtitle: dur, icon: 'sleep', tint };
   }
 
   if (isDiaperEvent(event)) {
@@ -164,9 +191,8 @@ export function formatTimelineEvent(event: CareEvent, now: number): TimelineEven
     if (isDraftPump(event)) {
       return { title: 'Pump', subtitle: 'finished · add volume', icon: 'pump', tint };
     }
-    const total = pumpTotalVolumeMl(event.details);
-    const detail = total > 0 ? `${total} ml` : formatCompactDuration(sessionElapsedMs(event, now));
-    return { title: 'Pump', subtitle: `${detail} · ${pumpSideWord(event.details.side)}`, icon: 'pump', tint };
+    const view = pumpVolumeDetail(event, now);
+    return { ...view, icon: 'pump', tint };
   }
 
   // Unreachable for the closed union, but keeps the formatter total + type-safe.
@@ -178,8 +204,8 @@ export function formatTimelineEvent(event: CareEvent, now: number): TimelineEven
 /**
  * The calm save-confirmation line for the Undo toast (plan §8, Phase 2/3/5/6
  * "Show Undo"). Built from the SAVED event so it matches the timeline copy:
- * "Diaper logged · wet", "Feed logged · 120 ml", "Sleep logged · 40m",
- * "Pump saved · 110 ml" (or its duration when no volume was recorded). The
+ * "Diaper logged · wet", "Feed logged · 120 ml", "Nap logged · 40m",
+ * "Pump logged · 110 ml" (or "Pump logged without volume"). The
  * trailing " · Undo" affordance is added by the toast component, not here.
  */
 export function formatLoggingToast(event: CareEvent, now: number): string {
@@ -189,11 +215,11 @@ export function formatLoggingToast(event: CareEvent, now: number): string {
     const { totalLeftMs, totalRightMs } = breastSegmentTotals(event.details.segments, now);
     return `Feed logged · ${formatCompactDuration(totalLeftMs + totalRightMs)}`;
   }
-  if (isSleepEvent(event)) return `Sleep logged · ${formatCompactDuration(sessionElapsedMs(event, now))}`;
+  if (isSleepEvent(event)) return `Nap logged · ${sleepDurationLabel(event, now)}`;
   if (isPumpEvent(event)) {
     const total = pumpTotalVolumeMl(event.details);
-    const detail = total > 0 ? `${total} ml` : formatCompactDuration(sessionElapsedMs(event, now));
-    return `Pump saved · ${detail}`;
+    if (total > 0) return `Pump logged · ${total} ml`;
+    return 'Pump logged without volume';
   }
   return 'Logged';
 }
@@ -243,7 +269,7 @@ function sleepSubtitle(input: V2QuickLogInput, now: number): string {
   if (input.activeSleep) return `Sleeping · ${formatCompactDuration(sessionElapsedMs(input.activeSleep, now))}`;
   const last = newest(input.todayEvents, (e) => e.type === 'sleep' && e.status === 'completed');
   if (last && last.endedAt) return `Awake for ${formatCompactDuration(Math.max(0, now - ms(last.endedAt)))}`;
-  return 'Tap to start';
+  return 'Awake · no sleep yet';
 }
 
 function diaperSubtitle(input: V2QuickLogInput, now: number): string {
@@ -254,14 +280,14 @@ function diaperSubtitle(input: V2QuickLogInput, now: number): string {
 
 function pumpSubtitle(input: V2QuickLogInput, now: number): string {
   if (input.activePump && isRunningPump(input.activePump)) {
-    return `Pumping · ${formatCompactDuration(sessionElapsedMs(input.activePump, now))} · ${pumpSideWord(input.activePump.details.side)}`;
+    return `Pumping · ${formatClock(sessionElapsedMs(input.activePump, now))}`;
   }
   if (input.pumpVolumeDraft) return 'Finished · add volume';
   const last = newest(input.todayEvents, (e) => e.type === 'pump' && e.status === 'completed');
   if (last && isPumpEvent(last)) {
     const total = pumpTotalVolumeMl(last.details);
     const detail = total > 0 ? `${total} ml` : formatCompactDuration(sessionElapsedMs(last, now));
-    return `${agoLabel(recencyIso(last), now)} · ${detail}`;
+    return `Last · ${detail}`;
   }
   return 'Log pump';
 }

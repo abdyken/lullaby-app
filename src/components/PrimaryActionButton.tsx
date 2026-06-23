@@ -1,4 +1,5 @@
-import { Pressable, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Easing, Pressable, Text, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { colors, fonts, radii } from '@/theme';
@@ -7,7 +8,16 @@ type Props = {
   label: string;
   accentColor: string;
   onPress?: () => void;
+  animateColor?: boolean;
+  pressOpacity?: number;
+  pressScale?: number;
 };
+
+const BUTTON_MIN_WIDTH = 190;
+const BUTTON_HEIGHT = 50;
+const ICON_SLOT_SIZE = 18;
+const PRESS_IN_MS = 105;
+const PRESS_OUT_MS = 165;
 
 function ActionIcon({ label }: { label: string }) {
   if (label === 'Start sleep') {
@@ -24,7 +34,7 @@ function ActionIcon({ label }: { label: string }) {
     );
   }
 
-  if (label === 'Wake baby') {
+  if (label === 'Wake baby' || label === 'Baby woke up') {
     return (
       <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
         <Path
@@ -49,52 +59,132 @@ function ActionIcon({ label }: { label: string }) {
  * surface — which is why the pill was invisible on device while the label
  * showed. A child `View` paints its solid background reliably (the quick-log
  * tiles already prove this pattern works on Android), so the Pressable is now a
- * pure touch + press-scale wrapper and the View is the actual pill.
+ * pure touch + opacity wrapper and the View is the actual pill.
  */
-export function PrimaryActionButton({ label, accentColor, onPress }: Props) {
+export function PrimaryActionButton({
+  label,
+  accentColor,
+  onPress,
+  animateColor = true,
+  pressOpacity = 0.95,
+  pressScale,
+}: Props) {
+  const [colorProgress] = useState(() => new Animated.Value(1));
+  const [pressProgress] = useState(() => new Animated.Value(0));
+  const previousAccent = useRef(accentColor);
+  const [colorPair, setColorPair] = useState({ from: accentColor, to: accentColor });
+  const usesAnimatedPress = pressScale !== undefined;
+  const tactilePressScale = pressScale ?? 1;
+
+  useEffect(() => {
+    if (!animateColor) {
+      previousAccent.current = accentColor;
+      colorProgress.setValue(1);
+      return;
+    }
+    if (previousAccent.current === accentColor) return;
+    const from = previousAccent.current;
+    previousAccent.current = accentColor;
+    setColorPair({ from, to: accentColor });
+    colorProgress.setValue(0);
+    const animation = Animated.timing(colorProgress, {
+      toValue: 1,
+      duration: 320,
+      useNativeDriver: false,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [accentColor, animateColor, colorProgress]);
+
+  const backgroundColor = animateColor
+    ? colorProgress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [colorPair.from, colorPair.to],
+      })
+    : accentColor;
+  const animatedPressScale = pressProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, tactilePressScale],
+  });
+  const animatedPressOpacity = pressProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, pressOpacity],
+  });
+
+  const animatePress = (toValue: number, duration: number, easing: (value: number) => number) => {
+    Animated.timing(pressProgress, {
+      toValue,
+      duration,
+      easing,
+      useNativeDriver: true,
+    }).start();
+  };
+
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
+      onPressIn={usesAnimatedPress ? () => animatePress(1, PRESS_IN_MS, Easing.out(Easing.quad)) : undefined}
+      onPressOut={usesAnimatedPress ? () => animatePress(0, PRESS_OUT_MS, Easing.out(Easing.cubic)) : undefined}
       hitSlop={8}
       style={({ pressed }) => ({
         alignSelf: 'center',
         borderRadius: radii.pill,
-        transform: [{ scale: pressed ? 0.96 : 1 }],
+        opacity: !usesAnimatedPress && pressed ? pressOpacity : 1,
       })}>
-      <View
-        style={{
-          minHeight: 48,
-          minWidth: 150,
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 8,
-          // Hush-style filled pill: solid state color, no white frame, with a
-          // soft color-matched shadow. Keep the existing dimensions intact.
-          backgroundColor: accentColor,
-          borderRadius: radii.pill,
-          paddingHorizontal: 28,
-          paddingVertical: 13,
-          borderWidth: 0,
-          shadowColor: accentColor,
-          shadowOpacity: 0.42,
-          shadowRadius: 12,
-          shadowOffset: { width: 0, height: 8 },
-          elevation: 8,
-        }}>
-        <ActionIcon label={label} />
-        <Text
+      <Animated.View
+        style={[
+          {
+            minWidth: BUTTON_MIN_WIDTH,
+            height: BUTTON_HEIGHT,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor,
+            borderRadius: radii.pill,
+            paddingHorizontal: 24,
+            borderWidth: 0,
+            shadowColor: accentColor,
+            shadowOpacity: 0.42,
+            shadowRadius: 12,
+            shadowOffset: { width: 0, height: 8 },
+            elevation: 8,
+          },
+          usesAnimatedPress ? { opacity: animatedPressOpacity, transform: [{ scale: animatedPressScale }] } : null,
+        ]}>
+        <View
+          pointerEvents="none"
           style={{
-            fontFamily: fonts.bodyBold,
-            fontSize: 14.5,
-            letterSpacing: 0,
-            color: colors.white,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
           }}>
-          {label}
-        </Text>
-      </View>
+          <View
+            style={{
+              width: ICON_SLOT_SIZE,
+              height: ICON_SLOT_SIZE,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+            <ActionIcon label={label} />
+          </View>
+          <Text
+            numberOfLines={1}
+            style={{
+              fontFamily: fonts.bodyBold,
+              fontSize: 15,
+              lineHeight: 20,
+              includeFontPadding: false,
+              letterSpacing: 0,
+              color: colors.white,
+              textAlign: 'center',
+              textAlignVertical: 'center',
+            }}>
+            {label}
+          </Text>
+        </View>
+      </Animated.View>
     </Pressable>
   );
 }

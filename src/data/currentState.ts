@@ -1,4 +1,4 @@
-import type { OrbCoreKind, OrbSky } from '@/components/OrbHero';
+import type { OrbCoreKind, OrbSky, OrbStateIconKind } from '@/components/OrbHero';
 import { events } from '@/data/mock';
 import type { Caregiver, LogEvent } from '@/data/models';
 import type { AccentState } from '@/theme';
@@ -13,6 +13,7 @@ export type CurrentBabyState = {
   actionLabel: string;
   progress: number;
   coreKind?: OrbCoreKind;
+  stateIcon?: OrbStateIconKind;
 };
 
 /** Quick-log tiles can preview a state without creating any data. These are
