@@ -1,5 +1,5 @@
 /**
- * The 3-tab shell: Tonight · Log · Reassure.
+ * The 4-tab shell: Tonight · Insights · Log · Reassure.
  *
  * Uses Expo Router's JS Tabs with a fully custom `tabBar` (LullabyTabBar) so we
  * get the floating, rounded, warm pill from the mockup instead of the stock OS
@@ -61,7 +61,7 @@ export default function TabsLayout() {
                 // content visibly overlaps (ghosting) and the two semi-transparent
                 // opaque screens composite into a muddy dark rectangle mid-switch.
                 // 'none' (the navigator default) + `lazy: false` +
-                // `detachInactiveScreens={false}` keeps all three screens mounted
+                // `detachInactiveScreens={false}` keeps all screens mounted
                 // and just toggles which is visible, so pages switch cleanly with
                 // no flash, ghosting, fallback frame, or first-open dependency.
                 // The tab-bar pill keeps its own (separate) Reanimated slide.
@@ -81,6 +81,7 @@ export default function TabsLayout() {
                 },
               }}>
               <Tabs.Screen name="index" options={{ title: 'Tonight' }} />
+              <Tabs.Screen name="insights" options={{ title: 'Insights' }} />
               <Tabs.Screen name="log" options={{ title: 'Log' }} />
               <Tabs.Screen name="reassure" options={{ title: 'Reassure' }} />
             </Tabs>

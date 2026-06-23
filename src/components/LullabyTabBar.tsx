@@ -28,12 +28,14 @@ type LullabyTabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['ta
 
 const LABELS: Record<string, string> = {
   index: 'Tonight',
+  insights: 'Insights',
   log: 'Log',
   reassure: 'Reassure',
 };
 
 const ICONS: Record<string, TabName> = {
   index: 'tonight',
+  insights: 'insights',
   log: 'log',
   reassure: 'reassure',
 };
