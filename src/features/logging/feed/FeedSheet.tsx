@@ -24,13 +24,25 @@ import { confirmDiscardSession } from '../ui/confirmDiscardSession';
 import { BottleFeedForm } from './BottleFeedForm';
 import { BreastFeedActive } from './BreastFeedActive';
 import { BreastFeedIdle } from './BreastFeedIdle';
-import { ChoicePill } from './ChoicePill';
+import { FeedSegmentedControl, type FeedSegmentedOption } from './FeedSegmentedControl';
 
 type FeedTab = 'breast' | 'bottle';
 
 type Props = {
   onClose: () => void;
 };
+
+const FEED_TAB_OPTIONS: FeedSegmentedOption<FeedTab>[] = [
+  { value: 'breast', label: 'Breast' },
+  { value: 'bottle', label: 'Bottle' },
+];
+
+function formatStartedAt(iso: string | null): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
 
 export function FeedSheet({ onClose }: Props) {
   const insets = useSafeAreaInsets();
@@ -76,7 +88,12 @@ export function FeedSheet({ onClose }: Props) {
 
   const isActive = activeBreastFeed !== null;
   const title = isActive ? 'Breastfeeding in progress' : 'Log a feed';
-  const subtitle = isActive ? 'Switch sides or finish anytime' : 'Breast session or bottle';
+  const activeStartedLabel = isActive ? formatStartedAt(activeBreastFeed.startedAt) : '';
+  const subtitle = isActive
+    ? activeStartedLabel
+      ? `Started ${activeStartedLabel}`
+      : 'Switch sides or finish anytime'
+    : 'Breast session or bottle';
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={handleClose} statusBarTranslucent>
@@ -116,8 +133,23 @@ export function FeedSheet({ onClose }: Props) {
             }}
           />
 
-          <Text style={{ fontFamily: fonts.display, fontSize: 20, color: colors.ink }}>{title}</Text>
-          <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.inkFaint, marginTop: 2 }}>
+          <Text
+            style={{
+              fontFamily: fonts.display,
+              fontSize: isActive ? 23 : 20,
+              color: colors.ink,
+              textAlign: isActive ? 'center' : 'left',
+            }}>
+            {title}
+          </Text>
+          <Text
+            style={{
+              fontFamily: isActive ? fonts.bodyBold : fonts.body,
+              fontSize: 13,
+              color: isActive ? colors.inkSoft : colors.inkFaint,
+              marginTop: 2,
+              textAlign: isActive ? 'center' : 'left',
+            }}>
             {subtitle}
           </Text>
 
@@ -129,21 +161,8 @@ export function FeedSheet({ onClose }: Props) {
 
           {/* Breast / Bottle tabs — hidden while a breast session is running. */}
           {!isActive && (
-            <View style={{ flexDirection: 'row', gap: 9, marginTop: 16 }}>
-              <ChoicePill
-                label="Breast"
-                active={tab === 'breast'}
-                accentColor={accentColor}
-                accentTint={accentTint}
-                onPress={() => setTab('breast')}
-              />
-              <ChoicePill
-                label="Bottle"
-                active={tab === 'bottle'}
-                accentColor={accentColor}
-                accentTint={accentTint}
-                onPress={() => setTab('bottle')}
-              />
+            <View style={{ width: '100%', alignSelf: 'stretch', marginTop: 16 }}>
+              <FeedSegmentedControl value={tab} options={FEED_TAB_OPTIONS} onChange={setTab} />
             </View>
           )}
 
@@ -151,7 +170,6 @@ export function FeedSheet({ onClose }: Props) {
             <BreastFeedActive
               event={activeBreastFeed}
               accentColor={accentColor}
-              accentTint={accentTint}
               onSwitch={(side: BreastSide) => {
                 void switchBreast(side);
               }}
@@ -161,7 +179,6 @@ export function FeedSheet({ onClose }: Props) {
           ) : tab === 'breast' ? (
             <BreastFeedIdle
               accentColor={accentColor}
-              accentTint={accentTint}
               onStart={(side: BreastSide) => {
                 void startBreast(side);
               }}

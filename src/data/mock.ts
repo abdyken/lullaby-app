@@ -113,6 +113,8 @@ export type TimelineEntry = {
   kind: LogEvent['type'];
   /** human label, e.g. "Feed · left, 11m" / "Diaper · wet" / "Sleep running" */
   label: string;
+  /** Optional second-line detail, used when a logged event has a meaningful breakdown. */
+  detail?: string;
   caregiverName: string | null;
   caregiverColor: string | null;
 };

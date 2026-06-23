@@ -3,29 +3,28 @@
  *
  * Pick a side (Left / Right / Both), then start the timer. The session is created
  * on Start (by the use-case), not on selection. Both is the default — it is the
- * common case and matches the legacy pump card. Mirrors the side/preset idiom of
- * the Feed/Sleep flows (`ChoicePill` + `PrimaryActionButton`).
+ * common case and matches the legacy pump card. Mirrors the preview's segmented
+ * side selector while keeping the existing `PrimaryActionButton` action.
  */
 import { useState } from 'react';
 import { Text, View, type TextStyle } from 'react-native';
 
-import { PrimaryActionButton } from '@/components/PrimaryActionButton';
 import { colors, fonts } from '@/theme';
 
 import type { PumpSide } from '../domain/types';
-import { ChoicePill } from '../feed/ChoicePill';
+import { FeedSegmentedControl, type FeedSegmentedOption } from '../feed/FeedSegmentedControl';
+import { PumpActionStack } from './PumpActionStack';
 
 type Props = {
   accentColor: string;
-  accentTint: string;
   onStart: (side: PumpSide) => void;
 };
 
-const SIDES: { side: PumpSide; label: string; a11y: string }[] = [
-  { side: 'left', label: 'Left', a11y: 'Pump left side' },
-  { side: 'right', label: 'Right', a11y: 'Pump right side' },
-  { side: 'both', label: 'Both', a11y: 'Pump both sides' },
-];
+const SIDE_OPTIONS = [
+  { value: 'left', label: 'Left', accessibilityLabel: 'Pump left side' },
+  { value: 'right', label: 'Right', accessibilityLabel: 'Pump right side' },
+  { value: 'both', label: 'Both', accessibilityLabel: 'Pump both sides' },
+] as const satisfies readonly FeedSegmentedOption<PumpSide>[];
 
 const EYEBROW: TextStyle = {
   fontFamily: fonts.bodyBold,
@@ -35,29 +34,35 @@ const EYEBROW: TextStyle = {
   marginBottom: 8,
 };
 
-export function PumpIdle({ accentColor, accentTint, onStart }: Props) {
+export function PumpIdle({ accentColor, onStart }: Props) {
   const [side, setSide] = useState<PumpSide>('both');
 
   return (
     <View>
-      <Text style={{ ...EYEBROW, marginTop: 16 }}>SIDE</Text>
-      <View style={{ flexDirection: 'row', gap: 9 }}>
-        {SIDES.map((option) => (
-          <ChoicePill
-            key={option.side}
-            label={option.label}
-            accessibilityLabel={option.a11y}
-            active={side === option.side}
-            accentColor={accentColor}
-            accentTint={accentTint}
-            onPress={() => setSide(option.side)}
-          />
-        ))}
+      <Text style={{ ...EYEBROW, marginTop: 20 }}>SIDE</Text>
+      <View style={{ width: '100%', alignSelf: 'stretch' }}>
+        <FeedSegmentedControl value={side} options={SIDE_OPTIONS} onChange={setSide} />
       </View>
 
-      <View style={{ marginTop: 20, alignItems: 'center' }}>
-        <PrimaryActionButton label="Start pumping" accentColor={accentColor} onPress={() => onStart(side)} />
-      </View>
+      <Text
+        style={{
+          marginTop: 16,
+          marginHorizontal: 10,
+          textAlign: 'center',
+          fontFamily: fonts.bodyBold,
+          fontSize: 12.5,
+          lineHeight: 18,
+          color: colors.inkSoft,
+        }}>
+        First track duration. Enter volume after finishing.
+      </Text>
+
+      <PumpActionStack
+        primaryLabel="Start pumping"
+        accentColor={accentColor}
+        onPrimaryPress={() => onStart(side)}
+        marginTop={18}
+      />
     </View>
   );
 }

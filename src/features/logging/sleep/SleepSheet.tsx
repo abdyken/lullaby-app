@@ -12,10 +12,10 @@
  * use-cases behind `useLogging()`; this only translates the preset choices into
  * the timestamps the use-cases accept.
  */
-import { Modal, Pressable, Text, View } from 'react-native';
+import { Modal, Pressable, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, fonts, radii, shadows } from '@/theme';
+import { colors, radii, shadows } from '@/theme';
 
 import { useLogging } from '../state/LoggingProvider';
 import { confirmDiscardSession } from '../ui/confirmDiscardSession';
@@ -28,7 +28,7 @@ type Props = {
 
 export function SleepSheet({ onClose }: Props) {
   const insets = useSafeAreaInsets();
-  const { activeSleep, error, clearError, startSleep, finishSleep, cancelSleep, saveCompletedSleep } =
+  const { todayEvents, activeSleep, error, clearError, startSleep, finishSleep, cancelSleep, saveCompletedSleep } =
     useLogging();
 
   const accentColor = colors.sleep;
@@ -69,10 +69,11 @@ export function SleepSheet({ onClose }: Props) {
   };
 
   const isActive = activeSleep !== null;
-  const title = isActive ? 'Sleep in progress' : 'Log sleep';
-  const subtitle = isActive
-    ? 'We’ll keep the night quiet'
-    : 'Start now, earlier, or add a finished sleep';
+  const lastCompletedSleepEndedAt =
+    [...todayEvents]
+      .filter((event) => event.type === 'sleep' && event.status === 'completed' && event.endedAt !== null)
+      .sort((a, b) => Date.parse(b.endedAt ?? b.occurredAt) - Date.parse(a.endedAt ?? a.occurredAt))[0]
+      ?.endedAt ?? null;
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={handleClose} statusBarTranslucent>
@@ -112,21 +113,11 @@ export function SleepSheet({ onClose }: Props) {
             }}
           />
 
-          <Text style={{ fontFamily: fonts.display, fontSize: 20, color: colors.ink }}>{title}</Text>
-          <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.inkFaint, marginTop: 2 }}>
-            {subtitle}
-          </Text>
-
-          {error && (
-            <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: accentColor, marginTop: 8 }}>
-              {error.message}
-            </Text>
-          )}
-
           {isActive ? (
             <SleepActive
               event={activeSleep}
               accentColor={accentColor}
+              errorMessage={error?.message}
               onFinish={handleFinish}
               onCancel={handleCancel}
             />
@@ -134,6 +125,8 @@ export function SleepSheet({ onClose }: Props) {
             <SleepIdle
               accentColor={accentColor}
               accentTint={accentTint}
+              errorMessage={error?.message}
+              lastCompletedSleepEndedAt={lastCompletedSleepEndedAt}
               onStart={handleStart}
               onSaveCompleted={handleSaveCompleted}
             />

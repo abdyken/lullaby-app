@@ -5,10 +5,11 @@ import Svg, { Circle, Defs, Path, RadialGradient, Stop } from 'react-native-svg'
 
 import { PrimaryActionButton } from '@/components/PrimaryActionButton';
 import type { AccentState, SurfaceMode } from '@/theme';
-import { colors, fonts, getAccentForState, radii, shadows, sky, surfaces } from '@/theme';
+import { colors, fonts, getAccentForState, radii, shadows, sky } from '@/theme';
 
 export type OrbSky = 'day' | 'night' | 'dusk';
 export type OrbCoreKind = 'timer' | 'check';
+export type OrbStateIconKind = 'clock' | 'moon' | 'feed' | 'check';
 
 export type OrbHeroProps = {
   state: AccentState;
@@ -20,8 +21,9 @@ export type OrbHeroProps = {
   actionLabel: string;
   progress: number;
   coreKind?: OrbCoreKind;
+  stateIcon?: OrbStateIconKind;
   onActionPress?: () => void;
-  /** surface palette for the caption below the orb (the orb itself is unchanged) */
+  /** Kept for callers that render the hero inside the day/night theme reveal. */
   surfaceMode?: SurfaceMode;
   /**
    * Optional shared breathe driver. Pass the value from `useOrbBreathe()` so a
@@ -58,13 +60,31 @@ export function useOrbBreathe() {
 const ORB_SIZE = 178;
 const RING_RADIUS = 79;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+const FILL = { position: 'absolute' as const, top: 0, right: 0, bottom: 0, left: 0 };
 
 function clampProgress(progress: number) {
   return Math.max(0, Math.min(1, progress));
 }
 
-function StateIcon({ state, color }: { state: AccentState; color: string }) {
-  if (state === 'diaper') {
+function StateIcon({
+  state,
+  color,
+  iconKind,
+}: {
+  state: AccentState;
+  color: string;
+  iconKind?: OrbStateIconKind;
+}) {
+  if (iconKind === 'clock') {
+    return (
+      <Svg width={11} height={11} viewBox="0 0 24 24" fill="none">
+        <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={2.4} />
+        <Path d="M12 7v5l3 2" stroke={color} strokeWidth={2.4} strokeLinecap="round" />
+      </Svg>
+    );
+  }
+
+  if (state === 'diaper' || iconKind === 'check') {
     return (
       <Svg width={11} height={11} viewBox="0 0 24 24" fill="none">
         <Path d="M5 13l4 4L19 7" stroke={color} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
@@ -72,7 +92,7 @@ function StateIcon({ state, color }: { state: AccentState; color: string }) {
     );
   }
 
-  if (state === 'feed') {
+  if (state === 'feed' || iconKind === 'feed') {
     return (
       <Svg width={9} height={9} viewBox="0 0 24 24">
         <Circle cx={12} cy={12} r={6} fill={color} />
@@ -155,34 +175,19 @@ function OrbBody({ skyTone }: { skyTone: OrbSky }) {
   );
 }
 
-function SkyDecor({ skyTone }: { skyTone: OrbSky }) {
-  if (skyTone === 'night') {
-    const stars: { top: number; left?: number; right?: number; size: number }[] = [
-      { top: 19, left: 30, size: 13 },
-      { top: 46, right: 36, size: 9 },
-      { top: 82, left: 54, size: 7 },
-      { top: 26, right: 72, size: 10 },
-    ];
-
-    return (
-      <>
-        {stars.map((star, index) => (
-          <Svg
-            key={index}
-            width={star.size}
-            height={star.size}
-            viewBox="0 0 24 24"
-            style={{ position: 'absolute', top: star.top, left: star.left, right: star.right }}>
-            <Path d="M12 2l2 7 7 2-7 2-2 7-2-7-7-2 7-2 2-7Z" fill="rgba(255,255,255,0.9)" />
-          </Svg>
-        ))}
-      </>
-    );
-  }
+function SkyDecor({ nightOpacity }: { nightOpacity: number }) {
+  const cloudOpacity = 1 - nightOpacity;
+  const starOpacity = nightOpacity;
+  const stars: { top: number; left?: number; right?: number; size: number }[] = [
+    { top: 19, left: 30, size: 13 },
+    { top: 46, right: 36, size: 9 },
+    { top: 82, left: 54, size: 7 },
+    { top: 26, right: 72, size: 10 },
+  ];
 
   return (
     <>
-      <View
+      <Animated.View
         style={{
           position: 'absolute',
           top: 22,
@@ -191,9 +196,10 @@ function SkyDecor({ skyTone }: { skyTone: OrbSky }) {
           height: 20,
           borderRadius: 40,
           backgroundColor: 'rgba(255,255,255,0.7)',
+          opacity: cloudOpacity,
         }}
       />
-      <View
+      <Animated.View
         style={{
           position: 'absolute',
           top: 27,
@@ -202,9 +208,10 @@ function SkyDecor({ skyTone }: { skyTone: OrbSky }) {
           height: 12,
           borderRadius: 40,
           backgroundColor: 'rgba(255,255,255,0.55)',
+          opacity: cloudOpacity,
         }}
       />
-      <View
+      <Animated.View
         style={{
           position: 'absolute',
           top: 56,
@@ -213,8 +220,18 @@ function SkyDecor({ skyTone }: { skyTone: OrbSky }) {
           height: 14,
           borderRadius: 40,
           backgroundColor: 'rgba(255,255,255,0.7)',
+          opacity: cloudOpacity,
         }}
       />
+      {stars.map((star, index) => (
+        <Animated.View
+          key={index}
+          style={{ position: 'absolute', top: star.top, left: star.left, right: star.right, opacity: starOpacity }}>
+          <Svg width={star.size} height={star.size} viewBox="0 0 24 24">
+            <Path d="M12 2l2 7 7 2-7 2-2 7-2-7-7-2 7-2 2-7Z" fill="rgba(255,255,255,0.9)" />
+          </Svg>
+        </Animated.View>
+      ))}
     </>
   );
 }
@@ -229,13 +246,12 @@ export function OrbHero({
   actionLabel,
   progress,
   coreKind = 'timer',
+  stateIcon,
   onActionPress,
-  surfaceMode = 'day',
   breathe: externalBreathe,
 }: OrbHeroProps) {
   const accent = getAccentForState(state);
   const actionColor = actionLabel === 'Start sleep' ? colors.feed : accent.color;
-  const caption = surfaces[surfaceMode];
   // Use the shared breathe driver when given (so a reveal-overlay copy stays in
   // phase); otherwise run our own loop.
   const [internalBreathe] = useState(() => new Animated.Value(0));
@@ -256,13 +272,13 @@ export function OrbHero({
     inputRange: [0, 1],
     outputRange: [0.97, 1.03],
   });
+  const nightOpacity = skyTone === 'night' ? 1 : 0;
+  const dayOpacity = 1 - nightOpacity;
+  const dayOrbTone = skyTone === 'dusk' ? 'dusk' : 'day';
 
   return (
     <View style={{ gap: 11 }}>
-      <LinearGradient
-        colors={sky[skyTone]}
-        start={{ x: 0.08, y: 0 }}
-        end={{ x: 0.92, y: 1 }}
+      <View
         style={{
           position: 'relative',
           overflow: 'hidden',
@@ -272,7 +288,18 @@ export function OrbHero({
           paddingBottom: 20,
           ...shadows.card,
         }}>
-        <SkyDecor skyTone={skyTone} />
+        <Animated.View pointerEvents="none" style={[FILL, { opacity: dayOpacity }]}>
+          <LinearGradient
+            colors={sky[dayOrbTone]}
+            start={{ x: 0.08, y: 0 }}
+            end={{ x: 0.92, y: 1 }}
+            style={FILL}
+          />
+        </Animated.View>
+        <Animated.View pointerEvents="none" style={[FILL, { opacity: nightOpacity }]}>
+          <LinearGradient colors={sky.night} start={{ x: 0.08, y: 0 }} end={{ x: 0.92, y: 1 }} style={FILL} />
+        </Animated.View>
+        <SkyDecor nightOpacity={nightOpacity} />
 
         <View style={{ position: 'relative', zIndex: 2, alignItems: 'center' }}>
           <View
@@ -297,19 +324,17 @@ export function OrbHero({
                 shadowOffset: { width: 0, height: 0 },
                 transform: [{ scale }],
               }}>
-              <OrbBody skyTone={skyTone} />
+              <Animated.View style={{ position: 'absolute', opacity: dayOpacity }}>
+                <OrbBody skyTone={dayOrbTone} />
+              </Animated.View>
+              <Animated.View style={{ position: 'absolute', opacity: nightOpacity }}>
+                <OrbBody skyTone="night" />
+              </Animated.View>
             </Animated.View>
 
             <View style={{ position: 'absolute', transform: [{ rotate: '-90deg' }] }}>
               <Svg width={ORB_SIZE} height={ORB_SIZE} viewBox={`0 0 ${ORB_SIZE} ${ORB_SIZE}`}>
-                <Circle
-                  cx={89}
-                  cy={89}
-                  r={RING_RADIUS}
-                  fill="none"
-                  stroke="rgba(255,255,255,0.55)"
-                  strokeWidth={10}
-                />
+                <Circle cx={89} cy={89} r={RING_RADIUS} fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth={10} />
                 <Circle
                   cx={89}
                   cy={89}
@@ -345,7 +370,7 @@ export function OrbHero({
               }}>
               {coreKind === 'check' ? <CheckMark /> : null}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                <StateIcon state={state} color={accent.color} />
+                <StateIcon state={state} color={accent.color} iconKind={stateIcon} />
                 <Text
                   style={{
                     fontFamily: fonts.bodyBold,
@@ -375,17 +400,41 @@ export function OrbHero({
             </View>
           </View>
 
-          <PrimaryActionButton label={actionLabel} accentColor={actionColor} onPress={onActionPress} />
-        </View>
-      </LinearGradient>
+          <View
+            style={{
+              maxWidth: '100%',
+              marginTop: 8,
+              marginBottom: 14,
+              borderRadius: radii.pill,
+              paddingVertical: 9,
+              paddingHorizontal: 16,
+              backgroundColor: skyTone === 'night' ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.78)',
+              borderWidth: 1,
+              borderColor: skyTone === 'night' ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.52)',
+            }}>
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.75}
+              style={{
+                fontFamily: fonts.bodyBold,
+                fontSize: 12.5,
+                color: skyTone === 'night' ? colors.white : colors.ink,
+                textAlign: 'center',
+              }}>
+              {description || title}
+            </Text>
+          </View>
 
-      <View style={{ paddingHorizontal: 4 }}>
-        <Text style={{ fontFamily: fonts.display, fontSize: 17, lineHeight: 20, color: caption.ink }}>
-          {title}
-        </Text>
-        <Text style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: 17, color: caption.inkSoft, marginTop: 2 }}>
-          {description}
-        </Text>
+          <PrimaryActionButton
+            label={actionLabel}
+            accentColor={actionColor}
+            animateColor={false}
+            pressOpacity={0.97}
+            pressScale={0.98}
+            onPress={onActionPress}
+          />
+        </View>
       </View>
     </View>
   );
