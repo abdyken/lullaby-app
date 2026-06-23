@@ -8,7 +8,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 
 import { tabbar } from '@/theme';
 
-export type TabName = 'tonight' | 'log' | 'reassure';
+export type TabName = 'tonight' | 'insights' | 'log' | 'reassure';
 
 type Props = {
   name: TabName;
@@ -42,6 +42,15 @@ export function TabIcon({ name, color, size = tabbar.iconSize }: Props) {
         <Circle cx={4.5} cy={6} r={1.4} fill={stroke} />
         <Circle cx={4.5} cy={12} r={1.4} fill={stroke} />
         <Circle cx={4.5} cy={18} r={1.4} fill={stroke} />
+      </Svg>
+    );
+  }
+
+  if (name === 'insights') {
+    // simple rhythm bars, matching the reference's chart-style Insights tab
+    return (
+      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path d="M4 19V10M10 19V5M16 19v-7M22 19H2" stroke={stroke} strokeWidth={sw} strokeLinecap="round" />
       </Svg>
     );
   }

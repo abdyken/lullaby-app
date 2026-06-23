@@ -60,7 +60,7 @@ import { fonts, getAccentForState, tabbar, tabbarSurfaces, type SurfaceMode } fr
 
 const TABBAR_BORDER_WIDTH = 1;
 /** Tabs in the navigator. Used for deterministic slot geometry. */
-const TAB_COUNT = 3;
+const TAB_COUNT = 4;
 // The shell accent (sleep). Theme-independent, so it never changes with the reveal.
 const accent = getAccentForState('sleep');
 
@@ -94,7 +94,7 @@ export function useTabBarLayout(): { pillWidth: number; paddingBottom: number } 
 /**
  * Deterministic geometry for the sliding tint pill, derived purely from
  * `pillWidth`. The inner surface row is `pillWidth - 2*border` wide with equal
- * `paddingX`/`gap`, so the three tab slots are evenly spaced and the pill only
+ * `paddingX`/`gap`, so the tab slots are evenly spaced and the pill only
  * ever needs a linear translateX — no width animation, no measuring. Identical
  * inputs in both copies → identical pixels.
  */
@@ -104,7 +104,7 @@ function pillGeometry(pillWidth: number) {
   const slotWidth = (contentWidth - (TAB_COUNT - 1) * tabbar.gap) / TAB_COUNT;
   // distance between adjacent slot centres == distance between slot left edges
   const slotStep = slotWidth + tabbar.gap;
-  // fixed-width pill, centred in a slot (chipMinWidth always fits — slots are wider)
+  // fixed-width pill, centred in a slot
   const pillItemWidth = tabbar.chipMinWidth;
   // absolute insets are measured from the row's padding edge, so add paddingX/Y back
   const pillLeft = tabbar.paddingX + (slotWidth - pillItemWidth) / 2;
