@@ -14,9 +14,10 @@ import { Pressable, Text, View } from 'react-native';
 import { Screen } from '@/components/Screen';
 import { TimelineItem } from '@/components/TimelineItem';
 import { useLocalEvents } from '@/state/LocalEventProvider';
+import { useTheme } from '@/state/ThemeProvider';
 import type { TimelineEntry } from '@/data/mock';
 import type { LogEvent, LogEventType } from '@/data/models';
-import { colors, fonts, radii, shadows } from '@/theme';
+import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
 /** The filter chips. "all" shows everything; the rest narrow to one kind. */
 type Filter = 'all' | 'feed' | 'sleep' | 'diaper';
@@ -104,11 +105,15 @@ function FilterChip({
   filter,
   active,
   onPress,
+  surfaceMode,
 }: {
   filter: (typeof FILTERS)[number];
   active: boolean;
   onPress: () => void;
+  surfaceMode: SurfaceMode;
 }) {
+  const palette = surfaces[surfaceMode];
+
   return (
     <Pressable
       onPress={onPress}
@@ -116,7 +121,7 @@ function FilterChip({
         paddingHorizontal: 15,
         paddingVertical: 8,
         borderRadius: radii.pill,
-        backgroundColor: active ? filter.accent : colors.surface,
+        backgroundColor: active ? filter.accent : palette.card,
         transform: [{ scale: pressed ? 0.96 : 1 }],
         ...shadows.card,
       })}>
@@ -124,7 +129,7 @@ function FilterChip({
         style={{
           fontFamily: fonts.bodyBold,
           fontSize: 12.5,
-          color: active ? colors.white : colors.inkSoft,
+          color: active ? colors.white : palette.inkSoft,
         }}>
         {filter.label}
       </Text>
@@ -132,24 +137,28 @@ function FilterChip({
   );
 }
 
-function EmptyState({ filter }: { filter: Filter }) {
+function EmptyState({ filter, surfaceMode }: { filter: Filter; surfaceMode: SurfaceMode }) {
+  const palette = surfaces[surfaceMode];
+
   return (
     <View
       style={{
-        backgroundColor: colors.surface,
+        backgroundColor: palette.card,
         borderRadius: radii.medium,
+        borderWidth: surfaceMode === 'night' ? 1 : 0,
+        borderColor: palette.border,
         paddingVertical: 30,
         paddingHorizontal: 20,
         alignItems: 'center',
         ...shadows.card,
       }}>
-      <Text style={{ fontFamily: fonts.display, fontSize: 17, color: colors.ink }}>Nothing here yet</Text>
+      <Text style={{ fontFamily: fonts.display, fontSize: 17, color: palette.ink }}>Nothing here yet</Text>
       <Text
         style={{
           fontFamily: fonts.body,
           fontSize: 13,
           lineHeight: 19,
-          color: colors.inkSoft,
+          color: palette.inkSoft,
           textAlign: 'center',
           marginTop: 6,
         }}>
@@ -163,6 +172,8 @@ function EmptyState({ filter }: { filter: Filter }) {
 
 export default function LogScreen() {
   const { events, fullTimeline, resetLocalEvents } = useLocalEvents();
+  const { mode } = useTheme();
+  const palette = surfaces[mode];
   const [filter, setFilter] = useState<Filter>('all');
   // Stamp "now" once (for Today/Yesterday headings) so render stays pure.
   const [now] = useState(() => Date.now());
@@ -176,20 +187,26 @@ export default function LogScreen() {
   }, [events, fullTimeline, filter, now]);
 
   return (
-    <Screen>
-      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 10, letterSpacing: 1.4, color: colors.inkFaint }}>
+    <Screen surfaceMode={mode}>
+      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 10, letterSpacing: 1.4, color: palette.inkFaint }}>
         HISTORY
       </Text>
-      <Text style={{ fontFamily: fonts.display, fontSize: 30, color: colors.ink, marginTop: 6 }}>
+      <Text style={{ fontFamily: fonts.display, fontSize: 30, color: palette.ink, marginTop: 6 }}>
         Night log
       </Text>
-      <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.inkSoft, marginTop: 4 }}>
+      <Text style={{ fontFamily: fonts.body, fontSize: 13, color: palette.inkSoft, marginTop: 4 }}>
         {recap}
       </Text>
 
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 18 }}>
         {FILTERS.map((f) => (
-          <FilterChip key={f.key} filter={f} active={filter === f.key} onPress={() => setFilter(f.key)} />
+          <FilterChip
+            key={f.key}
+            filter={f}
+            active={filter === f.key}
+            surfaceMode={mode}
+            onPress={() => setFilter(f.key)}
+          />
         ))}
       </View>
 
@@ -200,7 +217,7 @@ export default function LogScreen() {
               style={{
                 fontFamily: fonts.displayMedium,
                 fontSize: 14.5,
-                color: colors.ink,
+                color: palette.ink,
                 marginBottom: 8,
                 marginLeft: 2,
               }}>
@@ -208,22 +225,29 @@ export default function LogScreen() {
             </Text>
             <View
               style={{
-                backgroundColor: colors.surface,
+                backgroundColor: palette.card,
                 borderRadius: radii.medium,
+                borderWidth: mode === 'night' ? 1 : 0,
+                borderColor: palette.border,
                 paddingTop: 7,
                 paddingHorizontal: 16,
                 paddingBottom: 7,
                 ...shadows.card,
               }}>
               {group.entries.map((entry, index) => (
-                <TimelineItem key={entry.id} entry={entry} isLast={index === group.entries.length - 1} />
+                <TimelineItem
+                  key={entry.id}
+                  entry={entry}
+                  isLast={index === group.entries.length - 1}
+                  surfaceMode={mode}
+                />
               ))}
             </View>
           </View>
         ))
       ) : (
         <View style={{ marginTop: 22 }}>
-          <EmptyState filter={filter} />
+          <EmptyState filter={filter} surfaceMode={mode} />
         </View>
       )}
 
@@ -250,7 +274,7 @@ export default function LogScreen() {
               fontFamily: fonts.body,
               fontSize: 12,
               letterSpacing: 0.3,
-              color: colors.inkFaint,
+              color: palette.inkFaint,
             }}>
             Reset demo night
           </Text>

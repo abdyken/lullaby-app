@@ -1,10 +1,11 @@
 /**
  * AuthGate — decides what the app shows based on the auth/provisioning status.
  *
- *   local-only / ready → render the app (its children: provider + tabs)
+ *   local-only         → first-run onboarding, then render the app
+ *   ready              → render the app (its children: provider + tabs)
  *   loading            → calm spinner
- *   signed-out         → sign-in / sign-up
- *   needs-setup        → baby setup
+ *   signed-out         → first-run onboarding, then sign-in / sign-up
+ *   needs-setup        → first-run onboarding, then baby setup
  *
  * Crucially, the app's children (LocalEventProvider) only MOUNT in local-only or
  * ready — so in a configured build the night store + repository resolution don't
@@ -13,6 +14,7 @@
  */
 import type { ReactNode } from 'react';
 
+import { OnboardingGate } from '@/components/onboarding/OnboardingGate';
 import { useAuth } from '@/state/AuthProvider';
 
 import { AuthLoading } from './AuthLoading';
@@ -24,12 +26,21 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   switch (status) {
     case 'local-only':
+      return <OnboardingGate>{children}</OnboardingGate>;
     case 'ready':
       return <>{children}</>;
     case 'needs-setup':
-      return <BabySetupScreen />;
+      return (
+        <OnboardingGate>
+          <BabySetupScreen />
+        </OnboardingGate>
+      );
     case 'signed-out':
-      return <AuthScreen />;
+      return (
+        <OnboardingGate>
+          <AuthScreen />
+        </OnboardingGate>
+      );
     case 'loading':
     default:
       return <AuthLoading />;
