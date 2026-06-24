@@ -23,6 +23,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { VercelAnalytics } from '@/components/VercelAnalytics';
 import { ThemeProvider, useTheme } from '@/state/ThemeProvider';
 import { surfaces } from '@/theme';
 import '../global.css';
@@ -74,6 +75,7 @@ function RootShell({ fontsReady }: { fontsReady: boolean }) {
         }}>
         <Stack.Screen name="(tabs)" />
       </Stack>
+      <VercelAnalytics />
     </>
   );
 }
