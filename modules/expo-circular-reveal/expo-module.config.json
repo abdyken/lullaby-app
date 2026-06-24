@@ -1,0 +1,10 @@
+{
+  "platforms": ["android", "ios"],
+  "android": {
+    "modules": ["com.juanrdbo.circularreveal.CircularRevealModule"]
+  },
+  "ios": {
+    "modules": ["CircularRevealModule"],
+    "podspecPath": "expo-circular-reveal.podspec"
+  }
+}
