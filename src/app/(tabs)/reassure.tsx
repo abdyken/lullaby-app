@@ -21,7 +21,8 @@ import Svg, { Path } from 'react-native-svg';
 import { Screen } from '@/components/Screen';
 import { buildNightRecap, recapSummaryLine } from '@/data/currentState';
 import { useLocalEvents } from '@/state/LocalEventProvider';
-import { colors, fonts, radii, shadows } from '@/theme';
+import { useTheme } from '@/state/ThemeProvider';
+import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
 /** Calm pastel tones for the chips. Lavender stays the section tone; Safety
  *  uses the brand's warm terracotta (never a blaring alarm red, §8). */
@@ -74,12 +75,12 @@ const CARDS: ReassureCard[] = [
   },
 ];
 
-function Chevron() {
+function Chevron({ color }: { color: string }) {
   return (
     <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
       <Path
         d="M9 6l6 6-6 6"
-        stroke={colors.inkFaint}
+        stroke={color}
         strokeWidth={1.9}
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -88,8 +89,10 @@ function Chevron() {
   );
 }
 
-function ReassureRow({ card }: { card: ReassureCard }) {
+function ReassureRow({ card, surfaceMode }: { card: ReassureCard; surfaceMode: SurfaceMode }) {
   const tone = TONES[card.tone];
+  const palette = surfaces[surfaceMode];
+
   return (
     <Pressable
       // Visual-only for now: detail pages come later (§4). No-op press is fine.
@@ -97,8 +100,10 @@ function ReassureRow({ card }: { card: ReassureCard }) {
       accessibilityRole="button"
       accessibilityLabel={`${card.title}. ${tone.label}.`}
       style={({ pressed }) => ({
-        backgroundColor: colors.surface,
+        backgroundColor: palette.card,
         borderRadius: radii.medium,
+        borderWidth: surfaceMode === 'night' ? 1 : 0,
+        borderColor: palette.border,
         padding: 16,
         transform: [{ scale: pressed ? 0.98 : 1 }],
         ...shadows.card,
@@ -118,7 +123,7 @@ function ReassureRow({ card }: { card: ReassureCard }) {
 
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text style={{ fontFamily: fonts.display, fontSize: 16.5, color: colors.ink }}>
+            <Text style={{ fontFamily: fonts.display, fontSize: 16.5, color: palette.ink }}>
               {card.title}
             </Text>
             <View
@@ -146,14 +151,14 @@ function ReassureRow({ card }: { card: ReassureCard }) {
               fontFamily: fonts.body,
               fontSize: 13,
               lineHeight: 19,
-              color: colors.inkSoft,
+              color: palette.inkSoft,
               marginTop: 5,
             }}>
             {card.description}
           </Text>
         </View>
 
-        <Chevron />
+        <Chevron color={palette.inkFaint} />
       </View>
     </Pressable>
   );
@@ -164,16 +169,19 @@ function ReassureRow({ card }: { card: ReassureCard }) {
  * line of counts (or a calm empty state) plus a non-medical safety line. Reads
  * the live store so it always reflects what the parent actually logged.
  */
-function NightRecapCard() {
+function NightRecapCard({ surfaceMode }: { surfaceMode: SurfaceMode }) {
   const { events } = useLocalEvents();
+  const palette = surfaces[surfaceMode];
   const recap = buildNightRecap(events);
   const summary = recapSummaryLine(recap);
 
   return (
     <View
       style={{
-        backgroundColor: colors.surface,
+        backgroundColor: palette.card,
         borderRadius: radii.medium,
+        borderWidth: surfaceMode === 'night' ? 1 : 0,
+        borderColor: palette.border,
         paddingVertical: 16,
         paddingHorizontal: 16,
         marginTop: 16,
@@ -185,11 +193,11 @@ function NightRecapCard() {
           fontSize: 9.5,
           letterSpacing: 0.8,
           textTransform: 'uppercase',
-          color: colors.inkFaint,
+          color: palette.inkFaint,
         }}>
         Based on saved logs
       </Text>
-      <Text style={{ fontFamily: fonts.display, fontSize: 17, color: colors.ink, marginTop: 4 }}>
+      <Text style={{ fontFamily: fonts.display, fontSize: 17, color: palette.ink, marginTop: 4 }}>
         Here’s what you logged
       </Text>
 
@@ -198,7 +206,7 @@ function NightRecapCard() {
           fontFamily: fonts.body,
           fontSize: 13.5,
           lineHeight: 20,
-          color: summary ? colors.inkSoft : colors.inkFaint,
+          color: summary ? palette.inkSoft : palette.inkFaint,
           marginTop: 8,
         }}>
         {summary ??
@@ -210,7 +218,7 @@ function NightRecapCard() {
           fontFamily: fonts.body,
           fontSize: 12,
           lineHeight: 18,
-          color: colors.inkFaint,
+          color: palette.inkFaint,
           marginTop: 10,
         }}>
         Newborn nights can vary. If something feels unusual, urgent, or worrying, contact your
@@ -221,28 +229,34 @@ function NightRecapCard() {
 }
 
 export default function ReassureScreen() {
+  const { mode } = useTheme();
+  const palette = surfaces[mode];
+  const safetyNoteBackground = mode === 'night' ? 'rgba(85,96,198,0.17)' : colors.sleepTint;
+
   return (
-    <Screen>
+    <Screen surfaceMode={mode}>
       <Text style={{ fontFamily: fonts.bodyBold, fontSize: 10, letterSpacing: 1.4, color: colors.sleep }}>
         IS THIS NORMAL?
       </Text>
-      <Text style={{ fontFamily: fonts.display, fontSize: 30, color: colors.ink, marginTop: 6 }}>
+      <Text style={{ fontFamily: fonts.display, fontSize: 30, color: palette.ink, marginTop: 6 }}>
         Reassure
       </Text>
-      <Text style={{ fontFamily: fonts.body, fontSize: 14, lineHeight: 20, color: colors.inkSoft, marginTop: 2 }}>
+      <Text style={{ fontFamily: fonts.body, fontSize: 14, lineHeight: 20, color: palette.inkSoft, marginTop: 2 }}>
         Quick, bounded guidance for common newborn nights.
       </Text>
 
       {/* Safety note near the top — soft lavender, calm, never an alarm. */}
       <View
         style={{
-          backgroundColor: colors.sleepTint,
+          backgroundColor: safetyNoteBackground,
           borderRadius: radii.medium,
+          borderWidth: mode === 'night' ? 1 : 0,
+          borderColor: palette.border,
           paddingVertical: 13,
           paddingHorizontal: 15,
           marginTop: 16,
         }}>
-        <Text style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: 18.5, color: colors.ink }}>
+        <Text style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: 18.5, color: palette.ink }}>
           Lullaby does not provide diagnosis or treatment. If something feels urgent, call your doctor or
           local emergency number.
         </Text>
@@ -250,11 +264,11 @@ export default function ReassureScreen() {
 
       {/* Quiet morning recap from the local events (Phase 6) — sits above the
           static cards, never replaces them. */}
-      <NightRecapCard />
+      <NightRecapCard surfaceMode={mode} />
 
       <View style={{ gap: 11, marginTop: 16 }}>
         {CARDS.map((card) => (
-          <ReassureRow key={card.id} card={card} />
+          <ReassureRow key={card.id} card={card} surfaceMode={mode} />
         ))}
       </View>
 
@@ -264,7 +278,7 @@ export default function ReassureScreen() {
           fontFamily: fonts.body,
           fontSize: 11.5,
           lineHeight: 17,
-          color: colors.inkFaint,
+          color: palette.inkFaint,
           textAlign: 'center',
           marginTop: 20,
           paddingHorizontal: 12,
