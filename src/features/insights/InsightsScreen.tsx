@@ -1,18 +1,9 @@
-import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
-import {
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useCallback, useMemo, useState } from 'react';
+import { Text, useWindowDimensions, View } from 'react-native';
 
 import { Screen } from '@/components/Screen';
-import { ThemeIconButton, type RevealOrigin } from '@/components/ThemeIconButton';
-import { ThemeRevealOverlay } from '@/components/ThemeRevealOverlay';
+import { ThemeIconButton } from '@/components/ThemeIconButton';
 import { InsightCard } from '@/features/insights/components/InsightCard';
 import { InsightStatCard } from '@/features/insights/components/InsightStatCard';
 import { InsightsSectionCard } from '@/features/insights/components/InsightsSectionCard';
@@ -97,15 +88,12 @@ function statForDataState(
 }
 
 export function InsightsScreen() {
-  const { mode, reveal, revealProgress, isTransitioning, beginReveal } = useTheme();
+  const { mode, isTransitioning, toggleThemeFromPoint } = useTheme();
   const { loadInsightsHistory } = useLogging();
   const { width, height } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
   const isShortDesktop = width >= 700 && height <= 760;
   const contentMaxWidth = isShortDesktop ? SHORT_DESKTOP_CONTENT_MAX_WIDTH : CONTENT_MAX_WIDTH;
   const statsGap = isShortDesktop ? 18 : 22;
-  const [revealScrollY, setRevealScrollY] = useState(0);
-  const scrollYRef = useRef(0);
   const initialViewModel = useMemo(() => buildInsightsViewModel({ events: [], now: resolveInsightsNow() }), []);
   const [loadedViewModel, setLoadedViewModel] = useState<InsightsViewModel | null>(null);
   // Reload on tab focus so backdated logs inside the 7-day window are picked up from persisted history.
@@ -142,15 +130,9 @@ export function InsightsScreen() {
     average: 'Diapers avg',
   });
 
-  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    scrollYRef.current = event.nativeEvent.contentOffset.y;
-  };
-
-  const handleThemeToggle = (origin?: RevealOrigin) => {
+  const handleThemeToggle = (pageX?: number, pageY?: number) => {
     if (isTransitioning) return;
-    const fallbackOrigin: RevealOrigin = { x: width - 41, y: insets.top + 35 };
-    setRevealScrollY(scrollYRef.current);
-    beginReveal(origin ?? fallbackOrigin);
+    void toggleThemeFromPoint(pageX, pageY);
   };
 
   const renderBody = (bodyMode: SurfaceMode) => {
@@ -254,19 +236,9 @@ export function InsightsScreen() {
   };
 
   return (
-    <>
-      <Screen surfaceMode={mode} onScroll={handleScroll} scrollEnabled={!isTransitioning}>
-        {renderBody(mode)}
-      </Screen>
-
-      {reveal.active && <StatusBar style={reveal.toMode === 'night' ? 'light' : 'dark'} />}
-
-      <ThemeRevealOverlay visible={reveal.active} progress={revealProgress}>
-        <Screen surfaceMode={reveal.toMode} scrollEnabled={false} contentOffset={{ x: 0, y: revealScrollY }}>
-          {renderBody(reveal.toMode)}
-        </Screen>
-      </ThemeRevealOverlay>
-    </>
+    <Screen surfaceMode={mode} scrollEnabled={!isTransitioning}>
+      {renderBody(mode)}
+    </Screen>
   );
 }
 
