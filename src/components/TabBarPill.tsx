@@ -1,48 +1,34 @@
 /**
  * TabBarPill — the floating tab-bar pill, presentational and theme-explicit.
  *
- * Shared by BOTH the real (interactive) tab bar (LullabyTabBar) and the
- * full-window theme-reveal overlay (TabBarRevealOverlay) so the current-theme
- * and next-theme layers are pixel-identical in layout — only colours differ.
+ * Used by the real interactive tab bar. Geometry is deterministic and fixed so
+ * route changes can recolour and slide the indicator without moving tab content.
  *
  * ACTIVE-TAB MOTION (Reanimated, UI thread):
  *  - There is ONE moving tint pill (the lavender chip) that SLIDES between tab
  *    slots via translateX — never a per-tab background crossfade. A single shared
  *    value `activeIndex` (a float that springs between integer slot indices) is
- *    the SOLE source of truth: it drives the pill's translateX, and each tab's
- *    icon opacity, label colour, and content scale derive from how close it is.
- *    So the pill, icons, and labels all move as one continuous gesture instead of
+ *    the SOLE source of truth: it drives the pill's translateX, icon opacity,
+ *    and label colour. It never changes tab content layout or scale.
+ *    So the pill, icons, and labels all update as one continuous gesture instead of
  *    several independent JS-thread fades fighting the screen transition.
  *  - Slot geometry is computed DETERMINISTICALLY from `pillWidth` (equal flex
- *    slots, known padding/gap), not measured with onLayout. Both the base bar and
- *    the reveal-overlay copy mount independently mid-transition; deterministic
- *    geometry guarantees they land on identical pixels with no onLayout race, and
- *    the moving pill is correct on its very first frame.
- *  - `activeIndex` is INITIALISED to the focused slot (not 0), so the reveal
- *    overlay's fresh copy renders the pill already at rest in the right place and
- *    never animates-in mid-reveal. Only a real focus change springs it.
+ *    slots, known padding/gap), not measured with onLayout.
+ *  - `activeIndex` is INITIALISED to the focused slot (not 0), so first paint
+ *    starts in the right place. Only a real focus change springs it.
  *
  * ANDROID RULES (load-bearing — do not "simplify" away):
  *  - The fake border is a FILLED inset (outer view = border colour, inner view =
- *    surface), NEVER a native borderWidth/borderColor stroke. Fills clip to the
- *    circular reveal mask; native strokes don't, so a real border would not
- *    reveal with the rest of the pill.
- *  - NO `elevation` anywhere in this tree (incl. the animated pill). Android
- *    elevation breaks MaskedView compositing and competes with zIndex for draw
- *    order. Draw order is document-order only (the moving pill is the first child
- *    of the surface row, so it sits behind the icons/labels). Shadow (iOS only,
- *    theme-stable) lives on the base pill via `withShadow`; the masked overlay
- *    copy passes false and is shadowless.
+ *    surface), NEVER a native borderWidth/borderColor stroke.
+ *  - NO `elevation` anywhere in this tree (incl. the animated pill). Draw order is
+ *    document-order only (the moving pill is the first child of the surface row,
+ *    so it sits behind the icons/labels).
  *  - We animate transform / opacity / colour only — never native
  *    borderWidth/borderColor, and never per-frame layout props (left/width/margin).
  *
  * EXTENDING THE BAR: every theme-dependent visual (badges, extra chips, icons,
  * labels, backgrounds, outlines) MUST live inside this component and take its
- * colour from `palette` — i.e. be driven by the `themeMode` prop. Anything
- * theme-coloured added outside here won't exist identically in both the base and
- * the reveal-overlay copies and will flicker or mismatch during the transition.
- * The moving pill's tint is the theme-INDEPENDENT shell accent on purpose, so it
- * paints identical pixels in both layers and stays static through the reveal.
+ * colour from `palette` — i.e. be driven by the `themeMode` prop.
  */
 import { useEffect } from 'react';
 import { PixelRatio, Pressable, useWindowDimensions, View } from 'react-native';
@@ -61,7 +47,7 @@ import { fonts, getAccentForState, tabbar, tabbarSurfaces, type SurfaceMode } fr
 const TABBAR_BORDER_WIDTH = 1;
 /** Tabs in the navigator. Used for deterministic slot geometry. */
 const TAB_COUNT = 4;
-// The shell accent (sleep). Theme-independent, so it never changes with the reveal.
+// The shell accent (sleep). Theme-independent, so tab focus motion stays stable.
 const accent = getAccentForState('sleep');
 
 /**
@@ -70,16 +56,11 @@ const accent = getAccentForState('sleep');
  */
 const PILL_SPRING = { damping: 26, stiffness: 220, mass: 1 } as const;
 
-/** Smallest content scale for an inactive tab (active = 1). */
-const INACTIVE_SCALE = 0.94;
-
 /**
  * The ONE source of tab-bar frame geometry (pill width + bottom offset). Both the
- * real bar (LullabyTabBar) and the reveal overlay (TabBarRevealOverlay) call this
- * so their pills are guaranteed pixel-identical in size and position — no
- * duplicated clamp math drifting between the two. Values are snapped to the
- * device pixel grid so the 1px fake border stays crisp and never shimmers, and so
- * the two layers can never round to different sub-pixels.
+ * real bar and any callers use this so the pill is pixel-snapped in size and
+ * position. Values are snapped to the device pixel grid so the 1px fake border
+ * stays crisp and never shimmers.
  */
 export function useTabBarLayout(): { pillWidth: number; paddingBottom: number } {
   const { width } = useWindowDimensions();
@@ -95,8 +76,7 @@ export function useTabBarLayout(): { pillWidth: number; paddingBottom: number } 
  * Deterministic geometry for the sliding tint pill, derived purely from
  * `pillWidth`. The inner surface row is `pillWidth - 2*border` wide with equal
  * `paddingX`/`gap`, so the tab slots are evenly spaced and the pill only
- * ever needs a linear translateX — no width animation, no measuring. Identical
- * inputs in both copies → identical pixels.
+ * ever needs a linear translateX — no width animation, no measuring.
  */
 function pillGeometry(pillWidth: number) {
   const innerRowWidth = pillWidth - 2 * TABBAR_BORDER_WIDTH;
@@ -124,7 +104,6 @@ export type TabBarTab = {
   label: string;
   iconName: TabName;
   focused: boolean;
-  /** omitted for the non-interactive reveal overlay copy */
   onPress?: () => void;
 };
 
@@ -147,12 +126,6 @@ function AnimatedTabItem({
   inactiveColor: string;
   onPress: () => void;
 }) {
-  // Content (icon + label group) scales up subtly as the tab becomes active.
-  const chipStyle = useAnimatedStyle(() => {
-    const p = tabProgress(activeIndex.value, index);
-    return { transform: [{ scale: INACTIVE_SCALE + (1 - INACTIVE_SCALE) * p }] };
-  }, [index]);
-
   // Cross-fade two stacked icons (muted ↔ accent) — SVG stroke colour can't be
   // animated directly, so opacity is the UI-thread-friendly way to retint.
   const inactiveIconStyle = useAnimatedStyle(() => {
@@ -182,17 +155,14 @@ function AnimatedTabItem({
           borderRadius: tabbar.tabRadius,
           opacity: pressed ? 0.85 : 1,
         })}>
-        <Animated.View
-          style={[
-            {
-              minWidth: tabbar.chipMinWidth,
-              height: tabbar.chipHeight,
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: tabbar.chipGap,
-            },
-            chipStyle,
-          ]}>
+        <View
+          style={{
+            minWidth: tabbar.chipMinWidth,
+            height: tabbar.chipHeight,
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: tabbar.chipGap,
+          }}>
           <View
             style={{
               width: tabbar.iconSize,
@@ -219,7 +189,7 @@ function AnimatedTabItem({
             ]}>
             {label}
           </Animated.Text>
-        </Animated.View>
+        </View>
       </Pressable>
     </View>
   );
@@ -231,20 +201,16 @@ export function TabBarPill({
   themeMode,
   pillWidth,
   tabs,
-  withShadow = true,
 }: {
   themeMode: SurfaceMode;
   pillWidth: number;
   tabs: TabBarTab[];
-  /** iOS soft shadow on the base pill only; the masked overlay copy passes false */
-  withShadow?: boolean;
 }) {
   const palette = tabbarSurfaces[themeMode];
   const { slotStep, pillItemWidth, pillLeft, pillTop } = pillGeometry(pillWidth);
 
   // Single source of truth for ALL active-state visuals. Initialised to the
-  // focused slot so a freshly-mounted copy (the reveal overlay) is already at
-  // rest in the right place — only a genuine focus change springs it.
+  // focused slot so first paint is already at rest in the right place.
   const focusedIndex = Math.max(0, tabs.findIndex((t) => t.focused));
   const activeIndex = useSharedValue(focusedIndex);
   useEffect(() => {
@@ -262,17 +228,12 @@ export function TabBarPill({
         alignSelf: 'center',
         height: tabbar.height,
         borderRadius: tabbar.radius,
-        // "border" as a fill so the circular mask reveals it like normal content
         backgroundColor: palette.border,
         padding: TABBAR_BORDER_WIDTH,
-        ...(withShadow
-          ? {
-              shadowColor: tabbar.shadowColor,
-              shadowOpacity: tabbar.shadowOpacity,
-              shadowRadius: tabbar.shadowRadius,
-              shadowOffset: tabbar.shadowOffset,
-            }
-          : null),
+        shadowColor: tabbar.shadowColor,
+        shadowOpacity: tabbar.shadowOpacity,
+        shadowRadius: tabbar.shadowRadius,
+        shadowOffset: tabbar.shadowOffset,
       }}>
       <View
         style={{
@@ -286,9 +247,7 @@ export function TabBarPill({
           gap: tabbar.gap,
         }}>
         {/* The single sliding tint pill — first child, so it sits BEHIND the tab
-            content (document-order draw, no elevation). Theme-independent accent
-            tint so both reveal layers paint it identically and it never shifts as
-            the circle passes. */}
+            content (document-order draw, no elevation). */}
         <Animated.View
           pointerEvents="none"
           style={[

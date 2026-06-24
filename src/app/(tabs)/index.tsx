@@ -8,20 +8,11 @@
  * from the pure helpers in '@/data/localInteractions'.
  *
  * Theme: the committed surface mode lives in the global ThemeProvider (persisted
- * across restarts). Tapping the toggle plays a Telegram-style circular reveal —
- * the screen body is rendered twice (current theme as the base, the incoming
- * theme clipped to an expanding circle on top) — and only commits the new mode
- * to the provider once the circle covers the screen, so there's no flash.
+ * across restarts). Tapping the toggle lets the native circular-reveal module
+ * screenshot the current window, then the real app commits the new mode beneath it.
  */
-import { useEffect, useRef, useState } from 'react';
-import {
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-  useWindowDimensions,
-  View,
-} from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
+import { useEffect, useState } from 'react';
+import { View } from 'react-native';
 
 import { AccountSheet } from '@/components/auth/AccountSheet';
 import { BabyHeader } from '@/components/BabyHeader';
@@ -33,11 +24,9 @@ import { FeedSheet } from '@/features/logging/feed/FeedSheet';
 import { PumpSheet } from '@/features/logging/pump/PumpSheet';
 import { SleepSheet } from '@/features/logging/sleep/SleepSheet';
 import { useV2TodayView } from '@/features/logging/state/useV2TodayView';
-import { OrbHero, useOrbBreathe } from '@/components/OrbHero';
+import { OrbHero } from '@/components/OrbHero';
 import { QuickLogRow } from '@/components/QuickLogRow';
 import { Screen } from '@/components/Screen';
-import { type RevealOrigin } from '@/components/ThemeIconButton';
-import { ThemeRevealOverlay } from '@/components/ThemeRevealOverlay';
 import { TimelineCard } from '@/components/TimelineCard';
 import { TonightStatus } from '@/components/TonightStatus';
 import { buildQuickLogMeta, type PreviewState } from '@/data/currentState';
@@ -195,12 +184,7 @@ export default function TonightScreen() {
   // new"). resetNonce never changes in Supabase mode.
   const { cursor, ready: cursorReady, markCaughtUp } = useHandoffCursor(cursorContext, resetNonce);
 
-  const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
-  // Global, persisted surface mode + the shared reveal (owned by ThemeProvider
-  // so the tab bar can animate the same circle in sync). The base renders
-  // against `surfaceMode`; the mode commits once the circle covers the screen.
-  const { mode: surfaceMode, reveal, revealProgress, isTransitioning, beginReveal } = useTheme();
+  const { mode: surfaceMode, isTransitioning, toggleThemeFromPoint } = useTheme();
 
   const [sheet, setSheet] = useState<SheetKind | null>(null);
   // Logging v2 Feed sheet (breast session + bottle). Behind the loggingV2 flag;
@@ -220,26 +204,11 @@ export default function TonightScreen() {
   // only in real-sync mode — local demo keeps the header inert as before.
   const [accountOpen, setAccountOpen] = useState(false);
 
-  // Scroll offset snapshotted when a reveal starts, so the revealed copy lines
-  // up exactly with the scrolled base layer.
-  const [revealScrollY, setRevealScrollY] = useState(0);
-  // Live scroll offset kept in a ref (no re-render).
-  const scrollYRef = useRef(0);
-
   // Live render-only clock for elapsed labels and the hero progress ring. During
-  // a theme reveal we freeze it so both rendered layers keep identical text and
-  // progress until the reveal commits.
+  // a theme transition we freeze it so labels don't shift under the native reveal.
   const [frozenNow, setFrozenNow] = useState<number | undefined>(undefined);
   const liveNow = useHomeNowMs();
   const displayNow = isTransitioning ? (frozenNow ?? liveNow) : liveNow;
-
-  // One breathe driver shared by the base orb AND its reveal-overlay copy, so the
-  // orb stays perfectly in phase and never appears to jump where the circle crosses it.
-  const breathe = useOrbBreathe();
-
-  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    scrollYRef.current = event.nativeEvent.contentOffset.y;
-  };
 
   // Feed / Diaper open a sheet (logging happens on Save); Sleep stays immediate.
   // With loggingV2 on, Feed opens the new purpose-built FeedSheet instead.
@@ -260,17 +229,11 @@ export default function TonightScreen() {
     setSheet(kind);
   };
 
-  const handleThemeToggle = (origin?: RevealOrigin) => {
+  const handleThemeToggle = (pageX?: number, pageY?: number) => {
     if (isTransitioning) return;
-    // Fallback origin sits under the toggle (top-right) if measuring missed.
-    const fallbackOrigin: RevealOrigin = { x: width - 41, y: insets.top + 35 };
-    // Snapshot scroll + freeze the clock so the revealed copy lines up with the
-    // base and the time-based labels hold still for the whole reveal.
-    setRevealScrollY(scrollYRef.current);
     setFrozenNow(Date.now());
     hapticSave();
-    // ThemeProvider runs the shared circle and commits the new mode at the end.
-    beginReveal(origin ?? fallbackOrigin);
+    void toggleThemeFromPoint(pageX, pageY);
   };
 
   // Only Save creates the event + toast; dismissing the sheet logs nothing.
@@ -283,7 +246,7 @@ export default function TonightScreen() {
   };
 
   // Descriptive secondary lines for the quick-log cards, derived from live events.
-  // Uses the frozen clock so the labels don't shift during a theme reveal.
+  // Uses the frozen clock so labels don't shift during a theme transition.
   const quickLogMeta = buildQuickLogMeta(events, displayNow);
 
   // Logging v2 — the Today view read from the v2 store (orb, timeline, quick-log
@@ -301,9 +264,8 @@ export default function TonightScreen() {
   // TonightStatus derives from `events` when no items are passed (legacy path).
   const statusItems = v2 ? v2.tonightStatus : undefined;
 
-  // The whole screen body, parameterised by surface mode so it can be rendered
-  // twice during a theme transition (base = current, reveal overlay = incoming)
-  // with identical data and layout — only the colours differ.
+  // The screen body is parameterised by the committed surface mode so all child
+  // components read the same real theme after the native screenshot has frozen.
   const renderBody = (bodyMode: SurfaceMode) => (
     <>
       <BabyHeader
@@ -330,7 +292,6 @@ export default function TonightScreen() {
           stateIcon={heroOrb.stateIcon}
           onActionPress={heroPrimaryAction}
           surfaceMode={bodyMode}
-          breathe={breathe}
         />
       </View>
 
@@ -375,7 +336,7 @@ export default function TonightScreen() {
 
   return (
     <>
-      <Screen surfaceMode={surfaceMode} onScroll={handleScroll} scrollEnabled={!isTransitioning}>
+      <Screen surfaceMode={surfaceMode} scrollEnabled={!isTransitioning}>
         {renderBody(surfaceMode)}
       </Screen>
 
@@ -397,27 +358,6 @@ export default function TonightScreen() {
       {pumpV2Open && <PumpSheet onClose={() => setPumpV2Open(false)} />}
 
       {accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} />}
-
-      {/* Flip the status bar to the incoming theme as the reveal starts (the
-          top edge is covered almost immediately). On commit this unmounts and
-          the root status bar — now on the committed mode — takes over seamlessly. */}
-      {reveal.active && <StatusBar style={reveal.toMode === 'night' ? 'light' : 'dark'} />}
-
-      {/* The incoming theme, rendered through the *same* Screen component as the
-          base (so layout/padding match exactly — no misalignment) and revealed
-          through the expanding circular mask. It's a frozen copy pinned to the
-          base's scroll offset. The floating tab bar reveals the same circle
-          itself (see LullabyTabBar), so coverage is continuous to the corners. */}
-      <ThemeRevealOverlay
-        visible={reveal.active}
-        originX={reveal.origin.x}
-        originY={reveal.origin.y}
-        maxRadius={reveal.maxRadius}
-        progress={revealProgress}>
-        <Screen surfaceMode={reveal.toMode} scrollEnabled={false} contentOffset={{ x: 0, y: revealScrollY }}>
-          {renderBody(reveal.toMode)}
-        </Screen>
-      </ThemeRevealOverlay>
     </>
   );
 }

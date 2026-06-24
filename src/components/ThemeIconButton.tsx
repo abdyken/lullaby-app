@@ -1,4 +1,4 @@
-import { Animated, Easing, Pressable, View } from 'react-native';
+import { Animated, Easing, Pressable, View, type GestureResponderEvent } from 'react-native';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -6,19 +6,17 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { useTheme } from '@/state/ThemeProvider';
 import { colors, shadows, type SurfaceMode } from '@/theme';
 
-/** Window-coordinate point the theme reveal should grow from. */
-export type RevealOrigin = { x: number; y: number };
+export type ThemeToggleHandler = (pageX?: number, pageY?: number) => void | Promise<void>;
 
 type Props = {
   surfaceMode: SurfaceMode;
-  /** Fired with the button's measured centre so the reveal starts from the toggle. */
-  onPress: (origin?: RevealOrigin) => void;
+  /** Fired with the press point so the native reveal starts under the user's tap. */
+  onPress: ThemeToggleHandler;
   disabled?: boolean;
 };
 
-/** Icon swap timing — kicked off in sync with the theme cross-fade. Kept just
- *  under the reveal duration so the moon/sun has fully settled before the new
- *  mode commits (no snap), and the two motions feel like one. */
+/** Icon swap timing. The real button updates under the native screenshot overlay,
+ * then appears already settled as the circular reveal exposes it. */
 const ICON_DURATION = 300;
 const ICON_EASING = Easing.bezier(0.25, 0.1, 0.25, 1);
 /** 0 = day (moon shown, tap → night), 1 = night (sun shown, tap → day). */
@@ -87,45 +85,41 @@ function SunGlyph() {
 }
 
 export function ThemeIconButton({ surfaceMode, onPress, disabled = false }: Props) {
-  // The icon follows the global reveal so its swap is in sync with the circle,
-  // not driven by this copy's surfaceMode (which the button chrome still uses).
-  const { mode: committedMode, reveal } = useTheme();
+  const { mode: committedMode } = useTheme();
   const isNight = surfaceMode === 'night';
   const buttonRef = useRef<View>(null);
   // 0 = moon (day) … 1 = sun (night). Starts at the currently committed theme.
   const [icon] = useState(() => new Animated.Value(nightAmount(committedMode)));
 
-  // Measure the button's centre in window coordinates so the reveal grows from
-  // exactly under the toggle. measureInWindow is async; fall back to no origin
-  // (the screen then uses a sensible default) if the measure can't resolve.
-  const handlePress = () => {
+  const handlePress = (event: GestureResponderEvent) => {
+    if (disabled) return;
+
+    const { pageX, pageY } = event.nativeEvent;
+    if (Number.isFinite(pageX) && Number.isFinite(pageY)) {
+      void onPress(pageX, pageY);
+      return;
+    }
+
     const node = buttonRef.current;
     if (!node) {
-      onPress();
+      void onPress();
       return;
     }
     node.measureInWindow((x, y, w, h) => {
-      onPress({ x: x + w / 2, y: y + h / 2 });
+      void onPress(x + w / 2, y + h / 2);
     });
   };
 
-  // When a reveal begins, glide the icon toward the incoming theme (started
-  // together with the circle, so it reads as one motion). Both the base and
-  // overlay copies run this: the base morphs hidden beneath the overlay and is
-  // already settled by the time the theme commits, so there's no second snap.
-  // When idle (incl. async hydration on launch) we snap to the committed theme.
+  // The icon follows the committed mode. During native reveal, the old UI is a
+  // screenshot overlay, so this real button can settle underneath before it shows.
   useEffect(() => {
-    if (reveal.active) {
-      Animated.timing(icon, {
-        toValue: nightAmount(reveal.toMode),
-        duration: ICON_DURATION,
-        easing: ICON_EASING,
-        useNativeDriver: true,
-      }).start();
-    } else {
-      icon.setValue(nightAmount(committedMode));
-    }
-  }, [reveal.active, reveal.toMode, committedMode, icon]);
+    Animated.timing(icon, {
+      toValue: nightAmount(committedMode),
+      duration: ICON_DURATION,
+      easing: ICON_EASING,
+      useNativeDriver: true,
+    }).start();
+  }, [committedMode, icon]);
 
   // Centre-anchored swap only: fade + scale + gentle rotation. No translate, so
   // the icon never drifts up/down — moon fades/scales out as sun fades/scales in.
