@@ -1,0 +1,11 @@
+/android/build/
+/android/.gradle/
+/.gradle/
+/.kotlin/
+/build/
+*.aar
+*.apk
+*.class
+*.dex
+*.jar
+*.tmp

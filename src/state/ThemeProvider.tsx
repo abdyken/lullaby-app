@@ -11,7 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import * as SystemUI from 'expo-system-ui';
 
-import { triggerCircularRevealTransition } from '@/lib/circularReveal';
+import { cancelCircularReveal, prepareCircularReveal, startCircularReveal } from '@/lib/circularReveal';
 import { surfaces, type SurfaceMode } from '@/theme';
 
 const STORAGE_KEY = 'lullaby.surfaceMode';
@@ -41,16 +41,25 @@ function revealDurationMs(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_REVEAL_DURATION_MS;
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => {
     requestAnimationFrame(() => resolve());
   });
+}
+
+async function doubleRequestAnimationFrame(): Promise<void> {
+  await nextFrame();
+  await nextFrame();
+}
+
+function devLogThemeReveal(message: string, details?: Record<string, unknown>): void {
+  if (__DEV__) {
+    if (details) {
+      console.log(`[theme-reveal] ${message}`, details);
+    } else {
+      console.log(`[theme-reveal] ${message}`);
+    }
+  }
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -109,7 +118,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       const from: SurfaceMode = modeRef.current;
       const next: SurfaceMode = from === 'night' ? 'day' : 'night';
       const durationMs = revealDurationMs();
-      let nativeRevealActive = false;
+      let nativeRevealPrepared = false;
 
       try {
         if (
@@ -118,21 +127,32 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           Number.isFinite(pageX) &&
           Number.isFinite(pageY)
         ) {
-          nativeRevealActive = await triggerCircularRevealTransition(pageX, pageY, durationMs);
+          await prepareCircularReveal(pageX, pageY);
+          nativeRevealPrepared = true;
         }
       } catch {
-        nativeRevealActive = false;
+        nativeRevealPrepared = false;
+        await cancelCircularReveal().catch(() => {
+          /* no-op: prepare fallback may fail before a native overlay exists */
+        });
       }
 
       setModeState(next);
       modeRef.current = next;
+      devLogThemeReveal('React theme committed', { from, to: next });
       void persist(next);
 
       try {
-        if (nativeRevealActive) {
-          await wait(durationMs);
+        if (nativeRevealPrepared) {
+          await doubleRequestAnimationFrame();
+          await startCircularReveal(durationMs);
+        } else {
+          await nextFrame();
         }
-        await nextFrame();
+      } catch {
+        await cancelCircularReveal().catch(() => {
+          /* no-op: transition cleanup is best effort */
+        });
       } finally {
         transitioningRef.current = false;
         setIsTransitioning(false);
