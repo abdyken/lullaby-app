@@ -7,7 +7,7 @@
  * cream background.
  *
  * AuthProvider + AuthGate sit above the tab shell. In local-only mode (no
- * Supabase env) the gate is inert and renders the tabs exactly as before.
+ * Supabase env) onboarding runs once, then the seeded demo tabs render.
  */
 import { Tabs } from 'expo-router';
 import { View } from 'react-native';
