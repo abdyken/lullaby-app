@@ -1,5 +1,5 @@
 /**
- * The 4-tab shell: Tonight · Insights · Log · Reassure.
+ * The 4-tab shell: Tonight · Insights · History · Reassure.
  *
  * Uses Expo Router's JS Tabs with a fully custom `tabBar` (LullabyTabBar) so we
  * get the floating, rounded, warm pill from the mockup instead of the stock OS
@@ -72,7 +72,7 @@ export default function TabsLayout() {
                 }}>
                 <Tabs.Screen name="index" options={{ title: 'Tonight' }} />
                 <Tabs.Screen name="insights" options={{ title: 'Insights' }} />
-                <Tabs.Screen name="log" options={{ title: 'Log' }} />
+                <Tabs.Screen name="log" options={{ title: 'History' }} />
                 <Tabs.Screen name="reassure" options={{ title: 'Reassure' }} />
               </Tabs>
               <AppToast />

@@ -111,7 +111,7 @@ export type TimelineEntry = {
   /** "Now" for a running interval, otherwise a "h:mm" clock label */
   time: string;
   kind: LogEvent['type'];
-  /** human label, e.g. "Feed · left, 11m" / "Diaper · wet" / "Sleep running" */
+  /** human label, e.g. "Nursing · 11 min · L" / "Diaper · wet" / "Sleep in progress" */
   label: string;
   /** Optional second-line detail, used when a logged event has a meaningful breakdown. */
   detail?: string;
@@ -140,18 +140,27 @@ function intervalMinutes(startAt: string, endAt: string): number {
   return Math.max(0, Math.round((new Date(endAt).getTime() - new Date(startAt).getTime()) / 60000));
 }
 
+function feedDurationLabel(mins: number): string {
+  if (mins >= 60) return minutesToLabel(mins);
+  return `${mins} min`;
+}
+
 function entryLabel(event: LogEvent): string {
   switch (event.type) {
     case 'feed': {
-      const side = event.meta.side === 'L' ? 'left' : event.meta.side === 'R' ? 'right' : 'bottle';
       if (event.endAt) {
-        const mins = minutesToLabel(intervalMinutes(event.startAt, event.endAt));
-        return `Feed · ${side}, ${mins}`;
+        if (event.meta.amountMl != null) return `Bottle · ${event.meta.amountMl} ml`;
+
+        const duration = feedDurationLabel(intervalMinutes(event.startAt, event.endAt));
+        if (event.meta.side === 'L' || event.meta.side === 'R') {
+          return `Nursing · ${duration} · ${event.meta.side}`;
+        }
+        return `Bottle · ${duration}`;
       }
-      return 'Feed in progress';
+      return event.meta.side ? `Nursing in progress · ${event.meta.side}` : 'Feed in progress';
     }
     case 'sleep':
-      return event.endAt ? `Sleep · ${minutesToLabel(intervalMinutes(event.startAt, event.endAt))}` : 'Sleep running';
+      return event.endAt ? `Sleep · ${minutesToLabel(intervalMinutes(event.startAt, event.endAt))}` : 'Sleep in progress';
     case 'diaper':
       return `Diaper · ${event.meta.kind ?? 'change'}`;
     case 'pump':
@@ -241,7 +250,7 @@ export type FeedDetails = { side?: 'L' | 'R'; durationMin?: number; amountMl?: n
 
 /**
  * A just-finished feed. With no details it defaults to an 8-minute left-side
- * feed → "Feed · left, 8m" (preserves the zero-arg quick-log behavior). When
+ * feed → "Nursing · 8 min · L" (preserves the zero-arg quick-log behavior). When
  * details are supplied, only the provided fields are recorded.
  */
 export function createFeedEvent(now: number = Date.now(), details?: FeedDetails): LogEvent {
@@ -265,7 +274,7 @@ export function createFeedEvent(now: number = Date.now(), details?: FeedDetails)
   };
 }
 
-/** A running sleep (no endAt) → "Sleep running", shows "Now". */
+/** A running sleep (no endAt) → "Sleep in progress", shows "Now". */
 export function createSleepEvent(now: number = Date.now()): LogEvent {
   const startAt = new Date(now).toISOString();
   return {

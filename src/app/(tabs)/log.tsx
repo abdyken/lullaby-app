@@ -6,18 +6,27 @@
  * display-ready rows so each line looks exactly like Tonight's timeline.
  *
  * Local-only: no persistence, no backend, no logging controls here (logging
- * lives on Tonight). Filters, grouping, and recap are all computed in-memory.
+ * lives on Tonight). Filtering remains wired in-memory but is hidden for the
+ * current small demo timeline.
  */
 import { useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { Screen } from '@/components/Screen';
 import { TimelineItem } from '@/components/TimelineItem';
+import { isLoggingV2Enabled } from '@/features/logging';
+import type { CareEvent } from '@/features/logging/domain/types';
+import { buildV2HistoryTimeline } from '@/features/logging/state/historyTimeline';
+import { useLogging } from '@/features/logging/state/LoggingProvider';
 import { useLocalEvents } from '@/state/LocalEventProvider';
+import { useAuth } from '@/state/AuthProvider';
 import { useTheme } from '@/state/ThemeProvider';
-import type { TimelineEntry } from '@/data/mock';
-import type { LogEvent, LogEventType } from '@/data/models';
+import { caregivers as seedCaregivers, type TimelineEntry } from '@/data/mock';
+import type { LogEvent } from '@/data/models';
 import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
+
+const SHOW_HISTORY_FILTERS = false;
+const SHOW_DEMO_RESET = false;
 
 /** The filter chips. "all" shows everything; the rest narrow to one kind. */
 type Filter = 'all' | 'feed' | 'sleep' | 'diaper';
@@ -29,68 +38,50 @@ const FILTERS: { key: Filter; label: string; accent: string }[] = [
   { key: 'diaper', label: 'Diaper', accent: colors.diaper },
 ];
 
-/** ---- small local time helpers (mirror mock.ts, kept local to this screen) ---- */
-function intervalMinutes(startAt: string, endAt: string): number {
-  return Math.max(0, Math.round((new Date(endAt).getTime() - new Date(startAt).getTime()) / 60000));
-}
-
-function minutesToLabel(mins: number): string {
-  if (mins >= 60) {
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
-    return `${h}h ${m.toString().padStart(2, '0')}m`;
-  }
-  return `${mins}m`;
-}
-
 /** UTC day key (matches how mock.ts renders clock times in UTC). */
 function dayKey(iso: string): string {
   return iso.slice(0, 10);
 }
 
-/** "Today" / "Yesterday" / "Jun 15" for a day key, relative to now. */
+/** "Tuesday, June 16" for a day key. */
+function calendarDayLabel(key: string): string {
+  const d = new Date(`${key}T00:00:00.000Z`);
+  return d.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+/** "Today · Tuesday, June 16" / "Yesterday · Monday, June 15" for a day key. */
 function dayHeading(key: string, now: number): string {
   const today = new Date(now).toISOString().slice(0, 10);
   const yesterday = new Date(now - 86_400_000).toISOString().slice(0, 10);
-  if (key === today) return 'Today';
-  if (key === yesterday) return 'Yesterday';
-  const d = new Date(`${key}T00:00:00.000Z`);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-}
-
-/** One calm line: "3 feeds · 2 diapers · 5h 20m sleep". */
-function buildRecap(events: LogEvent[]): string {
-  const count = (type: LogEventType) => events.filter((e) => e.type === type).length;
-  const feeds = count('feed');
-  const diapers = count('diaper');
-
-  const sleeps = events.filter((e) => e.type === 'sleep');
-  const completedMin = sleeps
-    .filter((e) => e.endAt)
-    .reduce((sum, e) => sum + intervalMinutes(e.startAt, e.endAt as string), 0);
-  const running = sleeps.some((e) => e.endAt === null);
-
-  const sleepPart =
-    completedMin > 0 ? `${minutesToLabel(completedMin)} sleep` : running ? 'sleep running' : 'no sleep yet';
-
-  return [`${feeds} ${feeds === 1 ? 'feed' : 'feeds'}`, `${diapers} ${diapers === 1 ? 'diaper' : 'diapers'}`, sleepPart].join(
-    ' · ',
-  );
+  const label = calendarDayLabel(key);
+  if (key === today) return `Today · ${label}`;
+  if (key === yesterday) return `Yesterday · ${label}`;
+  return label;
 }
 
 type Group = { key: string; heading: string; entries: TimelineEntry[] };
+type HistorySourceEvent = {
+  id: string;
+  kind: LogEvent['type'] | CareEvent['type'];
+  occurredAt: string;
+};
 
 /** Group display rows by day (newest day first), preserving newest-first order. */
-function groupByDay(events: LogEvent[], rows: Map<string, TimelineEntry>, now: number): Group[] {
+function groupByDay(events: HistorySourceEvent[], rows: Map<string, TimelineEntry>, now: number): Group[] {
   const ordered = [...events].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime(),
   );
 
   const groups: Group[] = [];
   for (const event of ordered) {
     const row = rows.get(event.id);
     if (!row) continue;
-    const key = dayKey(event.createdAt);
+    const key = dayKey(event.occurredAt);
     let group = groups.find((g) => g.key === key);
     if (!group) {
       group = { key, heading: dayHeading(key, now), entries: [] };
@@ -170,45 +161,64 @@ function EmptyState({ filter, surfaceMode }: { filter: Filter; surfaceMode: Surf
   );
 }
 
+function legacyHistorySource(event: LogEvent): HistorySourceEvent {
+  return { id: event.id, kind: event.type, occurredAt: event.createdAt };
+}
+
+function v2HistorySource(event: CareEvent): HistorySourceEvent {
+  return { id: event.id, kind: event.type, occurredAt: event.occurredAt };
+}
+
+function filterHistoryEvents(events: HistorySourceEvent[], filter: Filter): HistorySourceEvent[] {
+  return filter === 'all' ? events : events.filter((event) => event.kind === filter);
+}
+
 export default function LogScreen() {
   const { events, fullTimeline, resetLocalEvents } = useLocalEvents();
+  const logging = useLogging();
+  const { caregivers: remoteCaregivers, caregiver: ownCaregiver } = useAuth();
   const { mode } = useTheme();
   const palette = surfaces[mode];
   const [filter, setFilter] = useState<Filter>('all');
   // Stamp "now" once (for Today/Yesterday headings) so render stays pure.
   const [now] = useState(() => Date.now());
+  const loggingV2 = isLoggingV2Enabled();
+  const v2Caregivers = useMemo(
+    () => (remoteCaregivers.length > 0 ? remoteCaregivers : ownCaregiver ? [ownCaregiver] : seedCaregivers),
+    [remoteCaregivers, ownCaregiver],
+  );
 
-  const recap = useMemo(() => buildRecap(events), [events]);
+  const v2Timeline = useMemo(
+    () => buildV2HistoryTimeline(logging.todayEvents, v2Caregivers, now),
+    [logging.todayEvents, v2Caregivers, now],
+  );
 
   const groups = useMemo(() => {
-    const rows = new Map(fullTimeline.map((entry) => [entry.id, entry]));
-    const visible = filter === 'all' ? events : events.filter((e) => e.type === filter);
-    return groupByDay(visible, rows, now);
-  }, [events, fullTimeline, filter, now]);
+    const timeline = loggingV2 ? v2Timeline : fullTimeline;
+    const sourceEvents = loggingV2 ? logging.todayEvents.map(v2HistorySource) : events.map(legacyHistorySource);
+    const rows = new Map(timeline.map((entry) => [entry.id, entry]));
+    return groupByDay(filterHistoryEvents(sourceEvents, filter), rows, now);
+  }, [events, fullTimeline, filter, logging.todayEvents, loggingV2, now, v2Timeline]);
 
   return (
     <Screen surfaceMode={mode}>
-      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 10, letterSpacing: 1.4, color: palette.inkFaint }}>
-        HISTORY
-      </Text>
-      <Text style={{ fontFamily: fonts.display, fontSize: 30, color: palette.ink, marginTop: 6 }}>
-        Night log
-      </Text>
-      <Text style={{ fontFamily: fonts.body, fontSize: 13, color: palette.inkSoft, marginTop: 4 }}>
-        {recap}
+      <Text style={{ fontFamily: fonts.display, fontSize: 30, color: palette.ink }}>
+        Timeline
       </Text>
 
-      <View style={{ flexDirection: 'row', gap: 8, marginTop: 18 }}>
-        {FILTERS.map((f) => (
-          <FilterChip
-            key={f.key}
-            filter={f}
-            active={filter === f.key}
-            surfaceMode={mode}
-            onPress={() => setFilter(f.key)}
-          />
-        ))}
-      </View>
+      {SHOW_HISTORY_FILTERS ? (
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 18 }}>
+          {FILTERS.map((f) => (
+            <FilterChip
+              key={f.key}
+              filter={f}
+              active={filter === f.key}
+              surfaceMode={mode}
+              onPress={() => setFilter(f.key)}
+            />
+          ))}
+        </View>
+      ) : null}
 
       {groups.length > 0 ? (
         groups.map((group) => (
@@ -255,11 +265,11 @@ export default function LogScreen() {
           QA or a demo. Gated by __DEV__ so it is stripped from production bundles.
           resetLocalEvents() clears AsyncStorage, restores the seed, and dismisses
           any active toast. Prototype-only — see docs/demo-readiness.md. */}
-      {__DEV__ && (
+      {__DEV__ && SHOW_DEMO_RESET && (
         <Pressable
           onPress={resetLocalEvents}
           accessibilityRole="button"
-          accessibilityLabel="Reset demo night"
+          accessibilityLabel="Reset demo data"
           hitSlop={8}
           style={({ pressed }) => ({
             marginTop: 28,
@@ -276,7 +286,7 @@ export default function LogScreen() {
               letterSpacing: 0.3,
               color: palette.inkFaint,
             }}>
-            Reset demo night
+            Reset demo data
           </Text>
         </Pressable>
       )}

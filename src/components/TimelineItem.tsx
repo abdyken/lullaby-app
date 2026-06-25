@@ -1,7 +1,7 @@
 /**
  * TimelineItem — one row of the tonight timeline (`.lb-tl-item`): a time, a
  * colored rounded dot with a kind icon, the event label, and a small caregiver
- * chip. A subtle vertical connector threads the dots between rows.
+ * initial badge. A subtle vertical connector threads the dots between rows.
  */
 import { Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
@@ -129,31 +129,24 @@ export function TimelineItem({ entry, isLast, surfaceMode = 'day' }: Props) {
               {entry.detail}
             </Text>
           ) : null}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
             {entry.caregiverName && entry.caregiverColor ? (
-              <>
-                <View
-                  style={{
-                    width: 17,
-                    height: 17,
-                    borderRadius: 9,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    backgroundColor: entry.caregiverColor,
-                  }}>
-                  <Text style={{ fontFamily: fonts.bodyBold, fontSize: 8.5, color: colors.white }}>
-                    {initial}
-                  </Text>
-                </View>
-                <Text style={{ fontFamily: fonts.body, fontSize: 11.5, color: palette.inkSoft }}>
-                  {entry.caregiverName}
+              <View
+                accessible
+                accessibilityLabel={`Logged by ${entry.caregiverName}`}
+                style={{
+                  width: 17,
+                  height: 17,
+                  borderRadius: 9,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: entry.caregiverColor,
+                }}>
+                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 8.5, color: colors.white }}>
+                  {initial}
                 </Text>
-              </>
-            ) : (
-              <Text style={{ fontFamily: fonts.body, fontSize: 11.5, color: palette.inkSoft }}>
-                On the clock
-              </Text>
-            )}
+              </View>
+            ) : null}
           </View>
         </View>
       </View>
