@@ -38,6 +38,17 @@ import { buildSeedEvents, caregivers as seedCaregivers, getTonightTimeline } fro
 import type { Caregiver, LogEvent, LogEventType } from '../src/data/models';
 import { resolveSurfaceMode } from '../src/theme';
 import { parsePersistedState, serializeState } from '../src/data/persistedState';
+import {
+  ONBOARDING_COMPLETE_KEY,
+  isForceOnboardingEnabled,
+  resolveOnboardingGateState,
+} from '../src/components/onboarding/onboardingStorage';
+import {
+  ONBOARDING_PANELS,
+  getNextOnboardingStep,
+  getOnboardingCtaLabel,
+  getOnboardingIntroDuration,
+} from '../src/components/onboarding/onboardingContent';
 // Logging v2 foundation (plan Phase 1.1) — new model lives beside the legacy one.
 import { createManualClock, systemClock } from '../src/features/logging/timer/clock';
 import { newClientEventId, newUuid } from '../src/features/logging/domain/ids';
@@ -266,6 +277,49 @@ check('G2. invalid stored data falls back to null (no crash)', () => {
 check('G3. an empty event list with a known orbView is valid', () => {
   const restored = parsePersistedState('{"events":[],"orbView":"calm"}');
   assert.ok(restored && restored.events.length === 0 && restored.orbView === 'calm');
+});
+
+// G4-G6. First-run onboarding gate selection (pure resolver, no RN render needed)
+check('G4. onboarding not completed selects OnboardingScreen', () => {
+  assert.equal(ONBOARDING_COMPLETE_KEY, 'lullaby.onboarding.v1.complete');
+  assert.equal(resolveOnboardingGateState(false, { rawFlag: 'false', isDev: true }), 'needed');
+});
+
+check('G5. onboarding completed continues the normal app flow', () => {
+  assert.equal(resolveOnboardingGateState(true, { rawFlag: 'false', isDev: true }), 'complete');
+});
+
+check('G6. force onboarding selects OnboardingScreen even when completed', () => {
+  assert.equal(isForceOnboardingEnabled({ rawFlag: 'true', isDev: true }), true);
+  assert.equal(resolveOnboardingGateState(true, { rawFlag: 'true', isDev: true }), 'needed');
+  assert.equal(resolveOnboardingGateState(true, { rawFlag: 'true', isDev: false }), 'complete');
+});
+
+check('G7. onboarding stays to three calm panels with final setup CTA', () => {
+  assert.equal(ONBOARDING_PANELS.length, 3);
+  assert.deepEqual(
+    ONBOARDING_PANELS.map((panel) => panel.eyebrow),
+    ['TRACK THE NIGHT', 'WAKE UP CLEAR', 'CALM REASSURANCE'],
+  );
+  assert.equal(getOnboardingCtaLabel(0), 'Next');
+  assert.equal(getOnboardingCtaLabel(2), 'Set up baby');
+  assert.equal(getOnboardingCtaLabel(2, true), 'Setting up...');
+});
+
+check('G8. pressing through onboarding reaches the setup/app handoff', () => {
+  let step = 0;
+  step = getNextOnboardingStep(step) as number;
+  assert.equal(step, 1);
+  step = getNextOnboardingStep(step) as number;
+  assert.equal(step, 2);
+  assert.equal(getNextOnboardingStep(step), 'complete');
+});
+
+check('G9. reduce-motion onboarding duration stays short and valid', () => {
+  const fullMotion = getOnboardingIntroDuration(false);
+  const reducedMotion = getOnboardingIntroDuration(true);
+  assert.ok(fullMotion >= 800 && fullMotion <= 1_200);
+  assert.ok(reducedMotion > 0 && reducedMotion < fullMotion);
 });
 
 // H. Note events

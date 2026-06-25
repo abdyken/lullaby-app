@@ -4,6 +4,7 @@ import {
   AccessibilityInfo,
   ActivityIndicator,
   Animated,
+  Easing,
   Pressable,
   ScrollView,
   Text,
@@ -17,32 +18,27 @@ import Svg, { Circle, Path } from 'react-native-svg';
 
 import { colors, fonts, radii, shadows, sky } from '@/theme';
 
-import { ONBOARDING_PANELS, type OnboardingPanel, type OnboardingVisual } from './onboardingContent';
+import {
+  ONBOARDING_PANELS,
+  getNextOnboardingStep,
+  getOnboardingCtaLabel,
+  getOnboardingIntroDuration,
+  isFinalOnboardingPanel,
+  type OnboardingPanel,
+  type OnboardingVisual,
+} from './onboardingContent';
 
 const logoGlow = require('../../../assets/images/logo-glow.png');
 
-const INTRO_MS = 1550;
-const INTRO_MS_REDUCED = 450;
 const BUTTON_HEIGHT = 54;
+const PANEL_ENTER_MS = 360;
+const PANEL_STAGGER_MS = 72;
+const CONTROLS_ENTER_MS = 260;
 const FILL = { position: 'absolute' as const, top: 0, right: 0, bottom: 0, left: 0 };
 
 type Props = {
   onComplete: () => Promise<void> | void;
 };
-
-type QuickTile = {
-  label: string;
-  color: string;
-  tint: string;
-  kind: 'feed' | 'sleep' | 'diaper' | 'pump';
-};
-
-const QUICK_TILES: QuickTile[] = [
-  { label: 'Feed', color: colors.feed, tint: colors.feedTint, kind: 'feed' },
-  { label: 'Sleep', color: colors.sleep, tint: colors.sleepTint, kind: 'sleep' },
-  { label: 'Diaper', color: colors.diaper, tint: colors.diaperTint, kind: 'diaper' },
-  { label: 'Pump', color: colors.pump, tint: colors.pumpTint, kind: 'pump' },
-];
 
 function useReduceMotion() {
   const [reduceMotion, setReduceMotion] = useState(false);
@@ -98,7 +94,7 @@ function OnboardingIntro({ onDone, reduceMotion }: { onDone: () => void; reduceM
         );
     loop?.start();
 
-    const timer = setTimeout(onDone, reduceMotion ? INTRO_MS_REDUCED : INTRO_MS);
+    const timer = setTimeout(onDone, getOnboardingIntroDuration(reduceMotion));
 
     return () => {
       entrance.stop();
@@ -148,60 +144,6 @@ function OnboardingIntro({ onDone, reduceMotion }: { onDone: () => void; reduceM
         </Text>
       </Animated.View>
     </View>
-  );
-}
-
-function MiniIcon({ kind, color }: { kind: QuickTile['kind']; color: string }) {
-  if (kind === 'feed') {
-    return (
-      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-        <Path
-          d="M9 2h6M10 2v3.5a4 4 0 0 0-1.2 2.8L8 19a3 3 0 0 0 3 3h2a3 3 0 0 0 3-3l-.8-10.7A4 4 0 0 0 14 5.5V2"
-          stroke={color}
-          strokeWidth={1.9}
-          strokeLinejoin="round"
-        />
-        <Path d="M8.4 12h7.2" stroke={color} strokeWidth={1.9} />
-      </Svg>
-    );
-  }
-
-  if (kind === 'sleep') {
-    return (
-      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-        <Path
-          d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"
-          stroke={color}
-          strokeWidth={1.9}
-          strokeLinejoin="round"
-        />
-      </Svg>
-    );
-  }
-
-  if (kind === 'diaper') {
-    return (
-      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-        <Path
-          d="M3 7h18l-1.5 4.5A8 8 0 0 1 12 17a8 8 0 0 1-7.5-5.5L3 7Z"
-          stroke={color}
-          strokeWidth={1.9}
-          strokeLinejoin="round"
-        />
-        <Path d="M9 11c1 1.2 5 1.2 6 0" stroke={color} strokeWidth={1.9} strokeLinecap="round" />
-      </Svg>
-    );
-  }
-
-  return (
-    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M7 21h10M8 21V11h8v10M6 11h12M9 11V7a3 3 0 0 1 6 0v4"
-        stroke={color}
-        strokeWidth={1.9}
-        strokeLinejoin="round"
-      />
-    </Svg>
   );
 }
 
@@ -293,51 +235,11 @@ function NightVisual() {
           backgroundColor: 'rgba(255,255,255,0.18)',
           padding: 12,
         }}>
-        <Text style={{ fontFamily: fonts.bodyBold, color: colors.white, fontSize: 12 }}>Now · Sleep running</Text>
+        <Text style={{ fontFamily: fonts.bodyBold, color: colors.white, fontSize: 12 }}>Now · Sleep in progress</Text>
         <Text style={{ fontFamily: fonts.body, color: 'rgba(255,255,255,0.72)', fontSize: 11, marginTop: 2 }}>
-          3:10 · Feed saved
+          3:10 · Nursing · 11 min · L
         </Text>
       </View>
-    </View>
-  );
-}
-
-function QuickLogVisual() {
-  return (
-    <View style={{ height: 246, justifyContent: 'center', gap: 10 }}>
-      {[0, 2].map((start) => (
-        <View key={start} style={{ flexDirection: 'row', gap: 10 }}>
-          {QUICK_TILES.slice(start, start + 2).map((tile) => (
-            <View
-              key={tile.kind}
-              style={{
-                flex: 1,
-                minHeight: 94,
-                borderRadius: radii.medium,
-                backgroundColor: colors.surface,
-                borderWidth: 1,
-                borderColor: 'rgba(60,40,30,0.1)',
-                padding: 13,
-                ...shadows.card,
-              }}>
-              <View
-                style={{
-                  width: 46,
-                  height: 46,
-                  borderRadius: 16,
-                  backgroundColor: tile.tint,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}>
-                <MiniIcon kind={tile.kind} color={tile.color} />
-              </View>
-              <Text style={{ fontFamily: fonts.displayMedium, fontSize: 16, color: tile.color, marginTop: 9 }}>
-                {tile.label}
-              </Text>
-            </View>
-          ))}
-        </View>
-      ))}
     </View>
   );
 }
@@ -355,14 +257,14 @@ function RecapVisual() {
           ...shadows.card,
         }}>
         <Text style={{ fontFamily: fonts.bodyBold, fontSize: 11, letterSpacing: 1.1, color: colors.sleep }}>
-          MORNING RECAP
+          MORNING CONTEXT
         </Text>
         <Text style={{ fontFamily: fonts.display, fontSize: 25, lineHeight: 31, color: colors.ink, marginTop: 6 }}>
-          You have the thread.
+          Less mental math.
         </Text>
         <View style={{ marginTop: 16, gap: 10 }}>
-          <RecapRow color={colors.feed} label="Last feed" value="4:12 AM" />
-          <RecapRow color={colors.diaper} label="Diapers" value="2 saved" />
+          <RecapRow color={colors.feed} label="Feeds" value="2 overnight" />
+          <RecapRow color={colors.diaper} label="Diaper" value="Wet · 3:30" />
           <RecapRow color={colors.sleep} label="Sleep" value="5h 20m total" />
         </View>
         <View
@@ -374,7 +276,74 @@ function RecapVisual() {
             paddingHorizontal: 12,
             paddingVertical: 7,
           }}>
-          <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12, color: colors.sleep }}>Reassure is close by</Text>
+          <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12, color: colors.sleep }}>Ready for the next shift</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function ReassureVisual() {
+  return (
+    <View style={{ height: 246, justifyContent: 'center' }}>
+      <View
+        style={{
+          borderRadius: radii.large,
+          backgroundColor: colors.surface,
+          padding: 18,
+          borderWidth: 1,
+          borderColor: colors.line,
+          ...shadows.card,
+        }}>
+        <View
+          style={{
+            alignSelf: 'flex-start',
+            borderRadius: radii.pill,
+            backgroundColor: colors.sleepTint,
+            paddingHorizontal: 12,
+            paddingVertical: 7,
+          }}>
+          <Text style={{ fontFamily: fonts.bodyBold, fontSize: 11, letterSpacing: 1.05, color: colors.sleep }}>
+            REASSURE
+          </Text>
+        </View>
+
+        <View style={{ marginTop: 16, gap: 10 }}>
+          <View
+            style={{
+              alignSelf: 'flex-start',
+              maxWidth: '82%',
+              borderRadius: 18,
+              backgroundColor: colors.surfaceSoft,
+              paddingHorizontal: 13,
+              paddingVertical: 11,
+            }}>
+            <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, lineHeight: 18, color: colors.ink }}>
+              Is this much fussing normal?
+            </Text>
+          </View>
+          <View
+            style={{
+              alignSelf: 'flex-end',
+              maxWidth: '88%',
+              borderRadius: 20,
+              backgroundColor: colors.feedTint,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+              borderWidth: 1,
+              borderColor: 'rgba(255,122,61,0.16)',
+            }}>
+            <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, lineHeight: 19, color: colors.ink }}>
+              Try a simple check: feed, diaper, temperature, then pause.
+            </Text>
+          </View>
+        </View>
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16 }}>
+          <CircleDot color={colors.sleep} />
+          <Text style={{ flex: 1, fontFamily: fonts.body, fontSize: 12.5, lineHeight: 18, color: colors.inkSoft }}>
+            Gentle guidance, clear limits.
+          </Text>
         </View>
       </View>
     </View>
@@ -402,68 +371,160 @@ function CircleDot({ color }: { color: string }) {
   );
 }
 
+function usePanelEntry(isActive: boolean, reduceMotion: boolean) {
+  const [visual] = useState(() => new Animated.Value(isActive ? 1 : 0));
+  const [eyebrow] = useState(() => new Animated.Value(isActive ? 1 : 0));
+  const [title] = useState(() => new Animated.Value(isActive ? 1 : 0));
+  const [body] = useState(() => new Animated.Value(isActive ? 1 : 0));
+
+  useEffect(() => {
+    const values = [visual, eyebrow, title, body];
+    values.forEach((value) => value.stopAnimation());
+
+    if (!isActive) {
+      values.forEach((value) => value.setValue(0));
+      return;
+    }
+
+    if (reduceMotion) {
+      values.forEach((value) => value.setValue(1));
+      return;
+    }
+
+    values.forEach((value) => value.setValue(0));
+    Animated.stagger(
+      PANEL_STAGGER_MS,
+      values.map((value) =>
+        Animated.timing(value, {
+          toValue: 1,
+          duration: PANEL_ENTER_MS,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ),
+    ).start();
+  }, [body, eyebrow, isActive, reduceMotion, title, visual]);
+
+  return { visual, eyebrow, title, body };
+}
+
+function entryStyle(value: Animated.Value, reduceMotion: boolean, translateY = 12, scaleFrom = 1) {
+  return {
+    opacity: value,
+    transform: [
+      {
+        translateY: reduceMotion
+          ? 0
+          : value.interpolate({
+              inputRange: [0, 1],
+              outputRange: [translateY, 0],
+            }),
+      },
+      {
+        scale: reduceMotion
+          ? 1
+          : value.interpolate({
+              inputRange: [0, 1],
+              outputRange: [scaleFrom, 1],
+            }),
+      },
+    ],
+  };
+}
+
 function PanelVisual({ visual }: { visual: OnboardingVisual }) {
   if (visual === 'night') return <NightVisual />;
-  if (visual === 'quick-log') return <QuickLogVisual />;
+  if (visual === 'reassure') return <ReassureVisual />;
   return <RecapVisual />;
 }
 
-function OnboardingPanelView({ panel, width }: { panel: OnboardingPanel; width: number }) {
+function OnboardingPanelView({
+  panel,
+  width,
+  isActive,
+  reduceMotion,
+}: {
+  panel: OnboardingPanel;
+  width: number;
+  isActive: boolean;
+  reduceMotion: boolean;
+}) {
+  const entry = usePanelEntry(isActive, reduceMotion);
+
   return (
     <View style={{ width, paddingHorizontal: 22, justifyContent: 'center' }}>
-      <PanelVisual visual={panel.visual} />
+      <Animated.View style={entryStyle(entry.visual, reduceMotion, 16, 0.985)}>
+        <PanelVisual visual={panel.visual} />
+      </Animated.View>
       <View style={{ marginTop: 26 }}>
-        <Text
+        <Animated.Text
           style={{
             fontFamily: fonts.bodyBold,
             fontSize: 11,
             letterSpacing: 1.3,
             textTransform: 'uppercase',
             color: colors.sleep,
+            ...entryStyle(entry.eyebrow, reduceMotion, 10),
           }}>
           {panel.eyebrow}
-        </Text>
-        <Text
+        </Animated.Text>
+        <Animated.Text
           style={{
             fontFamily: fonts.display,
             fontSize: 31,
             lineHeight: 37,
             color: colors.ink,
             marginTop: 7,
+            ...entryStyle(entry.title, reduceMotion, 12, 0.992),
           }}>
           {panel.title}
-        </Text>
-        <Text
+        </Animated.Text>
+        <Animated.Text
           style={{
             fontFamily: fonts.body,
             fontSize: 15,
             lineHeight: 22,
             color: colors.inkSoft,
             marginTop: 8,
+            ...entryStyle(entry.body, reduceMotion, 12),
           }}>
           {panel.body}
-        </Text>
+        </Animated.Text>
       </View>
     </View>
   );
 }
 
-function PageDots({ index }: { index: number }) {
+function PageDot({ active, reduceMotion }: { active: boolean; reduceMotion: boolean }) {
+  const [progress] = useState(() => new Animated.Value(active ? 1 : 0));
+
+  useEffect(() => {
+    progress.stopAnimation();
+    Animated.timing(progress, {
+      toValue: active ? 1 : 0,
+      duration: reduceMotion ? 1 : 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [active, progress, reduceMotion]);
+
+  const width = progress.interpolate({ inputRange: [0, 1], outputRange: [7, 22] });
+  const backgroundColor = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [colors.line, colors.sleep],
+  });
+
+  return <Animated.View style={{ width, height: 7, borderRadius: 4, backgroundColor }} />;
+}
+
+function PageDots({ index, reduceMotion }: { index: number; reduceMotion: boolean }) {
   return (
-    <View accessibilityLabel={`Onboarding page ${index + 1} of ${ONBOARDING_PANELS.length}`} style={{ flexDirection: 'row', gap: 7 }}>
+    <View
+      accessibilityLabel={`Onboarding page ${index + 1} of ${ONBOARDING_PANELS.length}`}
+      style={{ flexDirection: 'row', gap: 7 }}>
       {ONBOARDING_PANELS.map((panel, dotIndex) => {
         const active = dotIndex === index;
-        return (
-          <View
-            key={panel.id}
-            style={{
-              width: active ? 22 : 7,
-              height: 7,
-              borderRadius: 4,
-              backgroundColor: active ? colors.sleep : colors.line,
-            }}
-          />
-        );
+        return <PageDot key={panel.id} active={active} reduceMotion={reduceMotion} />;
       })}
     </View>
   );
@@ -478,14 +539,17 @@ export function OnboardingScreen({ onComplete }: Props) {
   const [completing, setCompleting] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const [pageOpacity] = useState(() => new Animated.Value(0));
+  const [controlsEntry] = useState(() => new Animated.Value(0));
   const panelWidth = Math.max(width, 320);
-  const isLast = activeIndex === ONBOARDING_PANELS.length - 1;
+  const isLast = isFinalOnboardingPanel(activeIndex);
+  const ctaLabel = getOnboardingCtaLabel(activeIndex, completing);
 
   const revealPanels = useCallback(() => {
     setShowIntro(false);
     Animated.timing(pageOpacity, {
       toValue: 1,
-      duration: reduceMotion ? 120 : 260,
+      duration: reduceMotion ? 80 : 220,
+      easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
   }, [pageOpacity, reduceMotion]);
@@ -495,6 +559,25 @@ export function OnboardingScreen({ onComplete }: Props) {
       scrollRef.current?.scrollTo({ x: activeIndex * panelWidth, animated: false });
     }
   }, [activeIndex, panelWidth, showIntro]);
+
+  useEffect(() => {
+    if (showIntro) return;
+
+    controlsEntry.stopAnimation();
+    if (reduceMotion) {
+      controlsEntry.setValue(1);
+      return;
+    }
+
+    controlsEntry.setValue(0);
+    Animated.timing(controlsEntry, {
+      toValue: 1,
+      duration: CONTROLS_ENTER_MS,
+      delay: PANEL_STAGGER_MS * 4,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [activeIndex, controlsEntry, reduceMotion, showIntro]);
 
   const complete = useCallback(async () => {
     if (completing) return;
@@ -507,14 +590,14 @@ export function OnboardingScreen({ onComplete }: Props) {
   }, [completing, onComplete]);
 
   const next = useCallback(() => {
-    if (isLast) {
+    const step = getNextOnboardingStep(activeIndex);
+    if (step === 'complete') {
       void complete();
       return;
     }
-    const nextIndex = activeIndex + 1;
-    setActiveIndex(nextIndex);
-    scrollRef.current?.scrollTo({ x: nextIndex * panelWidth, animated: true });
-  }, [activeIndex, complete, isLast, panelWidth]);
+    setActiveIndex(step);
+    scrollRef.current?.scrollTo({ x: step * panelWidth, animated: !reduceMotion });
+  }, [activeIndex, complete, panelWidth, reduceMotion]);
 
   const handleScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -548,15 +631,17 @@ export function OnboardingScreen({ onComplete }: Props) {
           justifyContent: 'space-between',
         }}>
         <Text style={{ fontFamily: fonts.display, fontSize: 20, color: colors.ink }}>Lullaby</Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Skip onboarding"
-          onPress={() => void complete()}
-          hitSlop={8}
-          disabled={completing}
-          style={({ pressed }) => ({ opacity: pressed ? 0.55 : completing ? 0.45 : 1 })}>
-          <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, color: colors.sleep }}>Skip</Text>
-        </Pressable>
+        {!isLast ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Skip onboarding"
+            onPress={() => void complete()}
+            hitSlop={8}
+            disabled={completing}
+            style={({ pressed }) => ({ opacity: pressed ? 0.55 : completing ? 0.45 : 1 })}>
+            <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, color: colors.sleep }}>Skip</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <ScrollView
@@ -569,14 +654,35 @@ export function OnboardingScreen({ onComplete }: Props) {
         onScroll={handleScroll}
         style={{ flex: 1 }}
         contentContainerStyle={{ alignItems: 'center' }}>
-        {ONBOARDING_PANELS.map((panel) => (
-          <OnboardingPanelView key={panel.id} panel={panel} width={panelWidth} />
+        {ONBOARDING_PANELS.map((panel, panelIndex) => (
+          <OnboardingPanelView
+            key={panel.id}
+            panel={panel}
+            width={panelWidth}
+            isActive={panelIndex === activeIndex}
+            reduceMotion={reduceMotion}
+          />
         ))}
       </ScrollView>
 
-      <View style={{ paddingHorizontal: 22, gap: 16 }}>
+      <Animated.View
+        style={{
+          paddingHorizontal: 22,
+          gap: 16,
+          opacity: controlsEntry,
+          transform: [
+            {
+              translateY: reduceMotion
+                ? 0
+                : controlsEntry.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [10, 0],
+                  }),
+            },
+          ],
+        }}>
         <View style={{ alignItems: 'center' }}>
-          <PageDots index={activeIndex} />
+          <PageDots index={activeIndex} reduceMotion={reduceMotion} />
         </View>
         <Pressable
           accessibilityRole="button"
@@ -586,28 +692,27 @@ export function OnboardingScreen({ onComplete }: Props) {
           disabled={completing}
           style={({ pressed }) => ({
             borderRadius: radii.pill,
-            transform: [{ scale: pressed && !completing ? 0.98 : 1 }],
+            transform: [{ scale: pressed && !completing ? 0.985 : 1 }],
           })}>
-          <View
-            style={{
-              minHeight: BUTTON_HEIGHT,
-              borderRadius: radii.pill,
-              backgroundColor: colors.sleep,
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: completing ? 0.62 : 1,
-              ...shadows.card,
-            }}>
-            {completing ? (
-              <ActivityIndicator color={colors.white} />
-            ) : (
-              <Text style={{ fontFamily: fonts.bodyBold, fontSize: 15, color: colors.white }}>
-                {isLast ? 'Set up baby' : 'Next'}
-              </Text>
-            )}
-          </View>
+          {({ pressed }) => (
+            <View
+              style={{
+                minHeight: BUTTON_HEIGHT,
+                borderRadius: radii.pill,
+                backgroundColor: pressed && !completing ? colors.sleep2 : colors.sleep,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: completing ? 0.86 : 1,
+                ...shadows.card,
+              }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+                {completing ? <ActivityIndicator size="small" color={colors.white} /> : null}
+                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 15, color: colors.white }}>{ctaLabel}</Text>
+              </View>
+            </View>
+          )}
         </Pressable>
-      </View>
+      </Animated.View>
     </Animated.View>
   );
 }
