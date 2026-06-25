@@ -3,7 +3,6 @@ import { useCallback, useMemo, useState } from 'react';
 import { Text, useWindowDimensions, View } from 'react-native';
 
 import { Screen } from '@/components/Screen';
-import { ThemeIconButton } from '@/components/ThemeIconButton';
 import { InsightCard } from '@/features/insights/components/InsightCard';
 import { InsightStatCard } from '@/features/insights/components/InsightStatCard';
 import { InsightsSectionCard } from '@/features/insights/components/InsightsSectionCard';
@@ -88,7 +87,7 @@ function statForDataState(
 }
 
 export function InsightsScreen() {
-  const { mode, isTransitioning, toggleThemeFromPoint } = useTheme();
+  const { mode, isTransitioning } = useTheme();
   const { loadInsightsHistory } = useLogging();
   const { width, height } = useWindowDimensions();
   const isShortDesktop = width >= 700 && height <= 760;
@@ -130,11 +129,6 @@ export function InsightsScreen() {
     average: 'Diapers avg',
   });
 
-  const handleThemeToggle = (pageX?: number, pageY?: number) => {
-    if (isTransitioning) return;
-    void toggleThemeFromPoint(pageX, pageY);
-  };
-
   const renderBody = (bodyMode: SurfaceMode) => {
     const bodyPalette = surfaces[bodyMode];
     const bodyIntroBackground = bodyMode === 'night' ? 'rgba(255,122,61,0.12)' : colors.feedTint;
@@ -172,7 +166,6 @@ export function InsightsScreen() {
               Last 7 days
             </Text>
           </View>
-          <ThemeIconButton surfaceMode={bodyMode} onPress={handleThemeToggle} disabled={isTransitioning} />
         </View>
 
         {stateCopy.intro ? (
