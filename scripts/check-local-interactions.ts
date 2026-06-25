@@ -34,7 +34,7 @@ import {
   getOrbView,
   recapSummaryLine,
 } from '../src/data/currentState';
-import { buildSeedEvents, getTonightTimeline } from '../src/data/mock';
+import { buildSeedEvents, caregivers as seedCaregivers, getTonightTimeline } from '../src/data/mock';
 import type { Caregiver, LogEvent, LogEventType } from '../src/data/models';
 import { resolveSurfaceMode } from '../src/theme';
 import { parsePersistedState, serializeState } from '../src/data/persistedState';
@@ -120,6 +120,7 @@ import {
   formatLoggingToast,
   formatTimelineEvent,
 } from '../src/features/logging/state/timelineSelectors';
+import { buildV2HistoryTimeline } from '../src/features/logging/state/historyTimeline';
 import { buildInsightsViewModel } from '../src/features/insights/insightSelectors';
 import { getInsightsViewModel } from '../src/features/insights/getInsightsViewModel';
 import { loggingError } from '../src/features/logging/domain/errors';
@@ -477,10 +478,10 @@ check('M3. feed hero with no side (Bottle) reads "Bottle"', () => {
   assert.match(orb.description, /Bottle/);
 });
 
-check('M4. feed timeline with no side (Bottle) reads "bottle"', () => {
+check('M4. feed timeline with no side (Bottle) reads "Bottle"', () => {
   const s = addFeed(initTonightState([]), {}, NOW);
   const row = getTonightTimeline(s.events, NOW)[0];
-  assert.match(row.label, /Feed · bottle/);
+  assert.match(row.label, /Bottle/);
 });
 
 // N. Night recap (Phase 6) — calm, non-medical summary from local events
@@ -2553,6 +2554,24 @@ async function runAsyncChecks(): Promise<void> {
     assert.equal(view.title, 'Bottle');
     assert.equal(view.subtitle, '90 ml · formula');
     assert.equal(view.icon, 'feed');
+  });
+
+  await checkAsync('FF1b. History timeline reads refreshed v2 state immediately after a create', async () => {
+    const persistence = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(persistence, clock);
+    let state = await hydrateLoggingState(repo, feedScope, clock);
+
+    const saved = await saveDiaper({ repo, clock, actor }, { kind: 'wet' });
+    assert.ok(saved.ok);
+    if (!saved.ok) return;
+
+    state = await reconcileLoggingState(repo, feedScope, clock, state);
+    const rows = buildV2HistoryTimeline(state.todayEvents, seedCaregivers, clock.now());
+
+    assert.equal(rows[0]?.id, saved.event.id);
+    assert.equal(rows[0]?.label, 'Diaper · wet');
+    assert.equal(rows[0]?.caregiverName, 'Mom');
   });
 
   await checkAsync('FF2. §11.3 #1: Wet diaper in two taps → it shows on the card + timeline → Undo reverts both', async () => {
