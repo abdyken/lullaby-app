@@ -2,7 +2,7 @@
  * AuthGate — decides what the app shows based on the auth/provisioning status.
  *
  *   local-only         → first-run onboarding, then render the app
- *   ready              → render the app (its children: provider + tabs)
+ *   ready              → first-run onboarding, then render the app
  *   loading            → calm spinner
  *   signed-out         → first-run onboarding, then sign-in / sign-up
  *   needs-setup        → first-run onboarding, then baby setup
@@ -28,7 +28,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     case 'local-only':
       return <OnboardingGate>{children}</OnboardingGate>;
     case 'ready':
-      return <>{children}</>;
+      return <OnboardingGate>{children}</OnboardingGate>;
     case 'needs-setup':
       return (
         <OnboardingGate>

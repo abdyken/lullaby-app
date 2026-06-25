@@ -3,9 +3,14 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { AuthLoading } from '@/components/auth/AuthLoading';
 
 import { OnboardingScreen } from './OnboardingScreen';
-import { loadOnboardingComplete, markOnboardingComplete } from './onboardingStorage';
+import {
+  loadOnboardingComplete,
+  markOnboardingComplete,
+  resolveOnboardingGateState,
+  type ResolvedOnboardingGateState,
+} from './onboardingStorage';
 
-type OnboardingGateState = 'loading' | 'needed' | 'complete';
+type OnboardingGateState = 'loading' | ResolvedOnboardingGateState;
 
 type Props = {
   children: ReactNode;
@@ -19,7 +24,7 @@ export function OnboardingGate({ children }: Props) {
 
     loadOnboardingComplete()
       .then((complete) => {
-        if (active) setState(complete ? 'complete' : 'needed');
+        if (active) setState(resolveOnboardingGateState(complete));
       })
       .catch(() => {
         if (active) setState('needed');
