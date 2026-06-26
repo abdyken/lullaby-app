@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 
 import { AccountSheet } from '@/components/auth/AccountSheet';
+import { AuthLoading } from '@/components/auth/AuthLoading';
 import { BabyHeader } from '@/components/BabyHeader';
 import { HandoffCard } from '@/components/HandoffCard';
 import { LogSheet, type SheetOption } from '@/components/LogSheet';
@@ -255,6 +256,7 @@ export default function TonightScreen() {
   // same). When on, the Sleep Hero, the Sleep card, and the Sleep sheet all act on
   // the SAME v2 session — the single source of truth for Sleep (plan Phase 6.5).
   const v2View = useV2TodayView({ now: displayNow, caregivers });
+  const waitingForV2Hydration = loggingV2 && v2View === null;
   const v2 = loggingV2 ? v2View : null;
   const heroOrb = v2 ? v2.orb : orb;
   const heroActiveTile = v2 ? v2.activeTile : activeTile;
@@ -337,10 +339,10 @@ export default function TonightScreen() {
   return (
     <>
       <Screen surfaceMode={surfaceMode} scrollEnabled={!isTransitioning}>
-        {renderBody(surfaceMode)}
+        {waitingForV2Hydration ? <AuthLoading /> : renderBody(surfaceMode)}
       </Screen>
 
-      {sheet !== null && (
+      {!waitingForV2Hydration && sheet !== null && (
         <LogSheet
           key={sheet}
           {...SHEETS[sheet]}
@@ -349,15 +351,15 @@ export default function TonightScreen() {
         />
       )}
 
-      {feedV2Open && <FeedSheet onClose={() => setFeedV2Open(false)} />}
+      {!waitingForV2Hydration && feedV2Open && <FeedSheet onClose={() => setFeedV2Open(false)} />}
 
-      {sleepV2Open && <SleepSheet onClose={() => setSleepV2Open(false)} />}
+      {!waitingForV2Hydration && sleepV2Open && <SleepSheet onClose={() => setSleepV2Open(false)} />}
 
-      {diaperV2Open && <DiaperSheet onClose={() => setDiaperV2Open(false)} />}
+      {!waitingForV2Hydration && diaperV2Open && <DiaperSheet onClose={() => setDiaperV2Open(false)} />}
 
-      {pumpV2Open && <PumpSheet onClose={() => setPumpV2Open(false)} />}
+      {!waitingForV2Hydration && pumpV2Open && <PumpSheet onClose={() => setPumpV2Open(false)} />}
 
-      {accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} />}
+      {!waitingForV2Hydration && accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} />}
     </>
   );
 }

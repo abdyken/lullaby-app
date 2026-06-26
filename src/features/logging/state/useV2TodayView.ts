@@ -50,6 +50,10 @@ export interface V2TodayView {
   onPrimaryAction: () => void;
 }
 
+export function shouldRenderV2TodayView(input: { enabled: boolean; hydrated: boolean }): boolean {
+  return input.enabled && input.hydrated;
+}
+
 const ms = (iso: string): number => Date.parse(iso);
 
 /**
@@ -128,7 +132,7 @@ export function useV2TodayView(params: { now?: number; caregivers: Caregiver[] }
   const tickNow = Number.isFinite(tickStartMs) ? tickStartMs + tickElapsed : undefined;
 
   return useMemo<V2TodayView | null>(() => {
-    if (!logging.enabled) return null;
+    if (!shouldRenderV2TodayView(logging)) return null;
     const now = nowParam ?? tickNow ?? resolveNow(undefined);
     const { todayEvents, activeBreastFeed, activeSleep, activePump, pumpVolumeDraft } = logging;
 
