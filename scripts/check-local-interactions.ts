@@ -47,7 +47,9 @@ import {
   ONBOARDING_PANELS,
   getNextOnboardingStep,
   getOnboardingCtaLabel,
+  getOnboardingPrimaryActionState,
   getOnboardingIntroDuration,
+  shouldShowOnboardingSkip,
 } from '../src/components/onboarding/onboardingContent';
 // Logging v2 foundation (plan Phase 1.1) — new model lives beside the legacy one.
 import { createManualClock, systemClock } from '../src/features/logging/timer/clock';
@@ -299,9 +301,10 @@ check('G7. onboarding stays to three calm panels with final setup CTA', () => {
   assert.equal(ONBOARDING_PANELS.length, 3);
   assert.deepEqual(
     ONBOARDING_PANELS.map((panel) => panel.eyebrow),
-    ['TRACK THE NIGHT', 'WAKE UP CLEAR', 'CALM REASSURANCE'],
+    ['LOG THE NIGHT', 'WHAT HAPPENED', 'CALM NEXT STEP'],
   );
   assert.equal(getOnboardingCtaLabel(0), 'Next');
+  assert.equal(getOnboardingCtaLabel(0, true), 'Next');
   assert.equal(getOnboardingCtaLabel(2), 'Set up baby');
   assert.equal(getOnboardingCtaLabel(2, true), 'Setting up...');
 });
@@ -320,6 +323,22 @@ check('G9. reduce-motion onboarding duration stays short and valid', () => {
   const reducedMotion = getOnboardingIntroDuration(true);
   assert.ok(fullMotion >= 800 && fullMotion <= 1_200);
   assert.ok(reducedMotion > 0 && reducedMotion < fullMotion);
+});
+
+check('G10. Next never enters the completion loading state', () => {
+  assert.deepEqual(getOnboardingPrimaryActionState(0, false), { label: 'Next', loading: false });
+  assert.deepEqual(getOnboardingPrimaryActionState(1, true), { label: 'Next', loading: false });
+});
+
+check('G11. final CTA is the only primary action that can show setup loading', () => {
+  assert.deepEqual(getOnboardingPrimaryActionState(2, false), { label: 'Set up baby', loading: false });
+  assert.deepEqual(getOnboardingPrimaryActionState(2, true), { label: 'Setting up...', loading: true });
+});
+
+check('G12. Skip is hidden on the final onboarding screen', () => {
+  assert.equal(shouldShowOnboardingSkip(0), true);
+  assert.equal(shouldShowOnboardingSkip(1), true);
+  assert.equal(shouldShowOnboardingSkip(2), false);
 });
 
 // H. Note events
@@ -1510,6 +1529,27 @@ async function runAsyncChecks(): Promise<void> {
     // Simulate a full app restart: a brand-new repository over the SAME persisted store.
     const restarted = await hydrateLoggingState(createLoggingRepository(port, clock), scope, clock);
     assert.equal(restarted.activeSleep?.id, 'evt-s1'); // session survived the restart
+  });
+
+  await checkAsync('W6b. v2 Tonight waits for hydration before showing a persisted running sleep', async () => {
+    const pending = createInitialLoggingState();
+    assert.equal(pending.hydrated, false);
+    assert.equal(pending.activeSleep, null);
+
+    const port = createInMemoryLoggingPersistence();
+    const clock = createManualClock(NOW);
+    const repo = createLoggingRepository(port, clock);
+    await repo.createEvent(makeSleep('evt-handoff-sleep', 'cid-handoff-sleep', 'active'));
+    clock.advance(25 * 60_000);
+
+    const hydrated = await hydrateLoggingState(createLoggingRepository(port, clock), scope, clock);
+    assert.equal(hydrated.hydrated, true);
+    assert.equal(hydrated.activeSleep?.id, 'evt-handoff-sleep');
+    assert.equal(
+      buildV2TonightStatus({ todayEvents: hydrated.todayEvents, activeSleep: hydrated.activeSleep }, clock.now())
+        .find((item) => item.key === 'sleep')?.label,
+      'Sleeping',
+    );
   });
 
   await checkAsync('W7. reconcileLoggingState drops a session finished elsewhere and flags a backwards clock', async () => {

@@ -21,9 +21,10 @@ import { colors, fonts, radii, shadows, sky } from '@/theme';
 import {
   ONBOARDING_PANELS,
   getNextOnboardingStep,
-  getOnboardingCtaLabel,
+  getOnboardingPrimaryActionState,
   getOnboardingIntroDuration,
   isFinalOnboardingPanel,
+  shouldShowOnboardingSkip,
   type OnboardingPanel,
   type OnboardingVisual,
 } from './onboardingContent';
@@ -34,6 +35,7 @@ const BUTTON_HEIGHT = 54;
 const PANEL_ENTER_MS = 360;
 const PANEL_STAGGER_MS = 72;
 const CONTROLS_ENTER_MS = 260;
+const ADVANCE_SETTLE_FALLBACK_MS = 460;
 const FILL = { position: 'absolute' as const, top: 0, right: 0, bottom: 0, left: 0 };
 
 type Props = {
@@ -110,7 +112,7 @@ function OnboardingIntro({ onDone, reduceMotion }: { onDone: () => void; reduceM
 
   return (
     <View
-      accessibilityLabel="Lullaby. A calm night log for the half-asleep hours."
+      accessibilityLabel="Lullaby. A simple night log for feeds, sleep, and diapers."
       style={{
         flex: 1,
         backgroundColor: colors.cream,
@@ -140,7 +142,7 @@ function OnboardingIntro({ onDone, reduceMotion }: { onDone: () => void; reduceM
             marginTop: 6,
             maxWidth: 260,
           }}>
-          A calm night log for the half-asleep hours.
+          A simple night log for feeds, sleep, and diapers.
         </Text>
       </Animated.View>
     </View>
@@ -235,9 +237,9 @@ function NightVisual() {
           backgroundColor: 'rgba(255,255,255,0.18)',
           padding: 12,
         }}>
-        <Text style={{ fontFamily: fonts.bodyBold, color: colors.white, fontSize: 12 }}>Now · Sleep in progress</Text>
+        <Text style={{ fontFamily: fonts.bodyBold, color: colors.white, fontSize: 12 }}>Now · Baby asleep</Text>
         <Text style={{ fontFamily: fonts.body, color: 'rgba(255,255,255,0.72)', fontSize: 11, marginTop: 2 }}>
-          3:10 · Nursing · 11 min · L
+          3:10 · Feed · 11 min · L
         </Text>
       </View>
     </View>
@@ -257,10 +259,10 @@ function RecapVisual() {
           ...shadows.card,
         }}>
         <Text style={{ fontFamily: fonts.bodyBold, fontSize: 11, letterSpacing: 1.1, color: colors.sleep }}>
-          MORNING CONTEXT
+          WHAT HAPPENED
         </Text>
         <Text style={{ fontFamily: fonts.display, fontSize: 25, lineHeight: 31, color: colors.ink, marginTop: 6 }}>
-          Less mental math.
+          What happened last night
         </Text>
         <View style={{ marginTop: 16, gap: 10 }}>
           <RecapRow color={colors.feed} label="Feeds" value="2 overnight" />
@@ -276,7 +278,7 @@ function RecapVisual() {
             paddingHorizontal: 12,
             paddingVertical: 7,
           }}>
-          <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12, color: colors.sleep }}>Ready for the next shift</Text>
+          <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12, color: colors.sleep }}>Ready for the morning</Text>
         </View>
       </View>
     </View>
@@ -304,7 +306,7 @@ function ReassureVisual() {
             paddingVertical: 7,
           }}>
           <Text style={{ fontFamily: fonts.bodyBold, fontSize: 11, letterSpacing: 1.05, color: colors.sleep }}>
-            REASSURE
+            ASK
           </Text>
         </View>
 
@@ -319,7 +321,7 @@ function ReassureVisual() {
               paddingVertical: 11,
             }}>
             <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, lineHeight: 18, color: colors.ink }}>
-              Is this much fussing normal?
+              What should I try next?
             </Text>
           </View>
           <View
@@ -334,7 +336,7 @@ function ReassureVisual() {
               borderColor: 'rgba(255,122,61,0.16)',
             }}>
             <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, lineHeight: 19, color: colors.ink }}>
-              Try a simple check: feed, diaper, temperature, then pause.
+              Check feed, diaper, and temperature. Then pause.
             </Text>
           </View>
         </View>
@@ -342,7 +344,7 @@ function ReassureVisual() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16 }}>
           <CircleDot color={colors.sleep} />
           <Text style={{ flex: 1, fontFamily: fonts.body, fontSize: 12.5, lineHeight: 18, color: colors.inkSoft }}>
-            Gentle guidance, clear limits.
+            Calm next step, not a diagnosis.
           </Text>
         </View>
       </View>
@@ -371,18 +373,19 @@ function CircleDot({ color }: { color: string }) {
   );
 }
 
-function usePanelEntry(isActive: boolean, reduceMotion: boolean) {
-  const [visual] = useState(() => new Animated.Value(isActive ? 1 : 0));
-  const [eyebrow] = useState(() => new Animated.Value(isActive ? 1 : 0));
-  const [title] = useState(() => new Animated.Value(isActive ? 1 : 0));
-  const [body] = useState(() => new Animated.Value(isActive ? 1 : 0));
+function usePanelEntry(animateEntry: boolean, reduceMotion: boolean) {
+  const initialValue = animateEntry && !reduceMotion ? 0 : 1;
+  const [visual] = useState(() => new Animated.Value(initialValue));
+  const [eyebrow] = useState(() => new Animated.Value(initialValue));
+  const [title] = useState(() => new Animated.Value(initialValue));
+  const [body] = useState(() => new Animated.Value(initialValue));
 
   useEffect(() => {
     const values = [visual, eyebrow, title, body];
     values.forEach((value) => value.stopAnimation());
 
-    if (!isActive) {
-      values.forEach((value) => value.setValue(0));
+    if (!animateEntry) {
+      values.forEach((value) => value.setValue(1));
       return;
     }
 
@@ -403,7 +406,7 @@ function usePanelEntry(isActive: boolean, reduceMotion: boolean) {
         }),
       ),
     ).start();
-  }, [body, eyebrow, isActive, reduceMotion, title, visual]);
+  }, [animateEntry, body, eyebrow, reduceMotion, title, visual]);
 
   return { visual, eyebrow, title, body };
 }
@@ -441,15 +444,15 @@ function PanelVisual({ visual }: { visual: OnboardingVisual }) {
 function OnboardingPanelView({
   panel,
   width,
-  isActive,
+  animateEntry,
   reduceMotion,
 }: {
   panel: OnboardingPanel;
   width: number;
-  isActive: boolean;
+  animateEntry: boolean;
   reduceMotion: boolean;
 }) {
-  const entry = usePanelEntry(isActive, reduceMotion);
+  const entry = usePanelEntry(animateEntry, reduceMotion);
 
   return (
     <View style={{ width, paddingHorizontal: 22, justifyContent: 'center' }}>
@@ -536,13 +539,24 @@ export function OnboardingScreen({ onComplete }: Props) {
   const reduceMotion = useReduceMotion();
   const [showIntro, setShowIntro] = useState(true);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [advanceInFlight, setAdvanceInFlight] = useState(false);
   const [completing, setCompleting] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+  const pendingIndexRef = useRef<number | null>(null);
+  const settleFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pageOpacity] = useState(() => new Animated.Value(0));
   const [controlsEntry] = useState(() => new Animated.Value(0));
   const panelWidth = Math.max(width, 320);
   const isLast = isFinalOnboardingPanel(activeIndex);
-  const ctaLabel = getOnboardingCtaLabel(activeIndex, completing);
+  const primaryAction = getOnboardingPrimaryActionState(activeIndex, completing);
+  const showSkip = shouldShowOnboardingSkip(activeIndex);
+
+  const clearSettleFallback = useCallback(() => {
+    if (settleFallbackRef.current) {
+      clearTimeout(settleFallbackRef.current);
+      settleFallbackRef.current = null;
+    }
+  }, []);
 
   const revealPanels = useCallback(() => {
     setShowIntro(false);
@@ -554,11 +568,24 @@ export function OnboardingScreen({ onComplete }: Props) {
     }).start();
   }, [pageOpacity, reduceMotion]);
 
+  const settlePage = useCallback(
+    (index: number) => {
+      if (index < 0 || index >= ONBOARDING_PANELS.length) return;
+      clearSettleFallback();
+      pendingIndexRef.current = null;
+      setAdvanceInFlight(false);
+      setActiveIndex(index);
+    },
+    [clearSettleFallback],
+  );
+
   useEffect(() => {
     if (!showIntro) {
       scrollRef.current?.scrollTo({ x: activeIndex * panelWidth, animated: false });
     }
   }, [activeIndex, panelWidth, showIntro]);
+
+  useEffect(() => clearSettleFallback, [clearSettleFallback]);
 
   useEffect(() => {
     if (showIntro) return;
@@ -577,7 +604,7 @@ export function OnboardingScreen({ onComplete }: Props) {
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
-  }, [activeIndex, controlsEntry, reduceMotion, showIntro]);
+  }, [controlsEntry, reduceMotion, showIntro]);
 
   const complete = useCallback(async () => {
     if (completing) return;
@@ -590,23 +617,35 @@ export function OnboardingScreen({ onComplete }: Props) {
   }, [completing, onComplete]);
 
   const next = useCallback(() => {
+    if (advanceInFlight) return;
     const step = getNextOnboardingStep(activeIndex);
     if (step === 'complete') {
       void complete();
       return;
     }
-    setActiveIndex(step);
-    scrollRef.current?.scrollTo({ x: step * panelWidth, animated: !reduceMotion });
-  }, [activeIndex, complete, panelWidth, reduceMotion]);
 
-  const handleScroll = useCallback(
+    if (reduceMotion) {
+      clearSettleFallback();
+      pendingIndexRef.current = null;
+      setAdvanceInFlight(false);
+      setActiveIndex(step);
+      scrollRef.current?.scrollTo({ x: step * panelWidth, animated: false });
+      return;
+    }
+
+    pendingIndexRef.current = step;
+    setAdvanceInFlight(true);
+    scrollRef.current?.scrollTo({ x: step * panelWidth, animated: !reduceMotion });
+    clearSettleFallback();
+    settleFallbackRef.current = setTimeout(() => settlePage(step), ADVANCE_SETTLE_FALLBACK_MS);
+  }, [activeIndex, advanceInFlight, clearSettleFallback, complete, panelWidth, reduceMotion, settlePage]);
+
+  const handleScrollSettled = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const nextIndex = Math.round(event.nativeEvent.contentOffset.x / panelWidth);
-      if (nextIndex >= 0 && nextIndex < ONBOARDING_PANELS.length && nextIndex !== activeIndex) {
-        setActiveIndex(nextIndex);
-      }
+      settlePage(nextIndex);
     },
-    [activeIndex, panelWidth],
+    [panelWidth, settlePage],
   );
 
   if (showIntro) {
@@ -631,7 +670,7 @@ export function OnboardingScreen({ onComplete }: Props) {
           justifyContent: 'space-between',
         }}>
         <Text style={{ fontFamily: fonts.display, fontSize: 20, color: colors.ink }}>Lullaby</Text>
-        {!isLast ? (
+        {showSkip ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Skip onboarding"
@@ -650,8 +689,7 @@ export function OnboardingScreen({ onComplete }: Props) {
         pagingEnabled
         bounces={false}
         showsHorizontalScrollIndicator={false}
-        scrollEventThrottle={16}
-        onScroll={handleScroll}
+        onMomentumScrollEnd={handleScrollSettled}
         style={{ flex: 1 }}
         contentContainerStyle={{ alignItems: 'center' }}>
         {ONBOARDING_PANELS.map((panel, panelIndex) => (
@@ -659,7 +697,7 @@ export function OnboardingScreen({ onComplete }: Props) {
             key={panel.id}
             panel={panel}
             width={panelWidth}
-            isActive={panelIndex === activeIndex}
+            animateEntry={panelIndex === 0}
             reduceMotion={reduceMotion}
           />
         ))}
@@ -687,27 +725,29 @@ export function OnboardingScreen({ onComplete }: Props) {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={isLast ? 'Set up baby' : 'Next onboarding screen'}
-          accessibilityState={{ busy: completing, disabled: completing }}
+          accessibilityState={{ busy: primaryAction.loading, disabled: completing || advanceInFlight }}
           onPress={next}
-          disabled={completing}
+          disabled={completing || advanceInFlight}
           style={({ pressed }) => ({
             borderRadius: radii.pill,
-            transform: [{ scale: pressed && !completing ? 0.985 : 1 }],
+            transform: [{ scale: pressed && !completing && !advanceInFlight ? 0.985 : 1 }],
           })}>
           {({ pressed }) => (
             <View
               style={{
                 minHeight: BUTTON_HEIGHT,
                 borderRadius: radii.pill,
-                backgroundColor: pressed && !completing ? colors.sleep2 : colors.sleep,
+                backgroundColor: pressed && !completing && !advanceInFlight ? colors.sleep2 : colors.sleep,
                 alignItems: 'center',
                 justifyContent: 'center',
-                opacity: completing ? 0.86 : 1,
+                opacity: primaryAction.loading ? 0.86 : 1,
                 ...shadows.card,
               }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
-                {completing ? <ActivityIndicator size="small" color={colors.white} /> : null}
-                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 15, color: colors.white }}>{ctaLabel}</Text>
+                {primaryAction.loading ? <ActivityIndicator size="small" color={colors.white} /> : null}
+                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 15, color: colors.white }}>
+                  {primaryAction.label}
+                </Text>
               </View>
             </View>
           )}
