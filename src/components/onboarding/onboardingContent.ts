@@ -17,23 +17,23 @@ export const ONBOARDING_COMPLETING_LABEL = 'Setting up...';
 export const ONBOARDING_PANELS: OnboardingPanel[] = [
   {
     id: 'track',
-    eyebrow: 'TRACK THE NIGHT',
-    title: 'Keep the whole night in one soft thread.',
-    body: 'Feeds, diapers, sleep, and notes stay together when 3am feels blurry.',
+    eyebrow: 'LOG THE NIGHT',
+    title: 'Log feeds, sleep, and diapers.',
+    body: 'Feeds, sleep, diapers, and notes stay together at 3am.',
     visual: 'night',
   },
   {
     id: 'clear',
-    eyebrow: 'WAKE UP CLEAR',
-    title: 'Morning starts with context, not guessing.',
-    body: 'See what happened overnight and pick up the day with less mental math.',
+    eyebrow: 'WHAT HAPPENED',
+    title: 'See the night in the morning.',
+    body: 'Feeds, diapers, sleep, and notes are all in one place.',
     visual: 'recap',
   },
   {
     id: 'reassure',
-    eyebrow: 'CALM REASSURANCE',
-    title: 'A calmer next step when worry loops.',
-    body: 'Get gentle, bounded guidance for common newborn questions. Not diagnosis.',
+    eyebrow: 'CALM NEXT STEP',
+    title: 'Ask a simple baby-care question.',
+    body: 'Get a calm next step, not a diagnosis. If it feels urgent, call your doctor.',
     visual: 'reassure',
   },
 ];
@@ -49,8 +49,20 @@ export function isFinalOnboardingPanel(index: number): boolean {
 }
 
 export function getOnboardingCtaLabel(index: number, completing = false): string {
-  if (completing) return ONBOARDING_COMPLETING_LABEL;
+  if (completing && isFinalOnboardingPanel(index)) return ONBOARDING_COMPLETING_LABEL;
   return isFinalOnboardingPanel(index) ? ONBOARDING_FINAL_LABEL : ONBOARDING_NEXT_LABEL;
+}
+
+export function getOnboardingPrimaryActionState(
+  index: number,
+  completing = false,
+): { label: string; loading: boolean } {
+  const loading = completing && isFinalOnboardingPanel(index);
+  return { label: getOnboardingCtaLabel(index, loading), loading };
+}
+
+export function shouldShowOnboardingSkip(index: number): boolean {
+  return !isFinalOnboardingPanel(index);
 }
 
 export function getNextOnboardingStep(index: number): OnboardingNextStep {
