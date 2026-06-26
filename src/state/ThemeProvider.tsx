@@ -62,6 +62,16 @@ function devLogThemeReveal(message: string, details?: Record<string, unknown>): 
   }
 }
 
+function devWarnThemeReveal(message: string, error?: unknown): void {
+  if (__DEV__) {
+    if (error) {
+      console.warn(`[theme-reveal] ${message}`, error);
+    } else {
+      console.warn(`[theme-reveal] ${message}`);
+    }
+  }
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [mode, setModeState] = useState<SurfaceMode>(DEFAULT_MODE);
   const [hydrated, setHydrated] = useState(false);
@@ -130,8 +140,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           await prepareCircularReveal(pageX, pageY);
           nativeRevealPrepared = true;
         }
-      } catch {
+      } catch (error) {
         nativeRevealPrepared = false;
+        devWarnThemeReveal('prepare failed; falling back to instant theme switch', error);
         await cancelCircularReveal().catch(() => {
           /* no-op: prepare fallback may fail before a native overlay exists */
         });
@@ -149,7 +160,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         } else {
           await nextFrame();
         }
-      } catch {
+      } catch (error) {
+        devWarnThemeReveal('start failed; cleaning up circular reveal', error);
         await cancelCircularReveal().catch(() => {
           /* no-op: transition cleanup is best effort */
         });
