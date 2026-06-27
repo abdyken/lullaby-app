@@ -34,11 +34,7 @@ import { buildQuickLogMeta, type PreviewState } from '@/data/currentState';
 import { LOCAL_CURSOR_CONTEXT } from '@/data/handoffCursor';
 import type { Baby } from '@/data/models';
 import { hapticSave } from '@/lib/haptics';
-import {
-  baby as seedBaby,
-  babyAgeInWeeks as seedBabyAgeInWeeks,
-  caregivers as seedCaregivers,
-} from '@/data/mock';
+import { baby as seedBaby } from '@/data/mock';
 import { useAuth } from '@/state/AuthProvider';
 import { useLocalEvents } from '@/state/LocalEventProvider';
 import { useTheme } from '@/state/ThemeProvider';
@@ -155,22 +151,18 @@ export default function TonightScreen() {
     handlePrimaryAction,
     resetNonce,
   } = useLocalEvents();
-  const { baby: remoteBaby, caregivers: remoteCaregivers, caregiver: ownCaregiver } = useAuth();
+  const { baby: activeBaby, caregivers: activeCaregivers, caregiver: ownCaregiver } = useAuth();
 
-  // In Supabase mode, show the real linked baby + caregivers; fall back softly if
-  // a read is briefly missing. Local-only keeps the seeded Mia / Mom+Dad exactly.
+  // Identity comes from the active baby/caregiver the AuthProvider owns: the
+  // linked baby + caregivers in Supabase mode, the seeded Mia / Mom+Dad in
+  // local-only mode. A soft FALLBACK_BABY covers a brief missing Supabase read.
   const isSupabase = syncMode === 'supabase';
-  const baby = isSupabase ? (remoteBaby ?? FALLBACK_BABY) : seedBaby;
-  const caregivers = isSupabase
-    ? remoteCaregivers.length > 0
-      ? remoteCaregivers
-      : ownCaregiver
-        ? [ownCaregiver]
-        : []
-    : seedCaregivers;
-  const ageWeeks = isSupabase
-    ? ageInWeeks(baby.birthDate)
-    : seedBabyAgeInWeeks(new Date('2026-06-16'));
+  const baby = activeBaby ?? FALLBACK_BABY;
+  const caregivers =
+    activeCaregivers.length > 0 ? activeCaregivers : ownCaregiver ? [ownCaregiver] : [];
+  // Age derives from the baby's real birth date against the live clock (no more
+  // frozen demo date), so it is correct for both the seed and a real baby.
+  const ageWeeks = ageInWeeks(baby.birthDate);
 
   // Device-local handoff cursor. Keyed per caregiver+baby in Supabase mode so two
   // accounts on one device don't share a "caught up" state; a single 'local' key

@@ -18,8 +18,10 @@ import {
   endRunningSleep,
   getTonightTimeline,
   hasRunningSleep,
+  SEED_ACTOR,
   wasLoggedRecently,
   type DiaperDetails,
+  type EventActor,
   type FeedDetails,
   type NoteDetails,
   type PumpDetails,
@@ -55,28 +57,32 @@ export function handleQuickLog(
   state: TonightState,
   kind: PreviewState,
   now: number = Date.now(),
+  actor: EventActor = SEED_ACTOR,
 ): TonightState {
   let events = state.events;
 
   if (kind === 'sleep') {
     if (!hasRunningSleep(events)) {
-      events = [createSleepEvent(now), ...events];
+      events = [createSleepEvent(now, actor), ...events];
     }
   } else if (!wasLoggedRecently(events, kind, now)) {
-    events = [kind === 'feed' ? createFeedEvent(now) : createDiaperEvent(now), ...events];
+    events = [
+      kind === 'feed' ? createFeedEvent(now, undefined, actor) : createDiaperEvent(now, undefined, actor),
+      ...events,
+    ];
   }
 
   return { events, orbView: kind };
 }
 
-export const handleFeedTap = (state: TonightState, now?: number): TonightState =>
-  handleQuickLog(state, 'feed', now);
+export const handleFeedTap = (state: TonightState, now?: number, actor?: EventActor): TonightState =>
+  handleQuickLog(state, 'feed', now, actor);
 
-export const handleDiaperTap = (state: TonightState, now?: number): TonightState =>
-  handleQuickLog(state, 'diaper', now);
+export const handleDiaperTap = (state: TonightState, now?: number, actor?: EventActor): TonightState =>
+  handleQuickLog(state, 'diaper', now, actor);
 
-export const handleSleepTap = (state: TonightState, now?: number): TonightState =>
-  handleQuickLog(state, 'sleep', now);
+export const handleSleepTap = (state: TonightState, now?: number, actor?: EventActor): TonightState =>
+  handleQuickLog(state, 'sleep', now, actor);
 
 /**
  * The orb's contextual primary button:
@@ -86,7 +92,11 @@ export const handleSleepTap = (state: TonightState, now?: number): TonightState 
  *  - calm   → "Start sleep": begin a running sleep
  * Never creates duplicate feed/diaper events.
  */
-export function handlePrimaryAction(state: TonightState, now: number = Date.now()): TonightState {
+export function handlePrimaryAction(
+  state: TonightState,
+  now: number = Date.now(),
+  actor: EventActor = SEED_ACTOR,
+): TonightState {
   switch (state.orbView) {
     case 'sleep':
       return { events: endRunningSleep(state.events, now), orbView: 'calm' };
@@ -98,7 +108,7 @@ export function handlePrimaryAction(state: TonightState, now: number = Date.now(
       return {
         events: hasRunningSleep(state.events)
           ? state.events
-          : [createSleepEvent(now), ...state.events],
+          : [createSleepEvent(now, actor), ...state.events],
         orbView: 'sleep',
       };
   }
@@ -114,11 +124,12 @@ export function addFeed(
   state: TonightState,
   details?: FeedDetails,
   now: number = Date.now(),
+  actor: EventActor = SEED_ACTOR,
 ): TonightState {
   if (wasLoggedRecently(state.events, 'feed', now)) {
     return { events: state.events, orbView: 'feed' };
   }
-  return { events: [createFeedEvent(now, details), ...state.events], orbView: 'feed' };
+  return { events: [createFeedEvent(now, details, actor), ...state.events], orbView: 'feed' };
 }
 
 /**
@@ -130,11 +141,12 @@ export function addDiaper(
   state: TonightState,
   details?: DiaperDetails,
   now: number = Date.now(),
+  actor: EventActor = SEED_ACTOR,
 ): TonightState {
   if (wasLoggedRecently(state.events, 'diaper', now)) {
     return { events: state.events, orbView: 'diaper' };
   }
-  return { events: [createDiaperEvent(now, details), ...state.events], orbView: 'diaper' };
+  return { events: [createDiaperEvent(now, details, actor), ...state.events], orbView: 'diaper' };
 }
 
 /**
@@ -146,8 +158,9 @@ export function addNote(
   state: TonightState,
   details?: NoteDetails,
   now: number = Date.now(),
+  actor: EventActor = SEED_ACTOR,
 ): TonightState {
-  return { events: [createNoteEvent(now, details), ...state.events], orbView: state.orbView };
+  return { events: [createNoteEvent(now, details, actor), ...state.events], orbView: state.orbView };
 }
 
 /**
@@ -160,8 +173,9 @@ export function addPump(
   state: TonightState,
   details?: PumpDetails,
   now: number = Date.now(),
+  actor: EventActor = SEED_ACTOR,
 ): TonightState {
-  return { events: [createPumpEvent(now, details), ...state.events], orbView: state.orbView };
+  return { events: [createPumpEvent(now, details, actor), ...state.events], orbView: state.orbView };
 }
 
 /**

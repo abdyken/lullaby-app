@@ -24,6 +24,7 @@ import {
   type ReactNode,
 } from 'react';
 
+import { baby as seedBaby, caregivers as seedCaregivers } from '@/data/mock';
 import type { Baby, Caregiver, CaregiverRole } from '@/data/models';
 import { hapticSuccess } from '@/lib/haptics';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
@@ -98,9 +99,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const [status, setStatus] = useState<AuthStatus>(configured ? 'loading' : 'local-only');
   const [session, setSession] = useState<Session | null>(null);
-  const [caregiver, setCaregiver] = useState<Caregiver | null>(null);
-  const [baby, setBaby] = useState<Baby | null>(null);
-  const [caregivers, setCaregivers] = useState<Caregiver[]>([]);
+  // Local-only builds own an *active local baby/caregiver* here, above the gate,
+  // so every read-site can resolve identity through `useAuth()` instead of
+  // importing the seed directly (onboarding Phase 0a). For now it is seeded with
+  // the demo baby (Mia / Mom) as the default fallback; Phase 0b replaces this
+  // with a real, persisted baby created during onboarding. Configured (Supabase)
+  // builds start empty and are filled by `evaluate` once a session resolves.
+  const [caregiver, setCaregiver] = useState<Caregiver | null>(
+    configured ? null : (seedCaregivers[0] ?? null),
+  );
+  const [baby, setBaby] = useState<Baby | null>(configured ? null : seedBaby);
+  const [caregivers, setCaregivers] = useState<Caregiver[]>(configured ? [] : seedCaregivers);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
