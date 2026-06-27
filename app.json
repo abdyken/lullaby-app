@@ -8,16 +8,16 @@
     "scheme": "lullaby",
     "userInterfaceStyle": "light",
     "ios": {
-      "icon": "./assets/expo.icon",
+      "icon": "./assets/images/icon.png",
       "bundleIdentifier": "com.lullaby.app",
       "supportsTablet": false
     },
     "android": {
+      "icon": "./assets/images/icon.png",
       "package": "com.lullaby.app",
       "adaptiveIcon": {
-        "backgroundColor": "#FBF4EF",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
+        "backgroundColor": "#E8D9FF",
+        "foregroundImage": "./assets/images/adaptive-icon.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false
@@ -31,10 +31,13 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#FBF4EF",
-          "android": {
-            "image": "./assets/images/splash-icon.png",
-            "imageWidth": 76
+          "backgroundColor": "#E8D9FF",
+          "image": "./assets/images/lullaby-logo-mark.png",
+          "imageWidth": 170,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#E8D9FF",
+            "image": "./assets/images/lullaby-logo-mark.png"
           }
         }
       ]
