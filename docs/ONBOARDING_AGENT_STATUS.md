@@ -3,9 +3,9 @@
 AUTOPILOT_STATUS: READY
 EXPECTED_BRANCH_PATTERN: feat/onboarding-*
 RECOMMENDED_IMPLEMENTATION_BRANCH: feat/onboarding-personalized-activation
-CURRENT_SLICE_ID: phase-1a-setup-foundation
-CURRENT_SLICE_NAME: Phase 1A - Setup foundation (shared Orb/role/date + flow reducer/layout)
-NEXT_SLICE_ID: phase-1a-live-flow
+CURRENT_SLICE_ID: phase-1a-live-flow
+CURRENT_SLICE_NAME: Phase 1A - Live setup flow (live age/name setup + real local completion + night-aware scaffold)
+NEXT_SLICE_ID: phase-1a-personalized-tonight
 PHASE_1B_ENABLED: false
 
 ## Source Of Truth
@@ -29,45 +29,56 @@ PHASE_1B_ENABLED: false
 
 ## Current Slice
 
-### phase-1a-setup-foundation - Setup flow foundation
+### phase-1a-live-flow - Live setup flow
 
-Goal: the enabling extractions + pure flow/layout scaffolding for Phase 1A, with
-no user-visible flow change yet. Extract a shared `<Orb>` from `OrbHero` (body +
-breathe + ring, one `useOrbBreathe` driver) and the private `RolePicker` +
-`birthDateFromWeeks` + `parseWeeks` out of `BabySetupScreen` into a shared module;
-build `OnboardingStepLayout` on top of `AuthShell` (orb/header slot + pinned CTA);
-add `useOnboardingFlow` as a pure step reducer (`beat → baby → creating → done`).
+Goal: replace the passive 3-panel value carousel with the live, personalized
+setup flow now that the foundation (shared `<Orb>`, `RolePicker`/age helpers,
+`OnboardingStepLayout`, `useOnboardingFlow`) is in place. This is the first
+user-visible onboarding change.
 
 Roadmap basis:
 
-- Section 12 (Phase 1A "Extract first"): shared `<Orb>`, shared role/date helpers,
-  `OnboardingStepLayout` on `AuthShell`, pure `useOnboardingFlow` reducer.
-- Section 13: component architecture map — extractions land before flow work.
+- Section 7 (flow B→C→D): emotional beat → age + optional name → real handoff into
+  Tonight.
+- Section 11 (completion ordering): write local baby → clear `lullaby/local-events/v1`
+  → `markOnboardingComplete` → reveal.
+- Section 12 (Phase 1A live flow): drop the paged `ScrollView`, render one step at a
+  time off `useOnboardingFlow`, wire completion to `useAuth().createLocalBaby`, kill
+  the fake `ONBOARDING_COMPLETING_LABEL`, resolve night at entry.
 
 Expected implementation scope:
 
-- A shared `<Orb>` extracted from `src/components/OrbHero.tsx` (no Tonight change).
-- A shared module for `RolePicker` + `birthDateFromWeeks` + `parseWeeks` (extracted
-  from `src/components/auth/BabySetupScreen.tsx`; fix the `RolePicker` contrast).
-  Reconcile with `src/data/localBaby.ts`'s `birthDateFromWeeks` (single source).
-- `OnboardingStepLayout` built on top of `AuthShell`.
-- `useOnboardingFlow` pure reducer + smoke checks.
+- Rebuild `OnboardingScreen` on `OnboardingStepLayout` + `<Orb>`, driven by
+  `useOnboardingFlow` (step state, not scroll index — blank-frame postmortem).
+- A one-thumb age control (coarse `RolePicker`/`ChoicePill` pattern → representative
+  weeks → `birthDateFromWeeks`) + optional name; no keyboard on the critical path.
+- Wire completion to `useAuth().createLocalBaby(...)` with the §11 ordering; remove
+  the fake "Setting up..." completing label.
+- Resolve the surface (`resolveSurfaceMode`) at entry so the first frame is night-safe.
 
 Acceptance criteria:
 
-- Extractions are behavior-preserving (BabySetupScreen + OrbHero render the same);
-  no live onboarding flow change in this slice.
-- The reducer + any extracted pure helper are covered by smoke checks.
-- `npx tsc --noEmit`, `npm run check:local-interactions`, and `npm run lint`
-  pass before commit.
-- Commit is one bounded slice.
+- New install (no local baby) walks beat → age/name → real local baby → Tonight; the
+  seed Mia never appears; skip/"Set up later" still creates a minimal valid baby.
+- `npx tsc --noEmit`, `npm run check:local-interactions`, and `npm run lint` pass.
+- Commit is one bounded slice. (`scripts/check-local-interactions.ts` likely needs a
+  rewrite of the old G7–G12 panel assertions once the carousel is gone — see
+  `phase-1a-checks-polish`.)
+
+Foundation already shipped (this slice's prerequisites, in `phase-1a-setup-foundation`):
+
+- `src/components/Orb.tsx` (shared `<Orb>` + `useOrbBreathe`).
+- `src/components/auth/RolePicker.tsx` (`RolePicker` + `colorForRole` + `ROLES`).
+- `src/components/onboarding/onboardingFlow.ts` + `useOnboardingFlow.ts` (pure reducer + hook).
+- `src/components/onboarding/OnboardingStepLayout.tsx` (on `AuthSurface`).
+- `parseWeeks` reconciled into `src/data/localBaby.ts` (single source with `birthDateFromWeeks`).
 
 ## Slice Queue
 
 - [x] `phase-0a` - Active-baby read-site refactor, no behavior change.
 - [x] `phase-0b` - Local baby creation factory, persisted local baby store,
   seed-clear ordering, dev reset extension.
-- [ ] `phase-1a-setup-foundation` - Extract shared `Orb`/role/date helpers and
+- [x] `phase-1a-setup-foundation` - Extract shared `Orb`/role/date helpers and
   introduce the pure onboarding flow reducer/layout foundation.
 - [ ] `phase-1a-live-flow` - Replace passive carousel with live age/name setup,
   real local completion, night-aware onboarding scaffold, and fake completing
@@ -84,6 +95,71 @@ Acceptance criteria:
   partner invite on-ramp, and edit baby recovery.
 
 ## Completed Slices
+
+### phase-1a-setup-foundation - Setup flow foundation (DONE)
+
+What shipped: the enabling extractions + pure flow/layout scaffolding for Phase
+1A, with no live onboarding flow change yet (the carousel still runs). The next
+slice (`phase-1a-live-flow`) consumes these.
+
+- `src/components/Orb.tsx` (NEW): the shared `<Orb>` (day/night body cross-fade +
+  progress ring + white core) + `useOrbBreathe` + the orb types, extracted from
+  `OrbHero`. One breathe driver, external-or-internal (theme-reveal overlay still
+  supported).
+- `src/components/OrbHero.tsx`: now composes `<Orb>` inside its sky card; keeps its
+  exact public API + render (sky gradient, cloud/star decor, description pill,
+  primary button unchanged). Re-exports `OrbSky`/`OrbCoreKind`/`OrbStateIconKind` +
+  `useOrbBreathe` so `@/components/OrbHero` consumers (e.g. `currentState.ts`) are
+  untouched.
+- `src/components/auth/RolePicker.tsx` (NEW): `RolePicker` + `colorForRole` + `ROLES`
+  extracted from `BabySetupScreen`. Contrast fix (roadmap §10): active selection is
+  now ink-on-tint (soft role tint fill + 2px role-color border + ink text) instead
+  of WCAG-failing white-on-tint. Selection behavior unchanged.
+- `src/data/localBaby.ts`: `parseWeeks` added beside `birthDateFromWeeks` (single
+  source). `BabySetupScreen` now imports both from here (the duplicate private
+  `birthDateFromWeeks` is gone — reconciled, same math) and `RolePicker`/`colorForRole`
+  from the new module.
+- `src/components/onboarding/onboardingFlow.ts` (NEW): pure step reducer
+  `beat → baby → creating → done` (+ `skip`/`back`/`reset`), `INITIAL_ONBOARDING_FLOW`,
+  `onboardingStepIndex`, `isOnboardingComplete`. React-free pure leaf (smoke-testable).
+- `src/components/onboarding/useOnboardingFlow.ts` (NEW): the `useReducer` hook over
+  the pure reducer, exposing `begin/submit/skip/created/back/reset` + `step`/`isComplete`.
+- `src/components/onboarding/OnboardingStepLayout.tsx` (NEW): per-step scaffold on the
+  shared `AuthSurface` (orb pinned top, content scrolls, CTA pinned bottom).
+- `src/components/auth/AuthShell.tsx`: extracted `AuthSurface` (the cream,
+  keyboard-aware scaffold) so `OnboardingStepLayout` builds on it instead of a parallel
+  cream background. `AuthShell` composes `AuthSurface` — render is byte-identical.
+- `scripts/check-local-interactions.ts`: +9 checks — `parseWeeks` (X1–X2) and the
+  onboarding flow reducer (Y1–Y7: happy path, skip, back, reset no-op, out-of-order
+  no-ops, step order + completion).
+
+Checks (all green):
+
+- `npx tsc --noEmit` -> exit 0.
+- `npm run check:local-interactions` -> 190/190 passed (was 181; +9 X/Y checks).
+- `npm run lint` -> exit 0.
+
+Intended visual delta (one, mandated by the slice — "fix the RolePicker contrast"):
+
+- The active `RolePicker` pill changed from white-on-role-color to ink-on-role-tint
+  with a role-color border (WCAG AA). Visible only on `BabySetupScreen` (Supabase
+  `needs-setup` builds) today; behavior identical. `OrbHero`/Tonight render unchanged.
+
+Risks / notes:
+
+- `OnboardingStepLayout`, `useOnboardingFlow`, and `<Orb>`-in-onboarding are not yet
+  wired into any live screen — they land in `phase-1a-live-flow`. They typecheck +
+  lint but have no on-device coverage yet.
+- The smoke test's old G7–G12 panel assertions still describe the 3-panel carousel;
+  they stay valid this slice (no flow change) but must be rewritten when the carousel
+  is replaced (`phase-1a-checks-polish`).
+
+Manual QA still recommended (device; not run in this headless slice):
+
+- `BabySetupScreen` (Supabase `needs-setup` build): confirm the role pills read clearly
+  in day + night and selection still drives the brand color.
+- Tonight: confirm `OrbHero` (calm/feed/sleep/diaper, day + night, progress ring) looks
+  identical to before the `<Orb>` extraction, incl. the theme reveal.
 
 ### phase-0b - Local baby creation (DONE)
 
@@ -179,12 +255,14 @@ Manual QA still recommended (device, not run in this headless slice):
 
 ## Next Slice
 
-`phase-0b` is complete and committed. Move to `phase-1a-setup-foundation` (extract
-the shared `<Orb>` + role/date helpers, build `OnboardingStepLayout` on
-`AuthShell`, add the pure `useOnboardingFlow` reducer) only if all checks pass and
-the diff stays within scope. Reconcile the duplicate `birthDateFromWeeks` during
-the helper extraction; keep the extractions behavior-preserving (no live flow
-change in that slice).
+`phase-1a-setup-foundation` is complete and committed. Move to `phase-1a-live-flow`:
+rebuild `OnboardingScreen` on `OnboardingStepLayout` + `<Orb>` driven by
+`useOnboardingFlow`, add the one-thumb age + optional name controls, wire completion
+to `useAuth().createLocalBaby` with the §11 ordering (write baby → clear local events
+→ mark complete → reveal), kill the fake `ONBOARDING_COMPLETING_LABEL`, and resolve
+night at entry. This is the first user-visible flow change, so verify on device in
+day + night; expect to rewrite the old carousel smoke assertions (G7–G12) — that
+cleanup is scoped to `phase-1a-checks-polish`.
 
 ## Blocked Status
 

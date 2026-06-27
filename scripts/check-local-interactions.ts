@@ -43,6 +43,7 @@ import {
   birthDateFromWeeks,
   createLocalBaby,
   parseLocalBaby,
+  parseWeeks,
   serializeLocalBaby,
 } from '../src/data/localBaby';
 import type { Caregiver, LogEvent, LogEventType } from '../src/data/models';
@@ -61,6 +62,14 @@ import {
   getOnboardingIntroDuration,
   shouldShowOnboardingSkip,
 } from '../src/components/onboarding/onboardingContent';
+import {
+  INITIAL_ONBOARDING_FLOW,
+  ONBOARDING_STEP_ORDER,
+  isOnboardingComplete,
+  onboardingFlowReducer,
+  onboardingStepIndex,
+  type OnboardingFlowState,
+} from '../src/components/onboarding/onboardingFlow';
 // Logging v2 foundation (plan Phase 1.1) — new model lives beside the legacy one.
 import { createManualClock, systemClock } from '../src/features/logging/timer/clock';
 import { newClientEventId, newUuid } from '../src/features/logging/domain/ids';
@@ -1083,6 +1092,78 @@ check('W10. parseLocalBaby rejects junk so the caller falls back to the seed', (
     caregiver: { ...createLocalBaby({}, NOW).caregiver, role: 'grandma' },
   });
   assert.equal(parseLocalBaby(badRole), null); // unknown caregiver role
+});
+
+// X. Setup field helpers (Phase 1A foundation) — parseWeeks now lives beside
+// birthDateFromWeeks in localBaby (single source, extracted from BabySetupScreen).
+check('X1. parseWeeks reads a whole-week number, trims, and floors fractions', () => {
+  assert.equal(parseWeeks('7'), 7);
+  assert.equal(parseWeeks('  12 '), 12); // surrounding whitespace trimmed
+  assert.equal(parseWeeks('2.9'), 2); // fraction floored to whole weeks
+  assert.equal(parseWeeks('0'), 0); // newborn
+});
+
+check('X2. parseWeeks rejects blank / non-numeric / out-of-range input as null', () => {
+  assert.equal(parseWeeks(''), null);
+  assert.equal(parseWeeks('   '), null);
+  assert.equal(parseWeeks('abc'), null);
+  assert.equal(parseWeeks('-1'), null); // negative age
+  assert.equal(parseWeeks('261'), null); // > 260 weeks (~5y) → out of range
+  assert.equal(parseWeeks('260'), 260); // upper boundary stays valid
+});
+
+// Y. Onboarding flow reducer (Phase 1A foundation) — the pure step machine behind
+// useOnboardingFlow: beat → baby → creating → done, with skip ("Set up later" /
+// "Skip for now") jumping straight to creating. Renders one step at a time.
+const flow = (step: OnboardingFlowState['step']): OnboardingFlowState => ({ step });
+
+check('Y1. the flow starts on the emotional beat', () => {
+  assert.equal(INITIAL_ONBOARDING_FLOW.step, 'beat');
+});
+
+check('Y2. begin → baby, submit → creating, created → done (the happy path)', () => {
+  let s: OnboardingFlowState = INITIAL_ONBOARDING_FLOW;
+  s = onboardingFlowReducer(s, { type: 'begin' });
+  assert.equal(s.step, 'baby');
+  s = onboardingFlowReducer(s, { type: 'submit' });
+  assert.equal(s.step, 'creating');
+  s = onboardingFlowReducer(s, { type: 'created' });
+  assert.equal(s.step, 'done');
+  assert.equal(INITIAL_ONBOARDING_FLOW.step, 'beat'); // the shared initial constant was not mutated
+});
+
+check('Y3. skip jumps to creating from either the beat or the baby step', () => {
+  assert.equal(onboardingFlowReducer(flow('beat'), { type: 'skip' }).step, 'creating');
+  assert.equal(onboardingFlowReducer(flow('baby'), { type: 'skip' }).step, 'creating');
+});
+
+check('Y4. back returns the baby step to the beat', () => {
+  assert.equal(onboardingFlowReducer(flow('baby'), { type: 'back' }).step, 'beat');
+});
+
+check('Y5. reset returns to the beat from anywhere (and is a no-op on the beat)', () => {
+  assert.equal(onboardingFlowReducer(flow('done'), { type: 'reset' }).step, 'beat');
+  const beat = flow('beat');
+  assert.equal(onboardingFlowReducer(beat, { type: 'reset' }), beat); // same reference
+});
+
+check('Y6. out-of-order actions are no-ops that return the same state reference', () => {
+  const creating = flow('creating');
+  assert.equal(onboardingFlowReducer(creating, { type: 'begin' }), creating);
+  assert.equal(onboardingFlowReducer(creating, { type: 'submit' }), creating);
+  assert.equal(onboardingFlowReducer(creating, { type: 'back' }), creating);
+  const done = flow('done');
+  assert.equal(onboardingFlowReducer(done, { type: 'created' }), done);
+  assert.equal(onboardingFlowReducer(done, { type: 'skip' }), done);
+});
+
+check('Y7. step index follows the canonical order and completion is done-only', () => {
+  assert.deepEqual([...ONBOARDING_STEP_ORDER], ['beat', 'baby', 'creating', 'done']);
+  assert.equal(onboardingStepIndex('beat'), 0);
+  assert.equal(onboardingStepIndex('done'), 3);
+  assert.ok(onboardingStepIndex('baby') < onboardingStepIndex('creating'));
+  assert.equal(isOnboardingComplete(flow('creating')), false);
+  assert.equal(isOnboardingComplete(flow('done')), true);
 });
 
 // V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are
