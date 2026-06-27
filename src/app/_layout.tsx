@@ -23,6 +23,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { BrandSplashGate } from '@/components/boot/BrandSplashGate';
 import { ThemeProvider, useTheme } from '@/state/ThemeProvider';
 import { surfaces } from '@/theme';
 import '../global.css';
@@ -67,13 +68,15 @@ function RootShell({ fontsReady }: { fontsReady: boolean }) {
   return (
     <>
       <StatusBar style={isNight ? 'light' : 'dark'} />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: surfaces[mode].bg },
-        }}>
-        <Stack.Screen name="(tabs)" />
-      </Stack>
+      <BrandSplashGate>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: surfaces[mode].bg },
+          }}>
+          <Stack.Screen name="(tabs)" />
+        </Stack>
+      </BrandSplashGate>
     </>
   );
 }
