@@ -71,6 +71,20 @@ export function birthDateFromWeeks(weeks: number, now: number = Date.now()): str
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+/**
+ * Parse a whole-week age from free text (the age field). Returns a clamped whole
+ * number of weeks, or null for blank / non-numeric / out-of-range input so the
+ * caller can keep the submit button disabled. Single source for the setup screen
+ * and the onboarding flow (extracted from `BabySetupScreen` in Phase 1A).
+ */
+export function parseWeeks(input: string): number | null {
+  const trimmed = input.trim();
+  if (trimmed === '') return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0 || n > 260) return null;
+  return Math.floor(n);
+}
+
 /** Inputs onboarding collects (all optional → a valid baby is always producible). */
 export type CreateLocalBabyInput = {
   /** Baby's name; blank/omitted → `DEFAULT_LOCAL_BABY_NAME`. */
