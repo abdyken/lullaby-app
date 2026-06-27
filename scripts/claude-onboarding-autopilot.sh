@@ -15,7 +15,10 @@ ROADMAP_FILE="docs/onboarding-roadmap.md"
 PROMPT_FILE=".claude/prompts/onboarding-autopilot-step.md"
 LOG_FILE=".claude/onboarding-autopilot.log"
 
-CLAUDE_MODEL="${CLAUDE_MODEL:-opus}"
+# Pin the onboarding workflow to an exact Opus 4.8 model id. The generic
+# `opus` alias is intentionally not used because this overnight workflow needs
+# stable, auditable model selection.
+CLAUDE_ONBOARDING_MODEL="${CLAUDE_ONBOARDING_MODEL:-claude-opus-4-8}"
 CLAUDE_EFFORT="${CLAUDE_EFFORT:-max}"
 MAX_SESSIONS="${MAX_SESSIONS:-1}"
 MAX_CHANGED_FILES="${MAX_CHANGED_FILES:-18}"
@@ -38,7 +41,8 @@ Options:
   --help                    Show this help.
 
 Environment:
-  CLAUDE_MODEL              Claude model passed to the CLI. Default: opus.
+  CLAUDE_ONBOARDING_MODEL   Claude model passed to the CLI. Default: claude-opus-4-8.
+                            Use an exact model id; the generic opus alias is not used.
   CLAUDE_EFFORT             Claude effort passed to the CLI. Default: max.
   MAX_CHANGED_FILES         Max committed file count per slice. Default: 18.
 USAGE
@@ -194,7 +198,7 @@ print_dry_run() {
   log
   log "Command:"
   printf 'claude -p --model %q --effort %q --permission-mode auto --output-format text %q\n' \
-    "$CLAUDE_MODEL" "$CLAUDE_EFFORT" "$prompt_text"
+    "$CLAUDE_ONBOARDING_MODEL" "$CLAUDE_EFFORT" "$prompt_text"
   log
   log "Rendered prompt:"
   log "----- BEGIN PROMPT -----"
@@ -302,7 +306,7 @@ while [ "$sessions_completed" -lt "$MAX_SESSIONS" ]; do
 
   set +e
   claude -p \
-    --model "$CLAUDE_MODEL" \
+    --model "$CLAUDE_ONBOARDING_MODEL" \
     --effort "$CLAUDE_EFFORT" \
     --permission-mode auto \
     --output-format text \
