@@ -3,9 +3,9 @@
 AUTOPILOT_STATUS: READY
 EXPECTED_BRANCH_PATTERN: feat/onboarding-*
 RECOMMENDED_IMPLEMENTATION_BRANCH: feat/onboarding-personalized-activation
-CURRENT_SLICE_ID: phase-0b
-CURRENT_SLICE_NAME: Phase 0b - Local baby creation
-NEXT_SLICE_ID: phase-1a-setup-foundation
+CURRENT_SLICE_ID: phase-1a-setup-foundation
+CURRENT_SLICE_NAME: Phase 1A - Setup foundation (shared Orb/role/date + flow reducer/layout)
+NEXT_SLICE_ID: phase-1a-live-flow
 PHASE_1B_ENABLED: false
 
 ## Source Of Truth
@@ -29,36 +29,35 @@ PHASE_1B_ENABLED: false
 
 ## Current Slice
 
-### phase-0b - Local baby creation
+### phase-1a-setup-foundation - Setup flow foundation
 
-Goal: add a pure `createLocalBaby` factory plus the persisted local baby/caregiver
-store on `AuthProvider`, so onboarding can create a real local baby (not the seed)
-with correct seed-clear ordering. Phase 0a already routes every read-site through
-`useAuth().baby/caregivers`, so 0b only needs to write that store and persist it.
+Goal: the enabling extractions + pure flow/layout scaffolding for Phase 1A, with
+no user-visible flow change yet. Extract a shared `<Orb>` from `OrbHero` (body +
+breathe + ring, one `useOrbBreathe` driver) and the private `RolePicker` +
+`birthDateFromWeeks` + `parseWeeks` out of `BabySetupScreen` into a shared module;
+build `OnboardingStepLayout` on top of `AuthShell` (orb/header slot + pinned CTA);
+add `useOnboardingFlow` as a pure step reducer (`beat → baby → creating → done`).
 
 Roadmap basis:
 
-- Section 11: own + persist the local baby/caregiver in `AuthProvider` (its own
-  AsyncStorage key; hydrate on mount); completion ordering = write local baby →
-  clear `lullaby/local-events/v1` → mark complete → reveal.
-- Section 12: Phase 0b local baby creation (pure factory + store write +
-  seed-clear + dev-reset extension; `birthDate` from the age control).
-- Section 13: `createLocalBaby(...)` as a small pure factory.
+- Section 12 (Phase 1A "Extract first"): shared `<Orb>`, shared role/date helpers,
+  `OnboardingStepLayout` on `AuthShell`, pure `useOnboardingFlow` reducer.
+- Section 13: component architecture map — extractions land before flow work.
 
 Expected implementation scope:
 
-- `src/state/AuthProvider.tsx` (persisted local baby store + `createLocalBaby`).
-- A new pure factory module (e.g. `src/data/localBaby.ts`) for
-  `createLocalBaby(inputs) -> {Baby, Caregiver}` + weeks->birthDate.
-- Dev-reset extension to also clear the persisted local baby.
-- `scripts/check-local-interactions.ts` for the new pure factory + weeks->birthDate
-  unit checks.
+- A shared `<Orb>` extracted from `src/components/OrbHero.tsx` (no Tonight change).
+- A shared module for `RolePicker` + `birthDateFromWeeks` + `parseWeeks` (extracted
+  from `src/components/auth/BabySetupScreen.tsx`; fix the `RolePicker` contrast).
+  Reconcile with `src/data/localBaby.ts`'s `birthDateFromWeeks` (single source).
+- `OnboardingStepLayout` built on top of `AuthShell`.
+- `useOnboardingFlow` pure reducer + smoke checks.
 
 Acceptance criteria:
 
-- `createLocalBaby` is a pure, smoke-testable factory; weeks->birthDate is covered.
-- The local baby/caregiver persists and rehydrates on cold launch.
-- Seed remains the fallback when no local baby has been created yet.
+- Extractions are behavior-preserving (BabySetupScreen + OrbHero render the same);
+  no live onboarding flow change in this slice.
+- The reducer + any extracted pure helper are covered by smoke checks.
 - `npx tsc --noEmit`, `npm run check:local-interactions`, and `npm run lint`
   pass before commit.
 - Commit is one bounded slice.
@@ -66,7 +65,7 @@ Acceptance criteria:
 ## Slice Queue
 
 - [x] `phase-0a` - Active-baby read-site refactor, no behavior change.
-- [ ] `phase-0b` - Local baby creation factory, persisted local baby store,
+- [x] `phase-0b` - Local baby creation factory, persisted local baby store,
   seed-clear ordering, dev reset extension.
 - [ ] `phase-1a-setup-foundation` - Extract shared `Orb`/role/date helpers and
   introduce the pure onboarding flow reducer/layout foundation.
@@ -85,6 +84,54 @@ Acceptance criteria:
   partner invite on-ramp, and edit baby recovery.
 
 ## Completed Slices
+
+### phase-0b - Local baby creation (DONE)
+
+What shipped: a pure `createLocalBaby` factory plus a persisted local
+baby/caregiver store on `AuthProvider`, so the Phase 1A flow can create a real
+local baby (not the seed) with correct seed-clear ordering. No live flow change
+yet — the seed stays the default until `createLocalBaby` is wired into onboarding.
+
+- `src/data/localBaby.ts` (NEW; pure leaf, only a type import): `createLocalBaby(
+  input, now) -> {baby, caregiver}` (fixed ids `local-baby`/`local-caregiver`,
+  calm defaults for the skip path, role→brand-color fallback), `birthDateFromWeeks(
+  weeks, now)` (clamps negative/non-finite, floors fractions), `serializeLocalBaby`
+  / `parseLocalBaby` (junk → null → seed fallback), and `LOCAL_BABY_STORAGE_KEY`
+  (`lullaby/local-baby/v1`).
+- `src/state/AuthProvider.tsx`: local-only cold-launch hydration of the persisted
+  local baby (falls back to the seed when absent); a `createLocalBaby(input)`
+  context method that sets state, persists the record, then clears the seed night
+  (`lullaby/local-events/v1`) so `LocalEventProvider` rehydrates clean. Configured
+  (Supabase) builds unchanged — identity still resolved by `evaluate`.
+- `src/components/onboarding/onboardingStorage.ts`: `resetOnboardingComplete
+  ForDevelopment` now `multiRemove`s the onboarding flag + local baby + local
+  events for a true dev cold-open (dev-only; keys imported relatively so the Node
+  smoke test still loads the module).
+- `scripts/check-local-interactions.ts`: +10 checks (W1–W10) — factory defaults/
+  trimming, weeks→birthDate clamping, purity, the age-control birthDate path, and
+  serialize/parse round-trip + junk rejection.
+
+Checks (all green):
+
+- `npx tsc --noEmit` -> exit 0.
+- `npm run check:local-interactions` -> 181/181 passed (was 171; +10 W-checks).
+- `npm run lint` -> exit 0.
+
+Risks / notes:
+
+- `birthDateFromWeeks` now lives in two places: the new `src/data/localBaby.ts` and
+  the private one in `BabySetupScreen`. Phase 1A's helper extraction must reconcile
+  them into one shared source (no runtime conflict today; same math).
+- `createLocalBaby` is on `AuthContextValue` for all builds but only exercised by
+  the local-only flow (Phase 1A); configured builds never call it.
+
+Manual QA still recommended (device; not run in this headless slice):
+
+- With `EXPO_PUBLIC_FORCE_ONBOARDING=true`, once Phase 1A calls
+  `useAuth().createLocalBaby({...})`, confirm Tonight shows the new baby/caregiver,
+  the seed Mia night is gone, and a cold relaunch rehydrates the same local baby
+  (not the seed).
+- Confirm the dev reset returns to a true first-run (no leftover baby or events).
 
 ### phase-0a - Active-baby read-site refactor (DONE)
 
@@ -132,8 +179,12 @@ Manual QA still recommended (device, not run in this headless slice):
 
 ## Next Slice
 
-`phase-0a` is complete and committed. Move to `phase-0b` (local baby creation)
-only if all checks pass and the committed diff stays within scope.
+`phase-0b` is complete and committed. Move to `phase-1a-setup-foundation` (extract
+the shared `<Orb>` + role/date helpers, build `OnboardingStepLayout` on
+`AuthShell`, add the pure `useOnboardingFlow` reducer) only if all checks pass and
+the diff stays within scope. Reconcile the duplicate `birthDateFromWeeks` during
+the helper extraction; keep the extractions behavior-preserving (no live flow
+change in that slice).
 
 ## Blocked Status
 

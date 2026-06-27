@@ -13,6 +13,7 @@
  * touches Supabase, so the existing demo is untouched. All the actual queries
  * live in the sync layer (session + provisioning); this is the React seam.
  */
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   createContext,
   useCallback,
@@ -24,6 +25,15 @@ import {
   type ReactNode,
 } from 'react';
 
+import {
+  LOCAL_BABY_STORAGE_KEY,
+  createLocalBaby as buildLocalBaby,
+  parseLocalBaby,
+  serializeLocalBaby,
+  type CreateLocalBabyInput,
+  type LocalBabyRecord,
+} from '@/data/localBaby';
+import { clearLocalEventStorage } from '@/data/localStorage';
 import { baby as seedBaby, caregivers as seedCaregivers } from '@/data/mock';
 import type { Baby, Caregiver, CaregiverRole } from '@/data/models';
 import { hapticSuccess } from '@/lib/haptics';
@@ -77,6 +87,12 @@ type AuthContextValue = {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   completeSetup: (fields: SetupFields) => Promise<void>;
+  /**
+   * Create + persist the active local baby/caregiver (local-only onboarding),
+   * replacing the seed defaults and clearing the seed night. No-op on the gate;
+   * marking onboarding complete + revealing stays the gate's job (Phase 1A).
+   */
+  createLocalBaby: (input: CreateLocalBabyInput) => Promise<LocalBabyRecord>;
   /** Join an existing baby with an invite code (alternative to completeSetup). */
   joinWithInvite: (fields: JoinFields) => Promise<void>;
   signOut: () => Promise<void>;
@@ -175,6 +191,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [configured, evaluate]);
 
+  // Local-only builds rehydrate a previously-created local baby on cold launch so
+  // a returning parent sees their baby, not the seed. Absent → the seed fallback
+  // set in initial state stays. Configured builds resolve identity via `evaluate`,
+  // so this is skipped there.
+  useEffect(() => {
+    if (configured) return;
+    let active = true;
+    (async () => {
+      try {
+        const record = parseLocalBaby(await AsyncStorage.getItem(LOCAL_BABY_STORAGE_KEY));
+        if (active && record) {
+          setCaregiver(record.caregiver);
+          setBaby(record.baby);
+          setCaregivers([record.caregiver]);
+        }
+      } catch {
+        // keep the seed fallback
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [configured]);
+
   const signIn = useCallback(async (email: string, password: string) => {
     if (!supabase) return;
     setBusy(true);
@@ -270,6 +310,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [session, evaluate],
   );
 
+  // Local-only onboarding: mint the real local baby/caregiver and replace the seed
+  // defaults. Ordering matters because the night-loop store is persisted and
+  // LocalEventProvider remounts after onboarding — write the baby first, then drop
+  // the seed night (`lullaby/local-events/v1`) so the provider hydrates clean.
+  // Best-effort persistence: a storage failure must never trap a parent mid-setup.
+  const createLocalBaby = useCallback(
+    async (input: CreateLocalBabyInput): Promise<LocalBabyRecord> => {
+      const record = buildLocalBaby(input);
+      if (mounted.current) {
+        setCaregiver(record.caregiver);
+        setBaby(record.baby);
+        setCaregivers([record.caregiver]);
+      }
+      try {
+        await AsyncStorage.setItem(LOCAL_BABY_STORAGE_KEY, serializeLocalBaby(record));
+      } catch {
+        // best-effort local cache — losing the write is not worth crashing for
+      }
+      await clearLocalEventStorage();
+      return record;
+    },
+    [],
+  );
+
   const signOut = useCallback(async () => {
     if (!supabase) return;
     setBusy(true);
@@ -299,6 +363,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signUp,
       completeSetup,
+      createLocalBaby,
       joinWithInvite,
       signOut,
       clearError,
@@ -315,6 +380,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signUp,
       completeSetup,
+      createLocalBaby,
       joinWithInvite,
       signOut,
       clearError,

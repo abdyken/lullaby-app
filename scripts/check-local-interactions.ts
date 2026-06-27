@@ -35,6 +35,16 @@ import {
   recapSummaryLine,
 } from '../src/data/currentState';
 import { buildSeedEvents, caregivers as seedCaregivers, getTonightTimeline } from '../src/data/mock';
+import {
+  DEFAULT_LOCAL_BABY_NAME,
+  DEFAULT_LOCAL_CAREGIVER_NAME,
+  LOCAL_BABY_ID,
+  LOCAL_CAREGIVER_ID,
+  birthDateFromWeeks,
+  createLocalBaby,
+  parseLocalBaby,
+  serializeLocalBaby,
+} from '../src/data/localBaby';
 import type { Caregiver, LogEvent, LogEventType } from '../src/data/models';
 import { resolveSurfaceMode } from '../src/theme';
 import { parsePersistedState, serializeState } from '../src/data/persistedState';
@@ -985,6 +995,94 @@ check('U10. CareEvent type guards narrow each event to its concrete shape', () =
   // The guard narrows: these property accesses are type-checked by tsc.
   assert.equal(breast.details.activeSide, 'left');
   assert.equal(bottle.details.amountMl, 120);
+});
+
+// W. Local baby creation (Phase 0b) — the pure createLocalBaby factory + the
+// weeks→birthDate helper that the live setup flow (Phase 1A) will write through
+// AuthProvider. The seed stays the fallback until createLocalBaby actually runs.
+const LB_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const lbDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+check('W1. birthDateFromWeeks maps whole weeks to an ISO date relative to now', () => {
+  assert.equal(birthDateFromWeeks(0, NOW), lbDay(NOW));
+  assert.equal(birthDateFromWeeks(6, NOW), lbDay(NOW - 6 * LB_WEEK_MS));
+});
+
+check('W2. birthDateFromWeeks clamps negative / non-finite weeks and floors fractions', () => {
+  assert.equal(birthDateFromWeeks(-3, NOW), lbDay(NOW)); // negative → newborn (today)
+  assert.equal(birthDateFromWeeks(Number.NaN, NOW), lbDay(NOW));
+  assert.equal(birthDateFromWeeks(2.9, NOW), lbDay(NOW - 2 * LB_WEEK_MS)); // 2.9 → 2 whole weeks
+});
+
+check('W3. createLocalBaby builds a baby + caregiver from full inputs (trimmed)', () => {
+  const { baby, caregiver } = createLocalBaby(
+    { babyName: '  Noa  ', birthDate: '2026-05-01', caregiverName: '  Sam ', role: 'dad' },
+    NOW,
+  );
+  assert.equal(baby.id, LOCAL_BABY_ID);
+  assert.equal(baby.name, 'Noa');
+  assert.equal(baby.birthDate, '2026-05-01');
+  assert.equal(baby.avatarKey, 'default');
+  assert.equal(baby.createdBy, LOCAL_CAREGIVER_ID);
+  assert.equal(caregiver.id, LOCAL_CAREGIVER_ID);
+  assert.equal(caregiver.displayName, 'Sam');
+  assert.equal(caregiver.role, 'dad');
+  assert.equal(caregiver.colorHex, '#5560C6'); // dad brand color
+  // The real local ids never collide with the demo seed (baby-mia / cg-mom).
+  assert.notEqual(baby.id, 'baby-mia');
+  assert.notEqual(caregiver.id, 'cg-mom');
+});
+
+check('W4. createLocalBaby fills calm defaults for the skip / "Set up later" path', () => {
+  const { baby, caregiver } = createLocalBaby({}, NOW);
+  assert.equal(baby.name, DEFAULT_LOCAL_BABY_NAME); // "Your baby"
+  assert.equal(baby.birthDate, birthDateFromWeeks(0, NOW)); // generic newborn
+  assert.equal(caregiver.displayName, DEFAULT_LOCAL_CAREGIVER_NAME); // "Mom"
+  assert.equal(caregiver.role, 'mom');
+  assert.equal(caregiver.colorHex, '#FF9E5E'); // mom brand color (role default)
+});
+
+check('W5. blank / whitespace-only inputs fall back to defaults', () => {
+  const { baby, caregiver } = createLocalBaby(
+    { babyName: '   ', caregiverName: '', colorHex: '   ' },
+    NOW,
+  );
+  assert.equal(baby.name, DEFAULT_LOCAL_BABY_NAME);
+  assert.equal(caregiver.displayName, DEFAULT_LOCAL_CAREGIVER_NAME);
+  assert.equal(caregiver.colorHex, '#FF9E5E'); // blank colorHex → role color
+});
+
+check('W6. an explicit colorHex overrides the role color', () => {
+  assert.equal(createLocalBaby({ role: 'mom', colorHex: '#123456' }, NOW).caregiver.colorHex, '#123456');
+});
+
+check('W7. createLocalBaby is pure — same (input, now) deep-equals', () => {
+  const input = { babyName: 'Mia', role: 'other' as const };
+  assert.deepEqual(createLocalBaby(input, NOW), createLocalBaby(input, NOW));
+});
+
+check('W8. birthDate from the age control flows through createLocalBaby unchanged', () => {
+  const birthDate = birthDateFromWeeks(8, NOW);
+  assert.equal(createLocalBaby({ babyName: 'Eli', birthDate }, NOW).baby.birthDate, birthDate);
+});
+
+check('W9. serialize → parse round-trips the local baby record', () => {
+  const record = createLocalBaby({ babyName: 'Ivy', birthDate: '2026-04-10', role: 'mom' }, NOW);
+  assert.deepEqual(parseLocalBaby(serializeLocalBaby(record)), record);
+});
+
+check('W10. parseLocalBaby rejects junk so the caller falls back to the seed', () => {
+  assert.equal(parseLocalBaby(null), null); // nothing saved
+  assert.equal(parseLocalBaby('not json {'), null); // unparseable
+  assert.equal(parseLocalBaby('42'), null); // not an object
+  assert.equal(parseLocalBaby('{"caregiver":{}}'), null); // missing baby
+  const onlyBaby = JSON.stringify({ baby: createLocalBaby({}, NOW).baby });
+  assert.equal(parseLocalBaby(onlyBaby), null); // missing caregiver
+  const badRole = JSON.stringify({
+    baby: createLocalBaby({}, NOW).baby,
+    caregiver: { ...createLocalBaby({}, NOW).caregiver, role: 'grandma' },
+  });
+  assert.equal(parseLocalBaby(badRole), null); // unknown caregiver role
 });
 
 // V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are
