@@ -99,6 +99,8 @@ export function BrandSplashGate({ children }: BrandSplashGateProps) {
       logoScale.setValue(1);
       fadeTimer = setTimeout(hideOverlay, BRAND_LAUNCH.minDurationMs);
     } else {
+      logoOpacity.setValue(BRAND_LAUNCH.initialLogoOpacity);
+      logoScale.setValue(BRAND_LAUNCH.initialLogoScale);
       logoAnimation = Animated.parallel([
         Animated.timing(logoOpacity, {
           toValue: 1,
@@ -123,9 +125,15 @@ export function BrandSplashGate({ children }: BrandSplashGateProps) {
       clearTimeout(fadeTimer);
       logoAnimation?.stop();
     };
-  }, [drawAnimationSource, logoOpacity, logoScale, overlayOpacity, reduceMotion]);
+  }, [
+    drawAnimationSource,
+    logoOpacity,
+    logoScale,
+    overlayOpacity,
+    reduceMotion,
+  ]);
 
-  const shouldRenderDrawAnimation = reduceMotion === false && drawAnimationSource !== null;
+  const shouldRenderLottieDrawAnimation = reduceMotion === false && drawAnimationSource !== null;
 
   return (
     <View style={styles.root}>
@@ -144,7 +152,7 @@ export function BrandSplashGate({ children }: BrandSplashGateProps) {
                 transform: [{ scale: logoScale }],
               },
             ]}>
-            {shouldRenderDrawAnimation ? (
+            {shouldRenderLottieDrawAnimation ? (
               <LottieView
                 autoPlay
                 loop={false}

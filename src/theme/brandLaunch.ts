@@ -1,8 +1,8 @@
 export const BRAND_LAUNCH = {
   backgroundColor: '#E8D9FF',
   revealBackgroundColor: '#FBF4EF',
-  logoSize: 132,
-  nativeLogoWidth: 170,
+  logoSize: 176,
+  nativeLogoWidth: 200,
   initialLogoOpacity: 0.82,
   initialLogoScale: 0.97,
   minDurationMs: 1350,
