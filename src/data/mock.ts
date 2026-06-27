@@ -35,6 +35,21 @@ export const babyCaregivers: BabyCaregiver[] = [
 ];
 
 /**
+ * The identity a newly-minted event is stamped with: which baby it belongs to
+ * and which caregiver authored it. The mint helpers below accept this so the
+ * active local baby (owned by AuthProvider) can be threaded through once it
+ * exists (onboarding Phase 0b); until then every caller falls back to the seed.
+ */
+export type EventActor = { babyId: string; caregiverId: string };
+
+/**
+ * The seed identity (demo baby Mia + Mom). Default actor for every mint helper,
+ * so the existing local demo and the Node smoke checks keep stamping events
+ * exactly as before until a real local baby is created.
+ */
+export const SEED_ACTOR: EventActor = { babyId: BABY_ID, caregiverId: MOM_ID };
+
+/**
  * Sample events from "tonight", built RELATIVE to "now" (minutes ago) rather
  * than at fixed calendar timestamps. A fixed running sleep would, by demo day,
  * read as an absurd stale duration (e.g. "36h" — clipped inside the orb). By
@@ -253,7 +268,11 @@ export type FeedDetails = { side?: 'L' | 'R'; durationMin?: number; amountMl?: n
  * feed → "Nursing · 8 min · L" (preserves the zero-arg quick-log behavior). When
  * details are supplied, only the provided fields are recorded.
  */
-export function createFeedEvent(now: number = Date.now(), details?: FeedDetails): LogEvent {
+export function createFeedEvent(
+  now: number = Date.now(),
+  details?: FeedDetails,
+  actor: EventActor = SEED_ACTOR,
+): LogEvent {
   const d = details ?? { side: 'L' };
   const durationMin = d.durationMin ?? 8;
   const endAt = new Date(now).toISOString();
@@ -264,8 +283,8 @@ export function createFeedEvent(now: number = Date.now(), details?: FeedDetails)
   if (d.amountMl != null) meta.amountMl = d.amountMl;
   return {
     id: nextId('feed', now),
-    babyId: baby.id,
-    caregiverId: caregivers[0].id,
+    babyId: actor.babyId,
+    caregiverId: actor.caregiverId,
     type: 'feed',
     startAt,
     endAt,
@@ -275,12 +294,12 @@ export function createFeedEvent(now: number = Date.now(), details?: FeedDetails)
 }
 
 /** A running sleep (no endAt) → "Sleep in progress", shows "Now". */
-export function createSleepEvent(now: number = Date.now()): LogEvent {
+export function createSleepEvent(now: number = Date.now(), actor: EventActor = SEED_ACTOR): LogEvent {
   const startAt = new Date(now).toISOString();
   return {
     id: nextId('sleep', now),
-    babyId: baby.id,
-    caregiverId: caregivers[0].id,
+    babyId: actor.babyId,
+    caregiverId: actor.caregiverId,
     type: 'sleep',
     startAt,
     endAt: null,
@@ -293,14 +312,18 @@ export function createSleepEvent(now: number = Date.now()): LogEvent {
 export type DiaperDetails = { kind?: 'wet' | 'dirty' | 'both'; note?: string };
 
 /** An instant diaper → "Diaper · wet" by default; kind/note overridable. */
-export function createDiaperEvent(now: number = Date.now(), details?: DiaperDetails): LogEvent {
+export function createDiaperEvent(
+  now: number = Date.now(),
+  details?: DiaperDetails,
+  actor: EventActor = SEED_ACTOR,
+): LogEvent {
   const startAt = new Date(now).toISOString();
   const meta: LogEvent['meta'] = { kind: details?.kind ?? 'wet' };
   if (details?.note) meta.note = details.note;
   return {
     id: nextId('diaper', now),
-    babyId: baby.id,
-    caregiverId: caregivers[0].id,
+    babyId: actor.babyId,
+    caregiverId: actor.caregiverId,
     type: 'diaper',
     startAt,
     endAt: null,
@@ -317,15 +340,19 @@ export type PumpDetails = { side?: 'L' | 'R' | 'both'; amountMl?: number };
  * Side L/R is recorded in meta when given; "both" carries no side (the model's
  * side is L | R only) and just reads as a plain pump in the timeline.
  */
-export function createPumpEvent(now: number = Date.now(), details?: PumpDetails): LogEvent {
+export function createPumpEvent(
+  now: number = Date.now(),
+  details?: PumpDetails,
+  actor: EventActor = SEED_ACTOR,
+): LogEvent {
   const startAt = new Date(now).toISOString();
   const meta: LogEvent['meta'] = {};
   if (details?.side === 'L' || details?.side === 'R') meta.side = details.side;
   if (details?.amountMl != null) meta.amountMl = details.amountMl;
   return {
     id: nextId('pump', now),
-    babyId: baby.id,
-    caregiverId: caregivers[0].id,
+    babyId: actor.babyId,
+    caregiverId: actor.caregiverId,
     type: 'pump',
     startAt,
     endAt: null,
@@ -338,15 +365,19 @@ export function createPumpEvent(now: number = Date.now(), details?: PumpDetails)
 export type NoteDetails = { label?: string; note?: string };
 
 /** An instant note → "Note · Fussy" / "Note · <text>" / "Note". */
-export function createNoteEvent(now: number = Date.now(), details?: NoteDetails): LogEvent {
+export function createNoteEvent(
+  now: number = Date.now(),
+  details?: NoteDetails,
+  actor: EventActor = SEED_ACTOR,
+): LogEvent {
   const startAt = new Date(now).toISOString();
   const meta: LogEvent['meta'] = {};
   if (details?.label) meta.label = details.label;
   if (details?.note) meta.note = details.note;
   return {
     id: nextId('note', now),
-    babyId: baby.id,
-    caregiverId: caregivers[0].id,
+    babyId: actor.babyId,
+    caregiverId: actor.caregiverId,
     type: 'note',
     startAt,
     endAt: null,
