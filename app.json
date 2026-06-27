@@ -33,7 +33,7 @@
         {
           "backgroundColor": "#E8D9FF",
           "image": "./assets/images/lullaby-logo-mark.png",
-          "imageWidth": 170,
+          "imageWidth": 200,
           "resizeMode": "contain",
           "dark": {
             "backgroundColor": "#E8D9FF",
