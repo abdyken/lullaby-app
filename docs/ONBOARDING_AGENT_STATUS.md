@@ -3,9 +3,9 @@
 AUTOPILOT_STATUS: READY
 EXPECTED_BRANCH_PATTERN: feat/onboarding-*
 RECOMMENDED_IMPLEMENTATION_BRANCH: feat/onboarding-personalized-activation
-CURRENT_SLICE_ID: phase-1a-checks-polish
-CURRENT_SLICE_NAME: Phase 1A - Checks & polish (rewrite carousel smoke G7–G12, remove dead onboardingContent.ts, bump onboarding key to v2, finish Phase 1A polish)
-NEXT_SLICE_ID: phase-1b-notifications
+CURRENT_SLICE_ID: phase-1b-notifications
+CURRENT_SLICE_NAME: Phase 1B - Gentle morning-recap opt-in (local notification only). STOPPED until a human sets PHASE_1B_ENABLED: true. Phase 1A is complete.
+NEXT_SLICE_ID: phase-2-polish-qa
 PHASE_1B_ENABLED: false
 
 ## Source Of Truth
@@ -29,49 +29,22 @@ PHASE_1B_ENABLED: false
 
 ## Current Slice
 
-### phase-1a-checks-polish - Checks & polish
+### phase-1b-notifications - Gentle morning-recap opt-in (STOPPED)
 
-Goal: now that the live setup flow and the personalized Tonight have shipped, the
-old carousel module is dead code and the v1 smoke assertions describe a UI that no
-longer runs. Reconcile the test harness with the live flow, retire the dead
-module, and bump the completion key so existing testers re-run the new flow once.
+Phase 1A is complete — every Phase 1A slice has shipped (see Completed Slices
+below). The next item in the queue is **Phase 1B notifications**, which is
+**STOPPED by default**.
 
-Roadmap basis:
+Do not implement Phase 1B unless a human explicitly sets `PHASE_1B_ENABLED: true`
+in the header above and selects the `phase-1b-notifications` slice. It is a local
+`expo-notifications` morning-recap opt-in (double opt-in after the first meaningful
+log, feature-flagged, with a graceful in-app fallback) and will likely need a
+dependency install + native-permission review — out of scope for the overnight
+autopilot.
 
-- Section 11: bump `lullaby.onboarding.v1.complete` → `lullaby.onboarding.v2.complete`
-  (so testers who finished the OLD onboarding see the new flow once); extend the dev
-  reset accordingly.
-- Section 12 (Phase 1A tests): **rewrite, not extend** the carousel smoke assertions —
-  G4 (the completion key) and G7–G12 (the 3-panel content / `getNextOnboardingStep` /
-  CTA labels / "Setting up..." loading / skip-on-final) describe the removed carousel.
-- Section 13: `onboardingContent.ts` (the 3-panel carousel content + the fake
-  `ONBOARDING_COMPLETING_LABEL`) is now unused by the app and should be removed.
-
-Expected implementation scope:
-
-- Remove the dead `src/components/onboarding/onboardingContent.ts` and its smoke
-  imports/assertions (G7–G12).
-- Bump the onboarding completion key to v2 in `onboardingStorage.ts` and update G4.
-- Update the dev reset / any remaining v1 references; keep `EXPO_PUBLIC_FORCE_ONBOARDING`.
-- Any remaining Phase 1A polish that does not require a dependency install.
-
-Acceptance criteria:
-
-- `npx tsc --noEmit`, `npm run check:local-interactions`, and `npm run lint` pass with
-  the carousel assertions rewritten (no dead `onboardingContent` import remains).
-- A tester who completed the OLD onboarding re-runs the new flow once (v2 key), and a
-  brand-new install still walks beat → age/name → personalized Tonight.
-
-Foundation already shipped (prerequisites, in earlier Phase 1A slices):
-
-- `src/components/Orb.tsx` (shared `<Orb>` + `useOrbBreathe`).
-- `src/components/onboarding/OnboardingScreen.tsx` (live beat → age/name → real
-  completion flow) + night-aware `OnboardingStepLayout`.
-- `src/state/AuthProvider.tsx` `createLocalBaby` (active local baby above the gate).
-- `src/data/localBaby.ts` (`createLocalBaby`/`birthDateFromWeeks`/`parseWeeks`).
-- Personalized Tonight: `BabyHeader` honest age (`formatBabyAge`), `TonightCalibrating`
-  + `FirstLogCoach` (`src/components/FirstLogCoach.tsx` / pure `firstLogCoach.ts`), and
-  the single-caregiver `HandoffCard` fix.
+Until then the safe next action is human sign-off: review Phase 1A on device (the
+manual-QA notes live in the Completed Slices entries below), then either mark
+`AUTOPILOT_STATUS: DONE` (Phase 1A signed off) or enable Phase 1B deliberately.
 
 ## Slice Queue
 
@@ -86,7 +59,7 @@ Foundation already shipped (prerequisites, in earlier Phase 1A slices):
 - [x] `phase-1a-personalized-tonight` - Personalized Tonight greeting,
   Calibrating copy, first-log coach, and minimal single-caregiver `HandoffCard`
   fix.
-- [ ] `phase-1a-checks-polish` - Rewrite/update local interaction checks for
+- [x] `phase-1a-checks-polish` - Rewrite/update local interaction checks for
   new onboarding constants/reducer/factory and complete Phase 1A polish.
 - [ ] `phase-1b-notifications` - STOP by default. Gentle morning-recap opt-in
   using local notifications only. Requires `PHASE_1B_ENABLED: true`, explicit
@@ -95,6 +68,52 @@ Foundation already shipped (prerequisites, in earlier Phase 1A slices):
   partner invite on-ramp, and edit baby recovery.
 
 ## Completed Slices
+
+### phase-1a-checks-polish - Checks & polish (DONE)
+
+What shipped: the test harness now matches the live setup flow, the dead carousel
+module is gone, and the completion key is bumped to v2 so existing testers re-run
+the new flow once. This is the final Phase 1A slice — **Phase 1A is complete**.
+
+- `src/components/onboarding/onboardingContent.ts` (DELETED): the 3-panel value
+  carousel content + the fake `ONBOARDING_COMPLETING_LABEL` ("Setting up...") became
+  dead code once `phase-1a-live-flow` rebuilt `OnboardingScreen` on the step reducer.
+  No app module imported it (verified) — only the smoke test did.
+- `src/components/onboarding/onboardingStorage.ts`: `ONBOARDING_COMPLETE_KEY` bumped
+  `lullaby.onboarding.v1.complete` → `lullaby.onboarding.v2.complete` (roadmap §11) so
+  a tester who finished the OLD onboarding sees the new flow once. The dev reset
+  (`resetOnboardingCompleteForDevelopment`) references the constant, so it now clears
+  the v2 key (+ local baby + local events) with no further edit;
+  `EXPO_PUBLIC_FORCE_ONBOARDING` is unchanged.
+- `scripts/check-local-interactions.ts`: dropped the dead `onboardingContent` import;
+  updated G4 to assert the v2 key; **removed** the carousel-only checks G7–G12 (3-panel
+  eyebrows, `getNextOnboardingStep`, `getOnboardingCtaLabel`, intro duration, the
+  `getOnboardingPrimaryActionState` loading states, skip-on-final). The live flow's
+  step logic is already covered by the pure-reducer checks Y1–Y7 (and the factory by
+  W1–W10), so no live-flow coverage is lost.
+
+Checks (all green):
+
+- `npx tsc --noEmit` -> exit 0.
+- `npm run check:local-interactions` -> 190/190 passed (was 196; -6 for the removed
+  carousel checks G7–G12).
+- `npm run lint` -> exit 0.
+
+Risks / notes:
+
+- Bumping the key orphans the old `lullaby.onboarding.v1.complete` value in a returning
+  tester's AsyncStorage. It is harmless (never read again) and intentionally left as-is
+  — cleaning it would add a one-off magic string outside this slice's scope.
+- No source behavior beyond the key string changed; the deletion + test edits are pure
+  cleanup. No on-device run in this headless slice.
+
+Manual QA still recommended (device; not run in this headless slice):
+
+- A tester who completed the OLD (v1) onboarding: cold launch → confirm onboarding runs
+  again ONCE (the v2 key), and after finishing it does not reappear on the next launch.
+- A brand-new install still walks beat → age/name → personalized Tonight.
+- Dev reset (`resetOnboardingCompleteForDevelopment`) still returns to a true first-run
+  (no leftover baby or events).
 
 ### phase-1a-personalized-tonight - Personalized Tonight (DONE)
 
@@ -416,15 +435,15 @@ Manual QA still recommended (device, not run in this headless slice):
 
 ## Next Slice
 
-`phase-1a-personalized-tonight` is complete and committed. Move to
-`phase-1a-checks-polish`: the live flow + personalized Tonight have shipped, so the
-3-panel carousel module is now dead code and the v1 smoke assertions (G4, G7–G12)
-describe a UI that no longer runs. Remove `src/components/onboarding/onboardingContent.ts`,
-**rewrite** (not extend) the carousel smoke assertions, bump the completion key
-`lullaby.onboarding.v1.complete` → `lullaby.onboarding.v2.complete` (so testers who
-finished the OLD onboarding re-run the new flow once) and extend the dev reset, plus
-any remaining Phase 1A polish that needs no dependency install. Then `phase-1b-notifications`
-stays STOPPED until a human sets `PHASE_1B_ENABLED: true`.
+`phase-1a-checks-polish` is complete and committed — **Phase 1A is done**. The
+queue's next item is `phase-1b-notifications`, which **stays STOPPED** until a human
+sets `PHASE_1B_ENABLED: true` and selects it deliberately (it needs an
+`expo-notifications` dependency + native-permission review, out of scope for the
+overnight autopilot).
+
+Recommended next human action: device QA of the full Phase 1A arc (see the manual-QA
+notes in each Completed Slices entry), then either mark `AUTOPILOT_STATUS: DONE`
+(Phase 1A signed off) or enable Phase 1B. Do not mark DONE from automode.
 
 ## Blocked Status
 

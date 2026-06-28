@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LOCAL_BABY_STORAGE_KEY } from '../../data/localBaby';
 import { STORAGE_KEY as LOCAL_EVENTS_STORAGE_KEY } from '../../data/persistedState';
 
-export const ONBOARDING_COMPLETE_KEY = 'lullaby.onboarding.v1.complete';
+export const ONBOARDING_COMPLETE_KEY = 'lullaby.onboarding.v2.complete';
 
 const COMPLETE_VALUE = 'true';
 
