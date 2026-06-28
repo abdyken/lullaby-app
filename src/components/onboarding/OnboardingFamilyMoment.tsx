@@ -1,72 +1,104 @@
 /**
- * OnboardingFamilyMoment — an original, Lullaby-styled vector illustration for the
+ * OnboardingFamilyMoment — an original, Lullaby-styled "night care moment" for the
  * first onboarding beat (visual identity, not Phase 1B).
  *
- * It says, before a single word is read, what this app is: two caregivers holding
- * a newborn under a soft glow, with a warm heart floating above. Everything is
- * built from the existing primitives — `react-native-svg` shapes + theme tokens —
- * so there are no new dependencies and no remote/static image assets. The figures
- * are abstract rounded silhouettes (no faces), which keeps it premium and calm
- * rather than childish or clip-arty.
+ * Before a single word is read it should land the whole premise: a caregiver
+ * cradling a swaddled, sleeping newborn through the quiet night shift — warm,
+ * safe, calm. It's a tiny layered scene, not an icon: a soft layered glow, a
+ * second caregiver leaning in as a muted silhouette, the main caregiver with a
+ * bowed head + peaceful face, the swaddled baby with closed eyes resting in the
+ * crook of an arm, a grounding shadow, and a warm heart drifting above. Built
+ * only from `react-native-svg` shapes + theme tokens — no new dependencies, no
+ * image assets.
  *
- * Night-safe: the whole palette swaps with the resolved `mode`, so the scene reads
- * intentionally on both the cream day scaffold and the low-glare navy night
- * scaffold (warm peach family in day, indigo family + crescent moon & stars at
- * night). It must never overpower the `<Orb>` protagonist or the CTA, so it sits
- * quietly in the beat step's flexible middle zone.
+ * Night-safe: the entire palette swaps with the resolved `mode` (warm peach
+ * family on cream by day; muted indigo family lit by a crescent moon + stars at
+ * night), so both surfaces read intentionally rather than one being a recolor of
+ * the other.
  *
- * Motion is a single, barely-perceptible heart float/pulse. Under Reduce Motion
- * the loop never starts and the driver rests at 0, so the heart sits still — same
- * latch discipline as the orb's frozen breathe.
+ * Motion is layered but barely-there: the caregiver+baby group breathes, the
+ * heart drifts and pulses, and two stars trade a slow shimmer. Every loop is
+ * gated on `reduceMotion`; the transform drivers rest at their neutral pose (0 →
+ * scale 1 / translate 0) and the stars fall back to a calm static opacity, so
+ * disabling motion yields a still — and still beautiful — frame, never a
+ * frozen-mid-pose one.
  */
 import { useEffect, useState } from 'react';
-import { Animated, View, type ViewStyle } from 'react-native';
+import { Animated, StyleSheet, View, type ViewStyle } from 'react-native';
 import Svg, { Circle, Defs, Ellipse, G, Path, RadialGradient, Stop } from 'react-native-svg';
 
 import type { SurfaceMode } from '@/theme';
 
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
 /** Illustration coordinate space. Width:height ≈ 1.47 — wide and low so it never
- *  pushes the CTA or competes with the taller orb above it. */
+ *  pushes the CTA down or competes with the taller orb above it. Kept identical to
+ *  the previous version so enriching the art causes no layout shift. */
 const VIEW_W = 220;
 const VIEW_H = 150;
 
 type FamilyPalette = {
   glow: string;
+  glowInner: string;
+  cloud: string;
   bodyBack: string;
   headBack: string;
   bodyFront: string;
   headFront: string;
+  arm: string;
   bundle: string;
+  bundleHi: string;
+  bundleFold: string;
   babyHead: string;
+  shadow: string;
+  faceInk: string;
+  blush: string;
   heart: string;
   moon: string;
   star: string;
 };
 
-/** Day = warm peach family on cream; night = calm indigo family lit by a glow +
- *  crescent moon. Heads are a shade lighter than bodies so the silhouettes read
- *  without hard borders (app rule: separation via tone, not outlines). */
+/** Day = warm peach/blush family on cream; night = calm muted-indigo family lit by
+ *  a glow + crescent moon. Heads sit a shade lighter than bodies so the silhouettes
+ *  read by tone, not outlines (app rule: separation via shadow + cream, not hard
+ *  borders). Colors stay soft and low-saturation — no cartoon primaries. */
 const PALETTES: Record<SurfaceMode, FamilyPalette> = {
   day: {
     glow: '#FFE6CE',
+    glowInner: '#FFF1DF',
+    cloud: '#FBEADC',
     bodyBack: '#FFD2A6',
     headBack: '#FFDEBA',
     bodyFront: '#FF9E5E',
-    headFront: '#FFB582',
-    bundle: '#FFF4E8',
-    babyHead: '#FFE2C4',
+    headFront: '#FFC49C',
+    arm: '#FFAE78',
+    bundle: '#FFF5EA',
+    bundleHi: '#FFFFFF',
+    bundleFold: '#F2D9C4',
+    babyHead: '#FFE7CF',
+    shadow: 'rgba(120,72,42,0.12)',
+    faceInk: 'rgba(110,72,56,0.55)',
+    blush: 'rgba(255,140,108,0.45)',
     heart: '#FF7A3D',
     moon: '#FFFFFF',
     star: '#FFFFFF',
   },
   night: {
     glow: '#2F2D54',
-    bodyBack: '#444A92',
-    headBack: '#565CAD',
+    glowInner: '#3C3B69',
+    cloud: '#2B2A4A',
+    bodyBack: '#3E4488',
+    headBack: '#525AA6',
     bodyFront: '#5560C6',
-    headFront: '#7C84DA',
+    headFront: '#8189DC',
+    arm: '#6A72CE',
     bundle: '#E9EBFB',
-    babyHead: '#CFD4F2',
+    bundleHi: '#FFFFFF',
+    bundleFold: '#C7CBEC',
+    babyHead: '#DCE0F6',
+    shadow: 'rgba(0,0,0,0.22)',
+    faceInk: 'rgba(28,26,52,0.55)',
+    blush: 'rgba(255,150,120,0.35)',
     // a warm heart stays warm at night — the one point of warmth on a cool scene
     heart: '#FF9E5E',
     moon: '#EEF0FF',
@@ -77,7 +109,7 @@ const PALETTES: Record<SurfaceMode, FamilyPalette> = {
 type Props = {
   /** Resolved surface — drives the whole palette. Defaults to day. */
   mode?: SurfaceMode;
-  /** When true the heart sits still (no loop). Defaults to false. */
+  /** When true all loops stay off and the scene renders as a calm still. */
   reduceMotion?: boolean;
   /** Cap so the scene never stretches uncomfortably wide on tablets. */
   maxWidth?: number;
@@ -87,90 +119,171 @@ type Props = {
 export function OnboardingFamilyMoment({
   mode = 'day',
   reduceMotion = false,
-  maxWidth = 260,
+  maxWidth = 264,
   style,
 }: Props) {
   const p = PALETTES[mode];
+  const night = mode === 'night';
 
-  // One subtle driver for the floating heart. Rests at 0 (its at-rest pose) when
-  // Reduce Motion is on, so disabling motion flattens rather than freezes mid-pose.
+  // Three calm drivers. Each rests at 0 → its neutral pose, so Reduce Motion just
+  // never starts the loops and the scene holds a still, intentional frame.
+  const [breathe] = useState(() => new Animated.Value(0));
   const [pulse] = useState(() => new Animated.Value(0));
+  const [twinkle] = useState(() => new Animated.Value(0));
+
   useEffect(() => {
     if (reduceMotion) return;
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 2600, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0, duration: 2600, useNativeDriver: true }),
-      ]),
-    );
-    animation.start();
-    return () => animation.stop();
-  }, [pulse, reduceMotion]);
+    const loop = (value: Animated.Value, halfMs: number, useNativeDriver: boolean) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(value, { toValue: 1, duration: halfMs, useNativeDriver }),
+          Animated.timing(value, { toValue: 0, duration: halfMs, useNativeDriver }),
+        ]),
+      );
+    // group breathe + heart drift run on the native driver (transforms); the star
+    // shimmer animates an SVG opacity prop, which the native driver can't own.
+    const animations = [
+      loop(breathe, 3000, true),
+      loop(pulse, 2400, true),
+      ...(night ? [loop(twinkle, 1700, false)] : []),
+    ];
+    animations.forEach((a) => a.start());
+    return () => animations.forEach((a) => a.stop());
+  }, [breathe, pulse, twinkle, reduceMotion, night]);
 
+  const groupScale = breathe.interpolate({ inputRange: [0, 1], outputRange: [1, 1.014] });
+  const groupTranslate = breathe.interpolate({ inputRange: [0, 1], outputRange: [0, -2.4] });
   const heartTranslate = pulse.interpolate({ inputRange: [0, 1], outputRange: [0, -5] });
-  const heartScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.09] });
+  const heartScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
+  // two stars trade the shimmer so the sky feels alive without blinking in unison
+  const starOpacityA = twinkle.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0.95] });
+  const starOpacityB = twinkle.interpolate({ inputRange: [0, 1], outputRange: [0.9, 0.4] });
 
   return (
     <View
       accessible
       accessibilityRole="image"
-      accessibilityLabel="Two parents holding their newborn under a soft glow"
+      accessibilityLabel="A parent cradling their swaddled, sleeping newborn under a soft night glow"
       style={[
         { width: '100%', maxWidth, aspectRatio: VIEW_W / VIEW_H, alignSelf: 'center' },
         style,
       ]}>
-      <Svg width="100%" height="100%" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}>
+      {/* ── Back layer: glow, night sky, the second caregiver. Mostly static. ── */}
+      <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}>
         <Defs>
-          <RadialGradient id="famGlow" cx="50%" cy="46%" r="62%">
-            <Stop offset="0%" stopColor={p.glow} stopOpacity={mode === 'night' ? 0.95 : 0.85} />
+          <RadialGradient id="famGlowOuter" cx="50%" cy="48%" r="64%">
+            <Stop offset="0%" stopColor={p.glow} stopOpacity={night ? 0.92 : 0.8} />
             <Stop offset="100%" stopColor={p.glow} stopOpacity={0} />
+          </RadialGradient>
+          <RadialGradient id="famGlowInner" cx="48%" cy="58%" r="46%">
+            <Stop offset="0%" stopColor={p.glowInner} stopOpacity={night ? 0.6 : 0.72} />
+            <Stop offset="100%" stopColor={p.glowInner} stopOpacity={0} />
           </RadialGradient>
         </Defs>
 
-        {/* soft glow / night bubble — the warmth the family sits inside */}
-        <Ellipse cx={110} cy={86} rx={104} ry={66} fill="url(#famGlow)" />
+        {/* layered halo → depth: a wide soft bloom + a brighter core behind the pair */}
+        <Ellipse cx={108} cy={82} rx={110} ry={72} fill="url(#famGlowOuter)" />
+        <Ellipse cx={104} cy={94} rx={70} ry={52} fill="url(#famGlowInner)" />
 
-        {/* night-only brand ornament: crescent moon + stars (reuses the orb's
-            proven crescent path, scaled down via a transform) */}
-        {mode === 'night' && (
+        {/* a soft grounding cloud the family rests on — barely-there, just enough to
+            seat the scene rather than have it float in a void */}
+        <Ellipse cx={108} cy={152} rx={98} ry={28} fill={p.cloud} opacity={night ? 0.55 : 0.7} />
+
+        {/* night context: crescent moon (reuses the orb's proven crescent path,
+            scaled down) + a small scatter of stars, two of which shimmer */}
+        {night && (
           <>
-            <G transform="translate(161 14) scale(0.2)">
+            <G transform="translate(165 12) scale(0.2)">
               <Path d="M89 14a74 74 0 1 0 68 102 58 58 0 0 1-68-102Z" fill={p.moon} opacity={0.92} />
             </G>
-            <Circle cx={150} cy={26} r={1.7} fill={p.star} opacity={0.85} />
-            <Circle cx={197} cy={52} r={1.5} fill={p.star} opacity={0.75} />
-            <Circle cx={159} cy={56} r={1.2} fill={p.star} opacity={0.7} />
+            <Circle cx={44} cy={34} r={1.5} fill={p.star} opacity={0.7} />
+            <Circle cx={150} cy={58} r={1.3} fill={p.star} opacity={0.6} />
+            <Circle cx={196} cy={64} r={1.6} fill={p.star} opacity={0.7} />
+            {reduceMotion ? (
+              <>
+                <Circle cx={64} cy={22} r={1.9} fill={p.star} opacity={0.8} />
+                <Circle cx={182} cy={38} r={1.7} fill={p.star} opacity={0.8} />
+              </>
+            ) : (
+              <>
+                <AnimatedCircle cx={64} cy={22} r={1.9} fill={p.star} opacity={starOpacityA} />
+                <AnimatedCircle cx={182} cy={38} r={1.7} fill={p.star} opacity={starOpacityB} />
+              </>
+            )}
           </>
         )}
 
-        {/* back caregiver (slightly lower head → reads as behind) */}
-        <Path d="M104 150 C104 116 120 96 140 96 C160 96 176 116 176 150 Z" fill={p.bodyBack} />
-        <Circle cx={140} cy={76} r={16} fill={p.headBack} />
-
-        {/* front caregiver (taller, closer) */}
-        <Path d="M44 150 C44 108 62 86 88 86 C114 86 130 108 130 150 Z" fill={p.bodyFront} />
-        <Circle cx={86} cy={63} r={19} fill={p.headFront} />
-
-        {/* the newborn, cradled across both — a swaddle bundle + small head peeking
-            out toward the front parent's chest */}
-        <G transform="rotate(-15 118 120)">
-          <Ellipse cx={118} cy={120} rx={27} ry={17} fill={p.bundle} />
-        </G>
-        <Circle cx={99} cy={109} r={11} fill={p.babyHead} />
+        {/* second caregiver — softer, muted, leaning in from behind so the moment
+            reads as "parents", not a lone figure, without cluttering the front */}
+        <Path d="M122 150 C122 118 138 100 156 100 C174 100 186 118 186 150 Z" fill={p.bodyBack} />
+        <Circle cx={156} cy={80} r={16} fill={p.headBack} />
       </Svg>
 
-      {/* floating heart — the single subtle motion; flat under Reduce Motion */}
+      {/* ── Mid layer: the caregiver + baby group. This is what breathes. ── */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFill,
+          { transform: [{ translateY: groupTranslate }, { scale: groupScale }] },
+        ]}>
+        <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}>
+          {/* grounding shadow beneath the bundle → the baby has weight */}
+          <Ellipse cx={110} cy={141} rx={36} ry={7.5} fill={p.shadow} />
+
+          {/* main caregiver torso/shoulders */}
+          <Path d="M38 150 C38 112 56 92 84 92 C112 92 128 110 128 150 Z" fill={p.bodyFront} />
+
+          {/* head, bowed toward the baby (whole group tilted), with a peaceful face:
+              one closed eye, a soft smile, a touch of blush */}
+          <G transform="rotate(7 78 64)">
+            <Circle cx={78} cy={64} r={20} fill={p.headFront} />
+            <Path d="M82 66 Q86 69 90 66" stroke={p.faceInk} strokeWidth={1.6} strokeLinecap="round" fill="none" />
+            <Path d="M80 75 Q85 79 90 75" stroke={p.faceInk} strokeWidth={1.6} strokeLinecap="round" fill="none" />
+            <Circle cx={90} cy={72} r={3} fill={p.blush} />
+          </G>
+
+          {/* the swaddled newborn, tilted, nestled against the chest. A hood of
+              swaddle behind the head + fabric folds + a soft top highlight give the
+              bundle real form rather than a flat blob. */}
+          <Circle cx={94} cy={98} r={14} fill={p.bundle} />
+          <G transform="rotate(-22 110 110)">
+            <Ellipse cx={110} cy={110} rx={27} ry={18} fill={p.bundle} />
+            <Path d="M90 106 Q110 116 130 107" stroke={p.bundleFold} strokeWidth={2} strokeLinecap="round" fill="none" opacity={0.55} />
+            <Path d="M94 116 Q110 123 126 116" stroke={p.bundleFold} strokeWidth={1.6} strokeLinecap="round" fill="none" opacity={0.4} />
+            <Ellipse cx={102} cy={103} rx={16} ry={6.5} fill={p.bundleHi} opacity={0.45} />
+          </G>
+
+          {/* the cradling forearm sweeping across the front, under the bundle */}
+          <Path
+            d="M52 122 C62 140 92 146 120 134"
+            stroke={p.arm}
+            strokeWidth={15}
+            strokeLinecap="round"
+            fill="none"
+          />
+
+          {/* baby head + sleeping face (closed eyes, tiny mouth, soft cheeks) */}
+          <Circle cx={96} cy={96} r={12} fill={p.babyHead} />
+          <Path d="M90 95 Q92 97 94 95" stroke={p.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
+          <Path d="M98 95 Q100 97 102 95" stroke={p.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
+          <Path d="M94 101 Q96 102.6 98 101" stroke={p.faceInk} strokeWidth={1.1} strokeLinecap="round" fill="none" />
+          <Circle cx={89} cy={99} r={2} fill={p.blush} />
+          <Circle cx={102} cy={99} r={2} fill={p.blush} />
+        </Svg>
+      </Animated.View>
+
+      {/* ── Foreground: the warm heart, drifting + pulsing above the pair. ── */}
       <Animated.View
         pointerEvents="none"
         style={{
           position: 'absolute',
-          top: '20%',
+          top: '15%',
           left: 0,
           right: 0,
           alignItems: 'center',
           transform: [{ translateY: heartTranslate }, { scale: heartScale }],
         }}>
-        <Svg width="13%" style={{ aspectRatio: 1 }} viewBox="0 0 24 24">
+        <Svg width="11%" style={{ aspectRatio: 1 }} viewBox="0 0 24 24">
           <Path
             d="M12 21.6 C12 21.6 3.2 15.4 3.2 9 C3.2 6 5.6 3.8 8.4 3.8 C10 3.8 11.4 4.6 12 5.8 C12.6 4.6 14 3.8 15.6 3.8 C18.4 3.8 20.8 6 20.8 9 C20.8 15.4 12 21.6 12 21.6 Z"
             fill={p.heart}
