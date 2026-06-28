@@ -43,6 +43,7 @@ import {
   type SurfacePalette,
 } from '@/theme';
 
+import { OnboardingFamilyMoment } from './OnboardingFamilyMoment';
 import { OnboardingStepLayout } from './OnboardingStepLayout';
 import { useOnboardingFlow } from './useOnboardingFlow';
 
@@ -310,6 +311,7 @@ export function OnboardingScreen({ onComplete }: Props) {
         <Text style={{ fontFamily: fonts.body, fontSize: 15, lineHeight: 22, color: surface.inkSoft }}>
           The hard hours are easier with a little help.
         </Text>
+        <OnboardingFamilyMoment mode={mode} reduceMotion={reduceMotion} style={{ marginTop: 6 }} />
       </OnboardingStepLayout>
     );
   }
