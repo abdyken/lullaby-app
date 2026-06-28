@@ -227,19 +227,19 @@ export function OnboardingFamilyMoment({
             fill="none"
           />
 
-          {/* baby head + sleeping face. The whole face is one group translated to
-              the head centre (96,96), built from mirrored offsets, so the eyes are
-              dead level and the nose/smile/cheeks stay centered — never crooked. */}
-          <Circle cx={96} cy={96} r={12} fill={P.babyHead} />
-          {/* features nudged left of the head centre so the face sits visually
-              centred within the cradled (slightly right-leaning) head */}
-          <G transform="translate(89 96)">
-            <Path d="M-5 -9 Q0 -13.5 5 -9" stroke={P.babyHair} strokeWidth={1.6} strokeLinecap="round" fill="none" />
-            <Path d="M-4.5 0 Q-2.5 1.8 -0.5 0" stroke={P.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
-            <Path d="M0.5 0 Q2.5 1.8 4.5 0" stroke={P.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
-            <Path d="M-2.5 5 Q0 7 2.5 5" stroke={P.faceInk} strokeWidth={1.1} strokeLinecap="round" fill="none" />
-            <Circle cx={-7} cy={3} r={2} fill={P.blush} />
-            <Circle cx={7} cy={3} r={2} fill={P.blush} />
+          {/* baby head + sleeping face, wrapped as one group and shifted 5px left
+              so the whole head sits more centered in the cradle. The face keeps its
+              exact alignment inside the head (mirrored offsets, eyes level). */}
+          <G transform="translate(-5 0)">
+            <Circle cx={96} cy={96} r={12} fill={P.babyHead} />
+            <G transform="translate(89 96)">
+              <Path d="M-5 -9 Q0 -13.5 5 -9" stroke={P.babyHair} strokeWidth={1.6} strokeLinecap="round" fill="none" />
+              <Path d="M-4.5 0 Q-2.5 1.8 -0.5 0" stroke={P.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
+              <Path d="M0.5 0 Q2.5 1.8 4.5 0" stroke={P.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
+              <Path d="M-2.5 5 Q0 7 2.5 5" stroke={P.faceInk} strokeWidth={1.1} strokeLinecap="round" fill="none" />
+              <Circle cx={-7} cy={3} r={2} fill={P.blush} />
+              <Circle cx={7} cy={3} r={2} fill={P.blush} />
+            </G>
           </G>
         </Svg>
       </Animated.View>
