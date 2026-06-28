@@ -46,11 +46,13 @@ const P = {
   // background caregiver — muted so the front pair stays the focus
   bodyBack: '#F9C193',
   headBack: '#FBCEA0',
-  hairBack: '#E0934F',
+  // soft warm-brown / auburn hair so it frames the faces and reads as hair, not
+  // skin — never a harsh black block
+  hairBack: '#A86A42',
   // front caregiver
   bodyFront: '#F4853C',
   headFront: '#FFB082',
-  hair: '#DD6E2E',
+  hair: '#955A33',
   arm: '#FA9351',
   // swaddle + baby
   bundle: '#FFF2E2',
@@ -166,11 +168,20 @@ export function OnboardingFamilyMoment({
         <Ellipse cx={180} cy={30} rx={25} ry={25} fill="url(#famMarkHalo)" />
         <Circle cx={180} cy={30} r={13} fill="url(#famOrb)" />
 
-        {/* second caregiver — softer, muted, leaning in from behind so the moment
-            reads as "parents", not a lone figure. A soft hair cap gives it form. */}
+        {/* second caregiver — softer, leaning in from behind so the moment reads as
+            "parents", not a lone figure. Hair cap frames the face; the face itself
+            is grouped about the head centre (mirrored offsets → centered + level). */}
         <Path d="M122 150 C122 118 138 100 156 100 C174 100 186 118 186 150 Z" fill={P.bodyBack} />
-        <Circle cx={156} cy={75} r={18} fill={P.hairBack} />
+        <Circle cx={156} cy={71} r={19} fill={P.hairBack} />
         <Circle cx={156} cy={80} r={16} fill={P.headBack} />
+        <G transform="translate(156 80)">
+          <Path d="M-6 -1 Q-3.5 1.4 -1 -1" stroke={P.faceInk} strokeWidth={1.5} strokeLinecap="round" fill="none" />
+          <Path d="M1 -1 Q3.5 1.4 6 -1" stroke={P.faceInk} strokeWidth={1.5} strokeLinecap="round" fill="none" />
+          <Path d="M-1 1 Q0 2.6 1 1" stroke={P.faceInk} strokeWidth={1.2} strokeLinecap="round" fill="none" />
+          <Path d="M-3.5 4.6 Q0 7 3.5 4.6" stroke={P.faceInk} strokeWidth={1.4} strokeLinecap="round" fill="none" />
+          <Circle cx={-7.5} cy={2.4} r={2.2} fill={P.blush} />
+          <Circle cx={7.5} cy={2.4} r={2.2} fill={P.blush} />
+        </G>
       </Svg>
 
       {/* ── Mid layer: the caregiver + baby group. This is what breathes. ── */}
@@ -191,14 +202,18 @@ export function OnboardingFamilyMoment({
               frames but never covers the face, two closed eyes, a small nose, a
               gentle smile, and a touch of blush */}
           <G transform="rotate(7 78 64)">
-            <Circle cx={78} cy={57} r={22} fill={P.hair} />
+            <Circle cx={78} cy={55} r={23} fill={P.hair} />
             <Circle cx={78} cy={64} r={20} fill={P.headFront} />
-            <Path d="M68 62 Q72 65 76 62" stroke={P.faceInk} strokeWidth={1.6} strokeLinecap="round" fill="none" />
-            <Path d="M80 62 Q84 65 88 62" stroke={P.faceInk} strokeWidth={1.6} strokeLinecap="round" fill="none" />
-            <Path d="M77 65 Q78 68 80 67" stroke={P.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
-            <Path d="M71 73 Q78 78 85 73" stroke={P.faceInk} strokeWidth={1.7} strokeLinecap="round" fill="none" />
-            <Circle cx={69} cy={70} r={2.6} fill={P.blush} />
-            <Circle cx={87} cy={70} r={2.6} fill={P.blush} />
+            {/* face grouped about the head centre (78,64) with mirrored offsets so
+                the eyes stay level and the nose/smile stay centered under them */}
+            <G transform="translate(78 64)">
+              <Path d="M-8 -2 Q-5 1 -2 -2" stroke={P.faceInk} strokeWidth={1.7} strokeLinecap="round" fill="none" />
+              <Path d="M2 -2 Q5 1 8 -2" stroke={P.faceInk} strokeWidth={1.7} strokeLinecap="round" fill="none" />
+              <Path d="M-1.4 1 Q0 2.8 1.4 2.2" stroke={P.faceInk} strokeWidth={1.4} strokeLinecap="round" fill="none" />
+              <Path d="M-5 7 Q0 11 5 7" stroke={P.faceInk} strokeWidth={1.8} strokeLinecap="round" fill="none" />
+              <Circle cx={-9} cy={5} r={2.8} fill={P.blush} />
+              <Circle cx={9} cy={5} r={2.8} fill={P.blush} />
+            </G>
           </G>
 
           {/* the swaddled newborn, tilted, nestled against the chest. A hood of
@@ -223,15 +238,18 @@ export function OnboardingFamilyMoment({
             fill="none"
           />
 
-          {/* baby head + sleeping face — centered and symmetric inside the head: a
-              soft hair wisp, two level closed eyes, a gentle smile, soft cheeks */}
+          {/* baby head + sleeping face. The whole face is one group translated to
+              the head centre (96,96), built from mirrored offsets, so the eyes are
+              dead level and the nose/smile/cheeks stay centered — never crooked. */}
           <Circle cx={96} cy={96} r={12} fill={P.babyHead} />
-          <Path d="M91 87 Q96 82 101 87" stroke={P.babyHair} strokeWidth={1.6} strokeLinecap="round" fill="none" />
-          <Path d="M90 96 Q92 98 94 96" stroke={P.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
-          <Path d="M98 96 Q100 98 102 96" stroke={P.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
-          <Path d="M93 101 Q96 103 99 101" stroke={P.faceInk} strokeWidth={1.1} strokeLinecap="round" fill="none" />
-          <Circle cx={88} cy={99} r={2} fill={P.blush} />
-          <Circle cx={104} cy={99} r={2} fill={P.blush} />
+          <G transform="translate(96 96)">
+            <Path d="M-5 -9 Q0 -13.5 5 -9" stroke={P.babyHair} strokeWidth={1.6} strokeLinecap="round" fill="none" />
+            <Path d="M-4.5 0 Q-2.5 1.8 -0.5 0" stroke={P.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
+            <Path d="M0.5 0 Q2.5 1.8 4.5 0" stroke={P.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
+            <Path d="M-2.5 5 Q0 7 2.5 5" stroke={P.faceInk} strokeWidth={1.1} strokeLinecap="round" fill="none" />
+            <Circle cx={-7} cy={3} r={2} fill={P.blush} />
+            <Circle cx={7} cy={3} r={2} fill={P.blush} />
+          </G>
         </Svg>
       </Animated.View>
 

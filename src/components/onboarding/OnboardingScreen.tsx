@@ -15,8 +15,10 @@
  * fake "Setting up..." button label is gone — the `creating` step is a true
  * transition.
  *
- * Night-safe: the surface is resolved once at entry (`resolveSurfaceMode`), so the
- * first frame at 3am is the low-glare navy scaffold + night orb, not a cream shock.
+ * Warm/light first run: the onboarding beat always uses the warm day surface +
+ * day orb, so the very first impression is calm and welcoming rather than the
+ * low-glare navy night scaffold. (The rest of the app still resolves day/night
+ * normally; this override is scoped to the first-run flow only.)
  */
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -37,7 +39,6 @@ import {
   colors,
   fonts,
   radii,
-  resolveSurfaceMode,
   surfaces,
   type SurfaceMode,
   type SurfacePalette,
@@ -228,10 +229,11 @@ export function OnboardingScreen({ onComplete }: Props) {
   const { createLocalBaby } = useAuth();
   const reduceMotion = useReduceMotion();
 
-  // Resolve night/day ONCE at entry so the very first frame is night-safe (§10).
-  const [mode] = useState<SurfaceMode>(() => resolveSurfaceMode('auto', new Date().getHours()));
+  // First-run onboarding is always warm/light — never the navy night scaffold —
+  // so the welcome reads calm and inviting regardless of the hour.
+  const mode: SurfaceMode = 'day';
   const surface = surfaces[mode];
-  const entrySky: OrbSky = mode === 'night' ? 'night' : 'day';
+  const entrySky: OrbSky = 'day';
 
   const [ageKey, setAgeKey] = useState<string | null>(null);
   const [name, setName] = useState('');
