@@ -6,9 +6,9 @@
  * cradling a swaddled, sleeping newborn — warm, safe, calm. It's a tiny layered
  * scene, not an icon: a soft layered glow, a second caregiver leaning in, the main
  * caregiver with a bowed head + peaceful face, the swaddled baby with closed eyes
- * resting in the crook of an arm, a grounding shadow, a small Lullaby orb, and a
- * warm heart drifting above. Built only from `react-native-svg` shapes + theme
- * tokens — no new dependencies, no image assets.
+ * resting in the crook of an arm, a grounding shadow, and a warm heart drifting
+ * above. Built only from `react-native-svg` shapes + theme tokens — no new
+ * dependencies, no image assets.
  *
  * One warm palette, both surfaces: the family deliberately does NOT swap into a
  * dark variant. The figures stay warm and consistent on the cream day scaffold and
@@ -65,7 +65,6 @@ const P = {
   faceInk: 'rgba(94,58,44,0.62)',
   blush: 'rgba(255,128,94,0.5)',
   heart: '#FF7333',
-  markGlow: '#FFD79A',
 } as const;
 
 type Props = {
@@ -138,18 +137,6 @@ export function OnboardingFamilyMoment({
             <Stop offset="68%" stopColor={P.backplate} stopOpacity={night ? 0.28 : 0} />
             <Stop offset="100%" stopColor={P.backplate} stopOpacity={0} />
           </RadialGradient>
-          {/* soft halo behind the little Lullaby orb */}
-          <RadialGradient id="famMarkHalo" cx="50%" cy="50%" r="50%">
-            <Stop offset="0%" stopColor={P.markGlow} stopOpacity={night ? 0.5 : 0.42} />
-            <Stop offset="100%" stopColor={P.markGlow} stopOpacity={0} />
-          </RadialGradient>
-          {/* the orb itself — same stops as the hero orb's day body, so the little
-              mark reads as a sibling of the orb at the top of the screen */}
-          <RadialGradient id="famOrb" cx="42%" cy="38%" r="64%">
-            <Stop offset="0%" stopColor="#FFF1D6" />
-            <Stop offset="46%" stopColor="#FFC15E" />
-            <Stop offset="100%" stopColor="#FF9A3D" />
-          </RadialGradient>
         </Defs>
 
         {/* neutral backplate first (under the warm glow) so it only lifts shadows */}
@@ -162,11 +149,6 @@ export function OnboardingFamilyMoment({
         {/* a soft grounding cloud the family rests on — barely-there, just enough to
             seat the scene rather than have it float in a void */}
         <Ellipse cx={108} cy={152} rx={98} ry={28} fill={P.cloud} opacity={night ? 0.5 : 0.7} />
-
-        {/* the little Lullaby orb in its own halo — ties the scene to the brand orb
-            at the top of the screen, not just the heart */}
-        <Ellipse cx={180} cy={30} rx={25} ry={25} fill="url(#famMarkHalo)" />
-        <Circle cx={180} cy={30} r={13} fill="url(#famOrb)" />
 
         {/* second caregiver — softer, leaning in from behind so the moment reads as
             "parents", not a lone figure. Hair cap frames the face; the face itself
@@ -249,9 +231,9 @@ export function OnboardingFamilyMoment({
               the head centre (96,96), built from mirrored offsets, so the eyes are
               dead level and the nose/smile/cheeks stay centered — never crooked. */}
           <Circle cx={96} cy={96} r={12} fill={P.babyHead} />
-          {/* features nudged 3px left of the head centre so the face sits visually
+          {/* features nudged left of the head centre so the face sits visually
               centred within the cradled (slightly right-leaning) head */}
-          <G transform="translate(93 96)">
+          <G transform="translate(89 96)">
             <Path d="M-5 -9 Q0 -13.5 5 -9" stroke={P.babyHair} strokeWidth={1.6} strokeLinecap="round" fill="none" />
             <Path d="M-4.5 0 Q-2.5 1.8 -0.5 0" stroke={P.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
             <Path d="M0.5 0 Q2.5 1.8 4.5 0" stroke={P.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
