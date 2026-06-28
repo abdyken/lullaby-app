@@ -243,22 +243,65 @@ print_dry_run() {
   log "----- END PROMPT -----"
 }
 
+slice_allows_auth_provider() {
+  local slice_id="$1"
+
+  case "$slice_id" in
+    phase-0a|phase-0b|phase-1a-live-flow) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+slice_allows_logging_provider() {
+  local slice_id="$1"
+
+  case "$slice_id" in
+    phase-0a) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+slice_allows_phase_1a_tonight() {
+  local slice_id="$1"
+
+  case "$slice_id" in
+    phase-1a-personalized-tonight|phase-1a-checks-polish) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 is_safe_path() {
-  case "$1" in
+  local file="$1"
+  local slice_id="$2"
+
+  case "$file" in
     docs/ONBOARDING_AGENT_STATUS.md) return 0 ;;
     scripts/check-local-interactions.ts) return 0 ;;
+    src/components/Orb.tsx) return 0 ;;
+    src/components/OrbHero.tsx) return 0 ;;
     src/components/onboarding/*) return 0 ;;
-    src/components/auth/*) return 0 ;;
-    src/components/BabyHeader.tsx) return 0 ;;
-    src/components/TonightStatus.tsx) return 0 ;;
-    src/components/QuickLogRow.tsx) return 0 ;;
-    src/components/HandoffCard.tsx) return 0 ;;
-    src/components/FirstLogCoach.tsx) return 0 ;;
-    src/state/AuthProvider.tsx) return 0 ;;
-    src/data/*) return 0 ;;
-    src/app/\(tabs\)/index.tsx) return 0 ;;
-    src/app/\(tabs\)/log.tsx) return 0 ;;
-    src/features/logging/state/LoggingProvider.tsx) return 0 ;;
+    src/components/auth/AuthShell.tsx) return 0 ;;
+    src/components/auth/BabySetupScreen.tsx) return 0 ;;
+    src/components/auth/RolePicker.tsx) return 0 ;;
+    src/data/localBaby.ts) return 0 ;;
+    src/state/AuthProvider.tsx)
+      if slice_allows_auth_provider "$slice_id"; then
+        return 0
+      fi
+      return 1
+      ;;
+    src/features/logging/state/LoggingProvider.tsx)
+      if slice_allows_logging_provider "$slice_id"; then
+        return 0
+      fi
+      return 1
+      ;;
+    src/components/BabyHeader.tsx|src/components/TonightStatus.tsx|src/components/QuickLogRow.tsx|src/components/HandoffCard.tsx|src/components/FirstLogCoach.tsx|src/app/\(tabs\)/index.tsx|src/app/\(tabs\)/log.tsx)
+      if slice_allows_phase_1a_tonight "$slice_id"; then
+        return 0
+      fi
+      return 1
+      ;;
     *) return 1 ;;
   esac
 }
@@ -266,6 +309,7 @@ is_safe_path() {
 check_diff_scope() {
   local before="$1"
   local after="$2"
+  local slice_id="$3"
   local changed_count=0
   local file
   local unsafe=0
@@ -279,7 +323,7 @@ check_diff_scope() {
   while IFS= read -r file; do
     [ -n "$file" ] || continue
     changed_count=$((changed_count + 1))
-    if ! is_safe_path "$file"; then
+    if ! is_safe_path "$file" "$slice_id"; then
       echo "Out-of-scope changed file: $file" >&2
       unsafe=1
     fi
@@ -488,7 +532,7 @@ while [ "$sessions_completed" -lt "$MAX_SESSIONS" ]; do
   [ "$claude_exit" -eq 0 ] || die "Claude failed in session $session_number; see $session_log"
   [ "$after_head" != "$before_head" ] || die "Claude made no commit for slice $current_slice_id"
 
-  check_diff_scope "$before_head" "$after_head"
+  check_diff_scope "$before_head" "$after_head" "$current_slice_id"
   run_checks
 
   if [ -n "$(git status --porcelain)" ]; then
