@@ -17,6 +17,7 @@ import { View } from 'react-native';
 import { AccountSheet } from '@/components/auth/AccountSheet';
 import { AuthLoading } from '@/components/auth/AuthLoading';
 import { BabyHeader } from '@/components/BabyHeader';
+import { FirstLogCoach, TonightCalibrating } from '@/components/FirstLogCoach';
 import { HandoffCard } from '@/components/HandoffCard';
 import { LogSheet, type SheetOption } from '@/components/LogSheet';
 import { isLoggingV2Enabled } from '@/features/logging';
@@ -258,6 +259,13 @@ export default function TonightScreen() {
   // TonightStatus derives from `events` when no items are passed (legacy path).
   const statusItems = v2 ? v2.tonightStatus : undefined;
 
+  // "Has the parent logged anything real yet?" — read from the flag-correct store
+  // (the v2 timeline when loggingV2 is on, else the legacy events). Drives the
+  // brand-new-night Calibrating line + first-log coach. Inside renderBody we are
+  // always past v2 hydration (the screen holds AuthLoading until then), so this is
+  // stable and never reads a half-hydrated store.
+  const hasRealEvents = v2 ? v2.timeline.length > 0 : events.length > 0;
+
   // The screen body is parameterised by the committed surface mode so all child
   // components read the same real theme after the native screenshot has frozen.
   const renderBody = (bodyMode: SurfaceMode) => (
@@ -293,6 +301,19 @@ export default function TonightScreen() {
       <View style={{ marginTop: 13 }}>
         <TonightStatus events={events} now={displayNow} items={statusItems} surfaceMode={bodyMode} />
       </View>
+
+      {/* Brand-new night (zero real events): a quiet, honest Calibrating line under
+          the status strip + a dismissible first-log coach that nudges the first tap
+          and, after it, points the eye back up at the status strip. Neither blocks
+          the quick-log row — they sit above it (the coach owns its own top margin
+          so a hidden coach leaves no gap). */}
+      {!hasRealEvents && (
+        <View style={{ marginTop: 10 }}>
+          <TonightCalibrating babyName={baby.name} surfaceMode={bodyMode} />
+        </View>
+      )}
+
+      <FirstLogCoach babyName={baby.name} hasRealEvents={hasRealEvents} surfaceMode={bodyMode} />
 
       <View style={{ marginTop: 13 }}>
         <QuickLogRow

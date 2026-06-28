@@ -159,13 +159,20 @@ export function HandoffCard({
   const useSummary = cursorReady && hasAnyEvents;
   const showMarkCaughtUp = useSummary && summary.hasNew && onMarkCaughtUp != null;
 
+  // With a single caregiver the "Both caregivers are ready" copy is simply false
+  // (roadmap §9/§14). Show a calm single-caregiver state instead; the full
+  // partner-invite on-ramp stays deferred to Phase 2. Two+ caregivers (the seed
+  // demo / a linked Supabase family) keep the original "both ready" line.
+  const isSolo = caregivers.length <= 1;
+  const readyTitle = isSolo ? 'Your night log is ready' : 'Both caregivers are ready';
+
   const title = !hasAnyEvents
-    ? 'Both caregivers are ready'
+    ? readyTitle
     : useSummary
       ? summary.text
       : hasLog
         ? handoffSentence(lastCaregiver.displayName, eventLabel)
-        : 'Both caregivers are ready';
+        : readyTitle;
   const subline = hasLog
     ? isShared
       ? `${babyName}'s night log is shared with your caregivers`

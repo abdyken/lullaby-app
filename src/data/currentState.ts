@@ -648,6 +648,18 @@ export function buildTonightStatus(
   ];
 }
 
+/**
+ * Honest, calm age label for the Tonight greeting (`BabyHeader`). "Newborn" in
+ * the first week (no clinical "0 weeks old" for a brand-new baby), singular "1
+ * week old", else "N weeks old". Clamps negative / non-finite weeks to Newborn.
+ */
+export function formatBabyAge(weeks: number): string {
+  const wholeWeeks = Number.isFinite(weeks) ? Math.max(0, Math.floor(weeks)) : 0;
+  if (wholeWeeks < 1) return 'Newborn';
+  if (wholeWeeks === 1) return '1 week old';
+  return `${wholeWeeks} weeks old`;
+}
+
 /* ------------------------------------------------------------------ *
  * Quick-log card secondary copy.
  *
