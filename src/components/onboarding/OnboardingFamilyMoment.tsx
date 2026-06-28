@@ -45,6 +45,7 @@ type FamilyPalette = {
   headBack: string;
   bodyFront: string;
   headFront: string;
+  hair: string;
   arm: string;
   bundle: string;
   bundleHi: string;
@@ -54,6 +55,7 @@ type FamilyPalette = {
   faceInk: string;
   blush: string;
   heart: string;
+  markGlow: string;
   moon: string;
   star: string;
 };
@@ -65,21 +67,24 @@ type FamilyPalette = {
 const PALETTES: Record<SurfaceMode, FamilyPalette> = {
   day: {
     glow: '#FFE6CE',
-    glowInner: '#FFF1DF',
-    cloud: '#FBEADC',
-    bodyBack: '#FFD2A6',
-    headBack: '#FFDEBA',
-    bodyFront: '#FF9E5E',
-    headFront: '#FFC49C',
-    arm: '#FFAE78',
-    bundle: '#FFF5EA',
+    glowInner: '#FFF0DC',
+    cloud: '#F7E2CE',
+    // deepened a step so the family reads with confidence on the cream scaffold
+    bodyBack: '#F9C193',
+    headBack: '#FBCEA0',
+    bodyFront: '#F4853C',
+    headFront: '#FFB082',
+    hair: '#DF6E2C',
+    arm: '#FA9351',
+    bundle: '#FFF2E2',
     bundleHi: '#FFFFFF',
-    bundleFold: '#F2D9C4',
-    babyHead: '#FFE7CF',
-    shadow: 'rgba(120,72,42,0.12)',
-    faceInk: 'rgba(110,72,56,0.55)',
-    blush: 'rgba(255,140,108,0.45)',
-    heart: '#FF7A3D',
+    bundleFold: '#E6C3A2',
+    babyHead: '#FFE1C2',
+    shadow: 'rgba(120,70,40,0.16)',
+    faceInk: 'rgba(94,58,44,0.62)',
+    blush: 'rgba(255,128,94,0.5)',
+    heart: '#FF7333',
+    markGlow: '#FFD79A',
     moon: '#FFFFFF',
     star: '#FFFFFF',
   },
@@ -87,20 +92,22 @@ const PALETTES: Record<SurfaceMode, FamilyPalette> = {
     glow: '#2F2D54',
     glowInner: '#3C3B69',
     cloud: '#2B2A4A',
-    bodyBack: '#3E4488',
+    bodyBack: '#3C4290',
     headBack: '#525AA6',
     bodyFront: '#5560C6',
-    headFront: '#8189DC',
+    headFront: '#838BDF',
+    hair: '#3A43A6',
     arm: '#6A72CE',
-    bundle: '#E9EBFB',
+    bundle: '#EAECFC',
     bundleHi: '#FFFFFF',
-    bundleFold: '#C7CBEC',
+    bundleFold: '#C3C8EC',
     babyHead: '#DCE0F6',
-    shadow: 'rgba(0,0,0,0.22)',
-    faceInk: 'rgba(28,26,52,0.55)',
-    blush: 'rgba(255,150,120,0.35)',
+    shadow: 'rgba(0,0,0,0.26)',
+    faceInk: 'rgba(24,22,50,0.62)',
+    blush: 'rgba(255,150,120,0.4)',
     // a warm heart stays warm at night — the one point of warmth on a cool scene
     heart: '#FF9E5E',
+    markGlow: '#C9CEFF',
     moon: '#EEF0FF',
     star: '#C9CEFF',
   },
@@ -179,6 +186,18 @@ export function OnboardingFamilyMoment({
             <Stop offset="0%" stopColor={p.glowInner} stopOpacity={night ? 0.6 : 0.72} />
             <Stop offset="100%" stopColor={p.glowInner} stopOpacity={0} />
           </RadialGradient>
+          {/* soft halo behind the little Lullaby orb/moon mark */}
+          <RadialGradient id="famMarkHalo" cx="50%" cy="50%" r="50%">
+            <Stop offset="0%" stopColor={p.markGlow} stopOpacity={night ? 0.5 : 0.42} />
+            <Stop offset="100%" stopColor={p.markGlow} stopOpacity={0} />
+          </RadialGradient>
+          {/* warm day orb — same stops as the hero orb's day body, so the little
+              mark reads as a sibling of the orb at the top of the screen */}
+          <RadialGradient id="famOrb" cx="42%" cy="38%" r="64%">
+            <Stop offset="0%" stopColor="#FFF1D6" />
+            <Stop offset="46%" stopColor="#FFC15E" />
+            <Stop offset="100%" stopColor="#FF9A3D" />
+          </RadialGradient>
         </Defs>
 
         {/* layered halo → depth: a wide soft bloom + a brighter core behind the pair */}
@@ -189,25 +208,33 @@ export function OnboardingFamilyMoment({
             seat the scene rather than have it float in a void */}
         <Ellipse cx={108} cy={152} rx={98} ry={28} fill={p.cloud} opacity={night ? 0.55 : 0.7} />
 
-        {/* night context: crescent moon (reuses the orb's proven crescent path,
-            scaled down) + a small scatter of stars, two of which shimmer */}
+        {/* the little Lullaby orb/moon mark in its own halo — a warm orb by day, a
+            cool crescent at night (reuses the hero orb's proven crescent path,
+            scaled down) — so the scene is tied to the brand, not just a heart */}
+        <Ellipse cx={180} cy={30} rx={25} ry={25} fill="url(#famMarkHalo)" />
+        {night ? (
+          <G transform="translate(165 12) scale(0.2)">
+            <Path d="M89 14a74 74 0 1 0 68 102 58 58 0 0 1-68-102Z" fill={p.moon} opacity={0.95} />
+          </G>
+        ) : (
+          <Circle cx={180} cy={30} r={13} fill="url(#famOrb)" />
+        )}
+
+        {/* night context: a small scatter of stars, two of which slowly shimmer */}
         {night && (
           <>
-            <G transform="translate(165 12) scale(0.2)">
-              <Path d="M89 14a74 74 0 1 0 68 102 58 58 0 0 1-68-102Z" fill={p.moon} opacity={0.92} />
-            </G>
             <Circle cx={44} cy={34} r={1.5} fill={p.star} opacity={0.7} />
+            <Circle cx={150} cy={22} r={1.2} fill={p.star} opacity={0.55} />
             <Circle cx={150} cy={58} r={1.3} fill={p.star} opacity={0.6} />
-            <Circle cx={196} cy={64} r={1.6} fill={p.star} opacity={0.7} />
             {reduceMotion ? (
               <>
                 <Circle cx={64} cy={22} r={1.9} fill={p.star} opacity={0.8} />
-                <Circle cx={182} cy={38} r={1.7} fill={p.star} opacity={0.8} />
+                <Circle cx={206} cy={54} r={1.7} fill={p.star} opacity={0.8} />
               </>
             ) : (
               <>
                 <AnimatedCircle cx={64} cy={22} r={1.9} fill={p.star} opacity={starOpacityA} />
-                <AnimatedCircle cx={182} cy={38} r={1.7} fill={p.star} opacity={starOpacityB} />
+                <AnimatedCircle cx={206} cy={54} r={1.7} fill={p.star} opacity={starOpacityB} />
               </>
             )}
           </>
@@ -236,6 +263,9 @@ export function OnboardingFamilyMoment({
           {/* head, bowed toward the baby (whole group tilted), with a peaceful face:
               one closed eye, a soft smile, a touch of blush */}
           <G transform="rotate(7 78 64)">
+            {/* a soft hair cap (a deeper circle peeking above the head) gives the
+                caregiver real form + a tender bowed posture, not a flat ball */}
+            <Circle cx={78} cy={58} r={22} fill={p.hair} />
             <Circle cx={78} cy={64} r={20} fill={p.headFront} />
             <Path d="M82 66 Q86 69 90 66" stroke={p.faceInk} strokeWidth={1.6} strokeLinecap="round" fill="none" />
             <Path d="M80 75 Q85 79 90 75" stroke={p.faceInk} strokeWidth={1.6} strokeLinecap="round" fill="none" />
@@ -248,9 +278,11 @@ export function OnboardingFamilyMoment({
           <Circle cx={94} cy={98} r={14} fill={p.bundle} />
           <G transform="rotate(-22 110 110)">
             <Ellipse cx={110} cy={110} rx={27} ry={18} fill={p.bundle} />
-            <Path d="M90 106 Q110 116 130 107" stroke={p.bundleFold} strokeWidth={2} strokeLinecap="round" fill="none" opacity={0.55} />
-            <Path d="M94 116 Q110 123 126 116" stroke={p.bundleFold} strokeWidth={1.6} strokeLinecap="round" fill="none" opacity={0.4} />
-            <Ellipse cx={102} cy={103} rx={16} ry={6.5} fill={p.bundleHi} opacity={0.45} />
+            {/* curved blanket folds — a wrapped, swaddled newborn, not a smooth pod */}
+            <Path d="M90 106 Q110 116 130 107" stroke={p.bundleFold} strokeWidth={2} strokeLinecap="round" fill="none" opacity={0.7} />
+            <Path d="M94 116 Q110 123 126 116" stroke={p.bundleFold} strokeWidth={1.6} strokeLinecap="round" fill="none" opacity={0.55} />
+            <Path d="M99 100 Q112 105 124 100" stroke={p.bundleFold} strokeWidth={1.4} strokeLinecap="round" fill="none" opacity={0.45} />
+            <Ellipse cx={102} cy={103} rx={16} ry={6.5} fill={p.bundleHi} opacity={0.5} />
           </G>
 
           {/* the cradling forearm sweeping across the front, under the bundle */}
@@ -262,8 +294,10 @@ export function OnboardingFamilyMoment({
             fill="none"
           />
 
-          {/* baby head + sleeping face (closed eyes, tiny mouth, soft cheeks) */}
+          {/* baby head + sleeping face (closed eyes, tiny mouth, soft cheeks) and a
+              single wisp of newborn hair so it reads unmistakably as a baby */}
           <Circle cx={96} cy={96} r={12} fill={p.babyHead} />
+          <Path d="M91 86 Q96 81 101 85" stroke={p.faceInk} strokeWidth={1.4} strokeLinecap="round" fill="none" opacity={0.7} />
           <Path d="M90 95 Q92 97 94 95" stroke={p.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
           <Path d="M98 95 Q100 97 102 95" stroke={p.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
           <Path d="M94 101 Q96 102.6 98 101" stroke={p.faceInk} strokeWidth={1.1} strokeLinecap="round" fill="none" />
