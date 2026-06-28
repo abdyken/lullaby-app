@@ -296,7 +296,7 @@ is_safe_path() {
       fi
       return 1
       ;;
-    src/components/BabyHeader.tsx|src/components/TonightStatus.tsx|src/components/QuickLogRow.tsx|src/components/HandoffCard.tsx|src/components/FirstLogCoach.tsx|src/app/\(tabs\)/index.tsx|src/app/\(tabs\)/log.tsx)
+    src/components/BabyHeader.tsx|src/components/TonightStatus.tsx|src/components/QuickLogRow.tsx|src/components/HandoffCard.tsx|src/components/FirstLogCoach.tsx|src/components/firstLogCoach.ts|src/data/currentState.ts|src/app/\(tabs\)/index.tsx)
       if slice_allows_phase_1a_tonight "$slice_id"; then
         return 0
       fi
