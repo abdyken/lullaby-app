@@ -3,9 +3,9 @@
 AUTOPILOT_STATUS: READY
 EXPECTED_BRANCH_PATTERN: feat/onboarding-*
 RECOMMENDED_IMPLEMENTATION_BRANCH: feat/onboarding-personalized-activation
-CURRENT_SLICE_ID: phase-1a-personalized-tonight
-CURRENT_SLICE_NAME: Phase 1A - Personalized Tonight (greeting + Calibrating + first-log coach + minimal single-caregiver HandoffCard fix)
-NEXT_SLICE_ID: phase-1a-checks-polish
+CURRENT_SLICE_ID: phase-1a-checks-polish
+CURRENT_SLICE_NAME: Phase 1A - Checks & polish (rewrite carousel smoke G7–G12, remove dead onboardingContent.ts, bump onboarding key to v2, finish Phase 1A polish)
+NEXT_SLICE_ID: phase-1b-notifications
 PHASE_1B_ENABLED: false
 
 ## Source Of Truth
@@ -29,38 +29,38 @@ PHASE_1B_ENABLED: false
 
 ## Current Slice
 
-### phase-1a-personalized-tonight - Personalized Tonight
+### phase-1a-checks-polish - Checks & polish
 
-Goal: now that onboarding creates a real local baby and hands off into Tonight
-(`phase-1a-live-flow`), make Tonight itself personal and honest for a brand-new
-night — the second user-visible change.
+Goal: now that the live setup flow and the personalized Tonight have shipped, the
+old carousel module is dead code and the v1 smoke assertions describe a UI that no
+longer runs. Reconcile the test harness with the live flow, retire the dead
+module, and bump the completion key so existing testers re-run the new flow once.
 
 Roadmap basis:
 
-- Section 7E/9: personalized Tonight that is never blank — `{name} · {age}` header,
-  an honest **Calibrating** line (not fake-precise), a dismissible first-log coach
-  that points the eye at `TonightStatus` after the first log.
-- Section 9 (solo-caregiver fix): with one caregiver and no events, `HandoffCard`
-  must never render the false "Both caregivers are ready" — hide it or show a calm
-  single-caregiver state (the full partner-invite on-ramp stays deferred to Phase 2).
-- Section 12 (Phase 1A Tonight): greet `{name}{age}`; Calibrating line; `FirstLogCoach`
-  reads the flag-correct store and is hydration-aware (recorded "V2 Tonight must not
-  render before hydration" postmortem) and never blocks the tap.
+- Section 11: bump `lullaby.onboarding.v1.complete` → `lullaby.onboarding.v2.complete`
+  (so testers who finished the OLD onboarding see the new flow once); extend the dev
+  reset accordingly.
+- Section 12 (Phase 1A tests): **rewrite, not extend** the carousel smoke assertions —
+  G4 (the completion key) and G7–G12 (the 3-panel content / `getNextOnboardingStep` /
+  CTA labels / "Setting up..." loading / skip-on-final) describe the removed carousel.
+- Section 13: `onboardingContent.ts` (the 3-panel carousel content + the fake
+  `ONBOARDING_COMPLETING_LABEL`) is now unused by the app and should be removed.
 
 Expected implementation scope:
 
-- `BabyHeader` / Tonight greeting reads the active baby name + age from `useAuth()`.
-- A Calibrating empty-state line on Tonight when there are no real events yet.
-- A new `FirstLogCoach` (dismissible, zero-real-events-only, flag/hydration-aware)
-  that nudges the first log and, after it, draws the eye to `TonightStatus`.
-- Minimal `HandoffCard` single-caregiver fix (no false "both ready").
+- Remove the dead `src/components/onboarding/onboardingContent.ts` and its smoke
+  imports/assertions (G7–G12).
+- Bump the onboarding completion key to v2 in `onboardingStorage.ts` and update G4.
+- Update the dev reset / any remaining v1 references; keep `EXPO_PUBLIC_FORCE_ONBOARDING`.
+- Any remaining Phase 1A polish that does not require a dependency install.
 
 Acceptance criteria:
 
-- A freshly onboarded baby sees a personalized, Calibrating Tonight (no Mia, no
-  fake-precise numbers); the first log flips the orb and the coach points at the thread.
-- A single caregiver never sees "Both caregivers are ready".
-- `npx tsc --noEmit`, `npm run check:local-interactions`, and `npm run lint` pass.
+- `npx tsc --noEmit`, `npm run check:local-interactions`, and `npm run lint` pass with
+  the carousel assertions rewritten (no dead `onboardingContent` import remains).
+- A tester who completed the OLD onboarding re-runs the new flow once (v2 key), and a
+  brand-new install still walks beat → age/name → personalized Tonight.
 
 Foundation already shipped (prerequisites, in earlier Phase 1A slices):
 
@@ -69,6 +69,9 @@ Foundation already shipped (prerequisites, in earlier Phase 1A slices):
   completion flow) + night-aware `OnboardingStepLayout`.
 - `src/state/AuthProvider.tsx` `createLocalBaby` (active local baby above the gate).
 - `src/data/localBaby.ts` (`createLocalBaby`/`birthDateFromWeeks`/`parseWeeks`).
+- Personalized Tonight: `BabyHeader` honest age (`formatBabyAge`), `TonightCalibrating`
+  + `FirstLogCoach` (`src/components/FirstLogCoach.tsx` / pure `firstLogCoach.ts`), and
+  the single-caregiver `HandoffCard` fix.
 
 ## Slice Queue
 
@@ -80,7 +83,7 @@ Foundation already shipped (prerequisites, in earlier Phase 1A slices):
 - [x] `phase-1a-live-flow` - Replace passive carousel with live age/name setup,
   real local completion, night-aware onboarding scaffold, and fake completing
   label removal.
-- [ ] `phase-1a-personalized-tonight` - Personalized Tonight greeting,
+- [x] `phase-1a-personalized-tonight` - Personalized Tonight greeting,
   Calibrating copy, first-log coach, and minimal single-caregiver `HandoffCard`
   fix.
 - [ ] `phase-1a-checks-polish` - Rewrite/update local interaction checks for
@@ -92,6 +95,89 @@ Foundation already shipped (prerequisites, in earlier Phase 1A slices):
   partner invite on-ramp, and edit baby recovery.
 
 ## Completed Slices
+
+### phase-1a-personalized-tonight - Personalized Tonight (DONE)
+
+What shipped: Tonight is now personal and honest for a brand-new night — the
+second user-visible onboarding change. A freshly onboarded baby (created by
+`phase-1a-live-flow`, seed Mia gone) lands on a greeting that reads their name +
+an honest age, an empty status strip explained by a calm **Calibrating** line, a
+dismissible **first-log coach**, and a `HandoffCard` that never lies about "both
+caregivers" when there is only one.
+
+- `src/components/firstLogCoach.ts` (NEW; pure React-free leaf): the coach phase
+  machine + copy. `resolveFirstLogCoachPhase({hydrated,dismissed,hasRealEvents,
+  startedEmpty})` → `hidden | nudge | thread` (hidden until hydrated / once
+  dismissed; `nudge` at zero real events; `thread` only after the first log when
+  the session **started empty**, so a returning parent with a timeline never sees
+  it). Copy builders `tonightCalibratingText` / `firstLogNudgeText` /
+  `firstLogThreadText` (possessive falls back to "your baby"; the thread line is
+  event-agnostic + not time-bound, so it stays honest if it lingers). Exports
+  `FIRST_LOG_COACH_DISMISSED_KEY`. Imported by the smoke test via a relative path.
+- `src/components/FirstLogCoach.tsx` (NEW): `FirstLogCoach` (the dismissible card,
+  caret down→quick-log for `nudge`, up→status strip for `thread`; owns its own top
+  margin so a hidden coach leaves no gap; persists the dismissal in AsyncStorage,
+  fire-and-forget) + `TonightCalibrating` (the quiet line). `startedEmpty` is
+  latched with a lazy `useState` initializer at the first post-hydration render
+  (no setState-in-effect — passes the React-Compiler lint rule).
+- `src/data/currentState.ts`: `formatBabyAge(weeks)` — "Newborn" in week 0 (no
+  clinical "0 weeks old"), singular "1 week old", else "N weeks old"; clamps
+  negative / non-finite to Newborn.
+- `src/components/BabyHeader.tsx`: the age subtitle now reads `formatBabyAge(ageWeeks)`
+  (the seed Mia reads "8 weeks old" as before; a newborn reads "Newborn").
+- `src/components/HandoffCard.tsx`: minimal single-caregiver fix — with
+  `caregivers.length <= 1` the "Both caregivers are ready" copy becomes "Your night
+  log is ready"; 2+ caregivers (seed demo / linked Supabase family) keep "both
+  ready". The full partner-invite on-ramp stays deferred to Phase 2.
+- `src/app/(tabs)/index.tsx`: computes `hasRealEvents` from the flag-correct store
+  (`v2.timeline` when loggingV2 is on, else legacy `events`) and renders the
+  Calibrating line + coach between the status strip and the quick-log row. Only
+  rendered inside `renderBody`, which runs after v2 hydration, so the coach never
+  flashes over a hydrating orb.
+- `scripts/check-local-interactions.ts`: +6 checks (Z1–Z6) — `formatBabyAge`, the
+  Calibrating/coach copy (personal, honest, no fake numbers, no "both caregivers"),
+  the blank-name fallback, and the phase machine (hidden-until-hydrated / dismissed,
+  nudge→thread, returning-parent-never).
+
+Checks (all green):
+
+- `npx tsc --noEmit` -> exit 0.
+- `npm run check:local-interactions` -> 196/196 passed (was 190; +6 Z checks).
+- `npm run lint` -> exit 0.
+
+Deliberately deferred (kept out of this bounded slice):
+
+- The **full partner-invite on-ramp** on the `HandoffCard` empty state (roadmap §9
+  / Phase 2). This slice only kills the false "both caregivers are ready"; it does
+  not add an invite CTA or promise real-time sync.
+- The carousel cleanup + **v2 onboarding key bump** + the G4/G7–G12 smoke rewrite
+  stay scoped to `phase-1a-checks-polish` (untouched here, so all carousel checks
+  stay green).
+- Motion polish (coach fade-in, `setAccessibilityFocus`, Dynamic Type) is roadmap
+  §10 polish, deferred to Phase 2. The coach swaps in instantly (calm).
+
+Risks / notes:
+
+- The coach + Calibrating + solo `HandoffCard` typecheck + lint + are unit-covered
+  (Z1–Z6) but have **no on-device coverage** in this headless slice — needs manual
+  QA in day + night (below).
+- `firstLogCoach.ts` (pure) and `FirstLogCoach.tsx` (component) differ only by the
+  leading case + extension; tsc's consistent-casing check passes and they resolve
+  distinctly, but cross-platform contributors should keep the casing exact.
+
+Manual QA still recommended (device; not run in this headless slice):
+
+- `EXPO_PUBLIC_FORCE_ONBOARDING=true` + dev-reset → walk onboarding → Tonight:
+  confirm the greeting reads the new name + honest age, the status strip is "None
+  yet", the Calibrating line + first-log coach show, and the `HandoffCard` reads
+  "Your night log is ready" (NOT "Both caregivers are ready").
+- Log the first event (diaper is the two-tap path): confirm the orb flips, the
+  coach switches to the "There's your thread…" pointer (aimed at the status strip),
+  and dismissing it ("Got it") keeps it gone across a relaunch.
+- Repeat at night (`resolveSurfaceMode` forced or after 20:00) → confirm the coach
+  card + Calibrating line read cleanly on the navy surface.
+- Confirm a returning parent who already has events sees **no** coach and **no**
+  Calibrating line.
 
 ### phase-1a-live-flow - Live setup flow (DONE)
 
@@ -330,15 +416,15 @@ Manual QA still recommended (device, not run in this headless slice):
 
 ## Next Slice
 
-`phase-1a-live-flow` is complete and committed. Move to `phase-1a-personalized-tonight`:
-make Tonight personal for a freshly onboarded baby — greet `{name} · {age}` from
-`useAuth()`, add the honest **Calibrating** empty-state line, build a dismissible,
-hydration-aware `FirstLogCoach` (zero-real-events-only; never blocks the tap; points
-the eye at `TonightStatus` after the first log), and apply the minimal single-caregiver
-`HandoffCard` fix (no false "Both caregivers are ready"). The full partner-invite
-on-ramp stays deferred to Phase 2. Then `phase-1a-checks-polish` rewrites the old
-carousel smoke assertions (G7–G12), removes the now-dead `onboardingContent.ts`, and
-bumps the onboarding completion key to v2.
+`phase-1a-personalized-tonight` is complete and committed. Move to
+`phase-1a-checks-polish`: the live flow + personalized Tonight have shipped, so the
+3-panel carousel module is now dead code and the v1 smoke assertions (G4, G7–G12)
+describe a UI that no longer runs. Remove `src/components/onboarding/onboardingContent.ts`,
+**rewrite** (not extend) the carousel smoke assertions, bump the completion key
+`lullaby.onboarding.v1.complete` → `lullaby.onboarding.v2.complete` (so testers who
+finished the OLD onboarding re-run the new flow once) and extend the dev reset, plus
+any remaining Phase 1A polish that needs no dependency install. Then `phase-1b-notifications`
+stays STOPPED until a human sets `PHASE_1B_ENABLED: true`.
 
 ## Blocked Status
 

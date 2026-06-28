@@ -31,9 +31,17 @@ import {
   calmDescription,
   deriveHandoff,
   deriveNightStatus,
+  formatBabyAge,
   getOrbView,
   recapSummaryLine,
 } from '../src/data/currentState';
+import {
+  FIRST_LOG_COACH_DISMISSED_KEY,
+  firstLogNudgeText,
+  firstLogThreadText,
+  resolveFirstLogCoachPhase,
+  tonightCalibratingText,
+} from '../src/components/firstLogCoach';
 import { buildSeedEvents, caregivers as seedCaregivers, getTonightTimeline } from '../src/data/mock';
 import {
   DEFAULT_LOCAL_BABY_NAME,
@@ -1164,6 +1172,62 @@ check('Y7. step index follows the canonical order and completion is done-only', 
   assert.ok(onboardingStepIndex('baby') < onboardingStepIndex('creating'));
   assert.equal(isOnboardingComplete(flow('creating')), false);
   assert.equal(isOnboardingComplete(flow('done')), true);
+});
+
+// Z. Personalized Tonight (Phase 1A) — the brand-new-night greeting age label, the
+// honest Calibrating line, and the first-log coach phase machine (pure parts; the
+// component owns the AsyncStorage dismissal + the "started empty" latch).
+check('Z1. formatBabyAge reads "Newborn" in week 0, singular at 1, plural after', () => {
+  assert.equal(formatBabyAge(0), 'Newborn');
+  assert.equal(formatBabyAge(0.6), 'Newborn'); // floored to 0 weeks
+  assert.equal(formatBabyAge(1), '1 week old');
+  assert.equal(formatBabyAge(8), '8 weeks old');
+  assert.equal(formatBabyAge(-3), 'Newborn'); // clamped
+  assert.equal(formatBabyAge(Number.NaN), 'Newborn'); // non-finite → newborn
+});
+
+check('Z2. the Calibrating + coach copy is personal, honest, and not fake-precise', () => {
+  assert.match(tonightCalibratingText('Mia'), /Mia's nights/);
+  assert.match(tonightCalibratingText('Mia'), /rhythm will fill in/);
+  assert.match(firstLogNudgeText('Mia'), /Mia's first feed/);
+  assert.match(firstLogNudgeText('Mia'), /timeline/);
+  assert.match(firstLogThreadText(), /thread/);
+  // Honest empty state: never a fake number, never the false "both caregivers".
+  assert.ok(!/\d/.test(tonightCalibratingText('Mia')));
+  assert.ok(!/both caregivers/i.test(firstLogThreadText()));
+});
+
+check('Z3. a blank baby name falls back to "your baby" in the possessive copy', () => {
+  assert.match(tonightCalibratingText('   '), /your baby's nights/);
+  assert.match(firstLogNudgeText(''), /your baby's first feed/);
+});
+
+check('Z4. the coach stays hidden until hydrated and once dismissed', () => {
+  const live = { dismissed: false, hasRealEvents: false, startedEmpty: true };
+  assert.equal(resolveFirstLogCoachPhase({ ...live, hydrated: false }), 'hidden');
+  assert.equal(
+    resolveFirstLogCoachPhase({ hydrated: true, dismissed: true, hasRealEvents: false, startedEmpty: true }),
+    'hidden',
+  );
+  assert.equal(FIRST_LOG_COACH_DISMISSED_KEY, 'lullaby.coach.firstLog.v1.dismissed');
+});
+
+check('Z5. zero real events nudges the first log; the first log points at the thread', () => {
+  assert.equal(
+    resolveFirstLogCoachPhase({ hydrated: true, dismissed: false, hasRealEvents: false, startedEmpty: true }),
+    'nudge',
+  );
+  assert.equal(
+    resolveFirstLogCoachPhase({ hydrated: true, dismissed: false, hasRealEvents: true, startedEmpty: true }),
+    'thread',
+  );
+});
+
+check('Z6. a returning parent with a timeline never sees the coach (started non-empty)', () => {
+  assert.equal(
+    resolveFirstLogCoachPhase({ hydrated: true, dismissed: false, hasRealEvents: true, startedEmpty: false }),
+    'hidden',
+  );
 });
 
 // V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are
