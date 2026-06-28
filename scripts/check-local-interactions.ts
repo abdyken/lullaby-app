@@ -63,14 +63,6 @@ import {
   resolveOnboardingGateState,
 } from '../src/components/onboarding/onboardingStorage';
 import {
-  ONBOARDING_PANELS,
-  getNextOnboardingStep,
-  getOnboardingCtaLabel,
-  getOnboardingPrimaryActionState,
-  getOnboardingIntroDuration,
-  shouldShowOnboardingSkip,
-} from '../src/components/onboarding/onboardingContent';
-import {
   INITIAL_ONBOARDING_FLOW,
   ONBOARDING_STEP_ORDER,
   isOnboardingComplete,
@@ -310,7 +302,7 @@ check('G3. an empty event list with a known orbView is valid', () => {
 
 // G4-G6. First-run onboarding gate selection (pure resolver, no RN render needed)
 check('G4. onboarding not completed selects OnboardingScreen', () => {
-  assert.equal(ONBOARDING_COMPLETE_KEY, 'lullaby.onboarding.v1.complete');
+  assert.equal(ONBOARDING_COMPLETE_KEY, 'lullaby.onboarding.v2.complete');
   assert.equal(resolveOnboardingGateState(false, { rawFlag: 'false', isDev: true }), 'needed');
 });
 
@@ -322,50 +314,6 @@ check('G6. force onboarding selects OnboardingScreen even when completed', () =>
   assert.equal(isForceOnboardingEnabled({ rawFlag: 'true', isDev: true }), true);
   assert.equal(resolveOnboardingGateState(true, { rawFlag: 'true', isDev: true }), 'needed');
   assert.equal(resolveOnboardingGateState(true, { rawFlag: 'true', isDev: false }), 'complete');
-});
-
-check('G7. onboarding stays to three calm panels with final setup CTA', () => {
-  assert.equal(ONBOARDING_PANELS.length, 3);
-  assert.deepEqual(
-    ONBOARDING_PANELS.map((panel) => panel.eyebrow),
-    ['LOG THE NIGHT', 'WHAT HAPPENED', 'CALM NEXT STEP'],
-  );
-  assert.equal(getOnboardingCtaLabel(0), 'Next');
-  assert.equal(getOnboardingCtaLabel(0, true), 'Next');
-  assert.equal(getOnboardingCtaLabel(2), 'Set up baby');
-  assert.equal(getOnboardingCtaLabel(2, true), 'Setting up...');
-});
-
-check('G8. pressing through onboarding reaches the setup/app handoff', () => {
-  let step = 0;
-  step = getNextOnboardingStep(step) as number;
-  assert.equal(step, 1);
-  step = getNextOnboardingStep(step) as number;
-  assert.equal(step, 2);
-  assert.equal(getNextOnboardingStep(step), 'complete');
-});
-
-check('G9. reduce-motion onboarding duration stays short and valid', () => {
-  const fullMotion = getOnboardingIntroDuration(false);
-  const reducedMotion = getOnboardingIntroDuration(true);
-  assert.ok(fullMotion >= 800 && fullMotion <= 1_200);
-  assert.ok(reducedMotion > 0 && reducedMotion < fullMotion);
-});
-
-check('G10. Next never enters the completion loading state', () => {
-  assert.deepEqual(getOnboardingPrimaryActionState(0, false), { label: 'Next', loading: false });
-  assert.deepEqual(getOnboardingPrimaryActionState(1, true), { label: 'Next', loading: false });
-});
-
-check('G11. final CTA is the only primary action that can show setup loading', () => {
-  assert.deepEqual(getOnboardingPrimaryActionState(2, false), { label: 'Set up baby', loading: false });
-  assert.deepEqual(getOnboardingPrimaryActionState(2, true), { label: 'Setting up...', loading: true });
-});
-
-check('G12. Skip is hidden on the final onboarding screen', () => {
-  assert.equal(shouldShowOnboardingSkip(0), true);
-  assert.equal(shouldShowOnboardingSkip(1), true);
-  assert.equal(shouldShowOnboardingSkip(2), false);
 });
 
 // H. Note events
