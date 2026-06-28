@@ -3,9 +3,9 @@
 AUTOPILOT_STATUS: READY
 EXPECTED_BRANCH_PATTERN: feat/onboarding-*
 RECOMMENDED_IMPLEMENTATION_BRANCH: feat/onboarding-personalized-activation
-CURRENT_SLICE_ID: phase-1a-live-flow
-CURRENT_SLICE_NAME: Phase 1A - Live setup flow (live age/name setup + real local completion + night-aware scaffold)
-NEXT_SLICE_ID: phase-1a-personalized-tonight
+CURRENT_SLICE_ID: phase-1a-personalized-tonight
+CURRENT_SLICE_NAME: Phase 1A - Personalized Tonight (greeting + Calibrating + first-log coach + minimal single-caregiver HandoffCard fix)
+NEXT_SLICE_ID: phase-1a-checks-polish
 PHASE_1B_ENABLED: false
 
 ## Source Of Truth
@@ -29,49 +29,46 @@ PHASE_1B_ENABLED: false
 
 ## Current Slice
 
-### phase-1a-live-flow - Live setup flow
+### phase-1a-personalized-tonight - Personalized Tonight
 
-Goal: replace the passive 3-panel value carousel with the live, personalized
-setup flow now that the foundation (shared `<Orb>`, `RolePicker`/age helpers,
-`OnboardingStepLayout`, `useOnboardingFlow`) is in place. This is the first
-user-visible onboarding change.
+Goal: now that onboarding creates a real local baby and hands off into Tonight
+(`phase-1a-live-flow`), make Tonight itself personal and honest for a brand-new
+night — the second user-visible change.
 
 Roadmap basis:
 
-- Section 7 (flow B→C→D): emotional beat → age + optional name → real handoff into
-  Tonight.
-- Section 11 (completion ordering): write local baby → clear `lullaby/local-events/v1`
-  → `markOnboardingComplete` → reveal.
-- Section 12 (Phase 1A live flow): drop the paged `ScrollView`, render one step at a
-  time off `useOnboardingFlow`, wire completion to `useAuth().createLocalBaby`, kill
-  the fake `ONBOARDING_COMPLETING_LABEL`, resolve night at entry.
+- Section 7E/9: personalized Tonight that is never blank — `{name} · {age}` header,
+  an honest **Calibrating** line (not fake-precise), a dismissible first-log coach
+  that points the eye at `TonightStatus` after the first log.
+- Section 9 (solo-caregiver fix): with one caregiver and no events, `HandoffCard`
+  must never render the false "Both caregivers are ready" — hide it or show a calm
+  single-caregiver state (the full partner-invite on-ramp stays deferred to Phase 2).
+- Section 12 (Phase 1A Tonight): greet `{name}{age}`; Calibrating line; `FirstLogCoach`
+  reads the flag-correct store and is hydration-aware (recorded "V2 Tonight must not
+  render before hydration" postmortem) and never blocks the tap.
 
 Expected implementation scope:
 
-- Rebuild `OnboardingScreen` on `OnboardingStepLayout` + `<Orb>`, driven by
-  `useOnboardingFlow` (step state, not scroll index — blank-frame postmortem).
-- A one-thumb age control (coarse `RolePicker`/`ChoicePill` pattern → representative
-  weeks → `birthDateFromWeeks`) + optional name; no keyboard on the critical path.
-- Wire completion to `useAuth().createLocalBaby(...)` with the §11 ordering; remove
-  the fake "Setting up..." completing label.
-- Resolve the surface (`resolveSurfaceMode`) at entry so the first frame is night-safe.
+- `BabyHeader` / Tonight greeting reads the active baby name + age from `useAuth()`.
+- A Calibrating empty-state line on Tonight when there are no real events yet.
+- A new `FirstLogCoach` (dismissible, zero-real-events-only, flag/hydration-aware)
+  that nudges the first log and, after it, draws the eye to `TonightStatus`.
+- Minimal `HandoffCard` single-caregiver fix (no false "both ready").
 
 Acceptance criteria:
 
-- New install (no local baby) walks beat → age/name → real local baby → Tonight; the
-  seed Mia never appears; skip/"Set up later" still creates a minimal valid baby.
+- A freshly onboarded baby sees a personalized, Calibrating Tonight (no Mia, no
+  fake-precise numbers); the first log flips the orb and the coach points at the thread.
+- A single caregiver never sees "Both caregivers are ready".
 - `npx tsc --noEmit`, `npm run check:local-interactions`, and `npm run lint` pass.
-- Commit is one bounded slice. (`scripts/check-local-interactions.ts` likely needs a
-  rewrite of the old G7–G12 panel assertions once the carousel is gone — see
-  `phase-1a-checks-polish`.)
 
-Foundation already shipped (this slice's prerequisites, in `phase-1a-setup-foundation`):
+Foundation already shipped (prerequisites, in earlier Phase 1A slices):
 
 - `src/components/Orb.tsx` (shared `<Orb>` + `useOrbBreathe`).
-- `src/components/auth/RolePicker.tsx` (`RolePicker` + `colorForRole` + `ROLES`).
-- `src/components/onboarding/onboardingFlow.ts` + `useOnboardingFlow.ts` (pure reducer + hook).
-- `src/components/onboarding/OnboardingStepLayout.tsx` (on `AuthSurface`).
-- `parseWeeks` reconciled into `src/data/localBaby.ts` (single source with `birthDateFromWeeks`).
+- `src/components/onboarding/OnboardingScreen.tsx` (live beat → age/name → real
+  completion flow) + night-aware `OnboardingStepLayout`.
+- `src/state/AuthProvider.tsx` `createLocalBaby` (active local baby above the gate).
+- `src/data/localBaby.ts` (`createLocalBaby`/`birthDateFromWeeks`/`parseWeeks`).
 
 ## Slice Queue
 
@@ -80,7 +77,7 @@ Foundation already shipped (this slice's prerequisites, in `phase-1a-setup-found
   seed-clear ordering, dev reset extension.
 - [x] `phase-1a-setup-foundation` - Extract shared `Orb`/role/date helpers and
   introduce the pure onboarding flow reducer/layout foundation.
-- [ ] `phase-1a-live-flow` - Replace passive carousel with live age/name setup,
+- [x] `phase-1a-live-flow` - Replace passive carousel with live age/name setup,
   real local completion, night-aware onboarding scaffold, and fake completing
   label removal.
 - [ ] `phase-1a-personalized-tonight` - Personalized Tonight greeting,
@@ -95,6 +92,84 @@ Foundation already shipped (this slice's prerequisites, in `phase-1a-setup-found
   partner invite on-ramp, and edit baby recovery.
 
 ## Completed Slices
+
+### phase-1a-live-flow - Live setup flow (DONE)
+
+What shipped: the passive 3-panel value carousel is replaced by the live,
+personalized setup flow — the first user-visible onboarding change. New install
+walks **beat → age/name → real local baby → Tonight**; the seed Mia never reaches
+Tonight, and skip / "Set up later" still creates a minimal valid baby.
+
+- `src/components/onboarding/OnboardingScreen.tsx` (REWRITTEN): rebuilt on
+  `OnboardingStepLayout` + the shared `<Orb>`, driven by `useOnboardingFlow` (step
+  STATE, never a scroll index — blank-frame postmortem). Three rendered steps:
+  - **beat** — "Lullaby" / "A calm place for the night shift." + "The hard hours
+    are easier with a little help." · CTA **Begin** · secondary **Set up later**.
+  - **baby** — "How old is your baby?" one-thumb coarse age picker (Newborn / A few
+    weeks / A few months → representative weeks → `birthDateFromWeeks`) + optional
+    night-aware name field + trust line "Stays on this phone. No account needed." ·
+    CTA **Continue** (enabled once an age is picked) · secondary **Back** / **Skip
+    for now**.
+  - **creating** — the real handoff ("Getting {name}'s night ready…") with a calm
+    spinner. The fake `ONBOARDING_COMPLETING_LABEL` ("Setting up...") is gone from
+    the live flow.
+  - The `<Orb>` is one persistent instance across steps (keeps breathing / follows
+    home); its sky tone tracks the picked age (newborn→night, few weeks→dusk, few
+    months→day) and the name settles into its core. Breathe is frozen under Reduce
+    Motion via an un-animated external value (theme-reveal double-render gotcha).
+  - Completion wires to `useAuth().createLocalBaby(input)` then the gate's
+    `onComplete` — the §11 ordering (write local baby → clear `lullaby/local-events/v1`
+    → `markOnboardingComplete` → reveal). Runs once via a `creating`-step effect,
+    guarded against double-invocation; both writes swallow errors so a parent is
+    never trapped mid-setup.
+- `src/components/onboarding/OnboardingStepLayout.tsx`: added an optional
+  `mode?: SurfaceMode` prop. Night paints the low-glare navy bg + night ink
+  (roadmap §10), resolved once at onboarding entry via `resolveSurfaceMode('auto',
+  hour)` so the first 3am frame isn't a cream/white shock. `mode='day'` is the
+  default and is byte-identical to the previous cream scaffold.
+- `OnboardingGate.tsx`: unchanged — the screen drives `createLocalBaby` then calls
+  the gate's existing `onComplete` (mark complete + reveal), preserving the ordering.
+
+Checks (all green):
+
+- `npx tsc --noEmit` -> exit 0.
+- `npm run check:local-interactions` -> 190/190 passed (unchanged — the carousel
+  content/key/reducer/factory modules were left intact; see risks).
+- `npm run lint` -> exit 0.
+
+Deliberately deferred (kept out of this bounded slice):
+
+- The old carousel module `onboardingContent.ts` and the v1 completion key are
+  **untouched**, so smoke checks G4–G12 (which assert the 3-panel content + the
+  `lullaby.onboarding.v1.complete` key + "Setting up..." label) stay green. The
+  carousel content is now unused by the app (dead code) and is removed/rewritten
+  together with G7–G12 in `phase-1a-checks-polish`.
+- The **v2 onboarding key bump** (roadmap §11: `lullaby.onboarding.v2.complete` so
+  existing testers re-run the new flow) is NOT done here (it would break smoke G4,
+  whose rewrite is scoped to `phase-1a-checks-polish`). Until then, testers who
+  finished the OLD onboarding need `EXPO_PUBLIC_FORCE_ONBOARDING=true` to see the
+  new flow; a brand-new install gets it directly.
+- Motion polish (cross-fade between steps, ~600ms animated sky transition, entry
+  stagger), step-change `setAccessibilityFocus`, and Dynamic Type are roadmap §10
+  polish, deferred to Phase 2. Steps swap instantly (calm + blank-frame-safe).
+- The personalized **Tonight** itself (greeting/Calibrating/first-log coach/
+  HandoffCard fix) is the next slice (`phase-1a-personalized-tonight`).
+
+Risks / notes:
+
+- The new flow is wired + typechecks + lints but has **no on-device coverage** in
+  this headless slice — needs manual QA in day + night + Reduce Motion (below).
+
+Manual QA still recommended (device; not run in this headless slice):
+
+- `EXPO_PUBLIC_FORCE_ONBOARDING=true` + dev-reset → cold launch: walk beat → pick
+  an age (+ optional name) → Continue → confirm Tonight shows the new baby (not
+  Mia) and a relaunch rehydrates the same local baby.
+- Skip / "Set up later" → confirm a minimal valid baby ("Your baby", newborn) and
+  a working Tonight.
+- Run once at night (or `resolveSurfaceMode` forced) → confirm the first frame is
+  the navy night scaffold + night orb, no cream/white flash; and with Reduce Motion
+  on, the orb is static.
 
 ### phase-1a-setup-foundation - Setup flow foundation (DONE)
 
@@ -255,14 +330,15 @@ Manual QA still recommended (device, not run in this headless slice):
 
 ## Next Slice
 
-`phase-1a-setup-foundation` is complete and committed. Move to `phase-1a-live-flow`:
-rebuild `OnboardingScreen` on `OnboardingStepLayout` + `<Orb>` driven by
-`useOnboardingFlow`, add the one-thumb age + optional name controls, wire completion
-to `useAuth().createLocalBaby` with the §11 ordering (write baby → clear local events
-→ mark complete → reveal), kill the fake `ONBOARDING_COMPLETING_LABEL`, and resolve
-night at entry. This is the first user-visible flow change, so verify on device in
-day + night; expect to rewrite the old carousel smoke assertions (G7–G12) — that
-cleanup is scoped to `phase-1a-checks-polish`.
+`phase-1a-live-flow` is complete and committed. Move to `phase-1a-personalized-tonight`:
+make Tonight personal for a freshly onboarded baby — greet `{name} · {age}` from
+`useAuth()`, add the honest **Calibrating** empty-state line, build a dismissible,
+hydration-aware `FirstLogCoach` (zero-real-events-only; never blocks the tap; points
+the eye at `TonightStatus` after the first log), and apply the minimal single-caregiver
+`HandoffCard` fix (no false "Both caregivers are ready"). The full partner-invite
+on-ramp stays deferred to Phase 2. Then `phase-1a-checks-polish` rewrites the old
+carousel smoke assertions (G7–G12), removes the now-dead `onboardingContent.ts`, and
+bumps the onboarding completion key to v2.
 
 ## Blocked Status
 
