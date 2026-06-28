@@ -33,10 +33,11 @@ import type { SurfaceMode } from '@/theme';
 const VIEW_W = 220;
 const VIEW_H = 150;
 
-/** Single shared centre for the baby head + every facial feature, so the face is
- *  mirrored about one point and never drifts inside the head/swaddle outline. */
-const BABY_FACE_CENTER_X = 96;
-const BABY_FACE_CENTER_Y = 96;
+/** A small whole-head offset that seats the baby head (and all its features,
+ *  which keep their own relative placement) inside the white swaddle opening.
+ *  This moves the head as one object — it does not re-center the face. */
+const BABY_HEAD_OFFSET_X = -2;
+const BABY_HEAD_OFFSET_Y = 0;
 
 /** A single warm palette used in every surface. Heads sit a shade lighter than
  *  bodies so the figures read by tone, not outlines (app rule: separation via
@@ -232,13 +233,13 @@ export function OnboardingFamilyMoment({
             fill="none"
           />
 
-          {/* baby head + sleeping face, wrapped as one group and shifted 5px left
-              so the whole head sits more centered in the cradle. The head circle and
-              the face group share BABY_FACE_CENTER, so every feature (mirrored about
-              that point) sits dead-centre inside the head — no drift. */}
-          <G transform="translate(-5 0)">
-            <Circle cx={BABY_FACE_CENTER_X} cy={BABY_FACE_CENTER_Y} r={12} fill={P.babyHead} />
-            <G transform={`translate(${BABY_FACE_CENTER_X} ${BABY_FACE_CENTER_Y})`}>
+          {/* baby head + sleeping face, wrapped as one group and moved together by
+              BABY_HEAD_OFFSET so the whole head seats naturally in the white swaddle
+              opening. The inner face group keeps its prior relative placement (a
+              touch left of the head centre); only the whole head moves. */}
+          <G transform={`translate(${BABY_HEAD_OFFSET_X} ${BABY_HEAD_OFFSET_Y})`}>
+            <Circle cx={96} cy={96} r={12} fill={P.babyHead} />
+            <G transform="translate(89 96)">
               <Path d="M-5 -9 Q0 -13.5 5 -9" stroke={P.babyHair} strokeWidth={1.6} strokeLinecap="round" fill="none" />
               <Path d="M-4.5 0 Q-2.5 1.8 -0.5 0" stroke={P.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
               <Path d="M0.5 0 Q2.5 1.8 4.5 0" stroke={P.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
