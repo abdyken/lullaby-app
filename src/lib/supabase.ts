@@ -17,8 +17,9 @@
  */
 import 'react-native-url-polyfill/auto';
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+
+import { secureSessionStorage } from './secureSessionStore';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
@@ -31,15 +32,16 @@ export const isSupabaseConfigured =
   supabaseAnonKey.length > 0;
 
 /**
- * The shared Supabase client, or null in local-only demo mode. Session is
- * persisted in AsyncStorage (same store as the local night state) so a returning
- * caregiver stays signed in. URL detection is off — this is a native app, not a
- * web OAuth redirect flow.
+ * The shared Supabase client, or null in local-only demo mode. The auth session
+ * is persisted through a secure, chunked SecureStore adapter on native (web/dev
+ * fall back to AsyncStorage) so a returning caregiver stays signed in without
+ * tokens sitting in plaintext. URL detection is off — this is a native app, not
+ * a web OAuth redirect flow.
  */
 export const supabase: SupabaseClient | null = isSupabaseConfigured
   ? createClient(supabaseUrl as string, supabaseAnonKey as string, {
       auth: {
-        storage: AsyncStorage,
+        storage: secureSessionStorage,
         autoRefreshToken: true,
         persistSession: true,
         detectSessionInUrl: false,
