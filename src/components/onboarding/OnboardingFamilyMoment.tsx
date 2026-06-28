@@ -172,6 +172,13 @@ export function OnboardingFamilyMoment({
             "parents", not a lone figure. Hair cap frames the face; the face itself
             is grouped about the head centre (mirrored offsets → centered + level). */}
         <Path d="M122 150 C122 118 138 100 156 100 C174 100 186 118 186 150 Z" fill={P.bodyBack} />
+        {/* longer hair — a soft drape behind the head falling down the sides to the
+            shoulders, dipping at the centre so it never reaches under the chin.
+            Drawn before the head, so it frames the face without covering it. */}
+        <Path
+          d="M138 70 C133 80 134 96 141 104 C146 100 150 99 156 99 C162 99 166 100 171 104 C178 96 179 80 174 70 C168 64 144 64 138 70 Z"
+          fill={P.hairBack}
+        />
         <Circle cx={156} cy={71} r={19} fill={P.hairBack} />
         <Circle cx={156} cy={80} r={16} fill={P.headBack} />
         <G transform="translate(156 80)">
@@ -242,7 +249,9 @@ export function OnboardingFamilyMoment({
               the head centre (96,96), built from mirrored offsets, so the eyes are
               dead level and the nose/smile/cheeks stay centered — never crooked. */}
           <Circle cx={96} cy={96} r={12} fill={P.babyHead} />
-          <G transform="translate(96 96)">
+          {/* features nudged 3px left of the head centre so the face sits visually
+              centred within the cradled (slightly right-leaning) head */}
+          <G transform="translate(93 96)">
             <Path d="M-5 -9 Q0 -13.5 5 -9" stroke={P.babyHair} strokeWidth={1.6} strokeLinecap="round" fill="none" />
             <Path d="M-4.5 0 Q-2.5 1.8 -0.5 0" stroke={P.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
             <Path d="M0.5 0 Q2.5 1.8 4.5 0" stroke={P.faceInk} strokeWidth={1.3} strokeLinecap="round" fill="none" />
