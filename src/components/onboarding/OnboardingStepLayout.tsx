@@ -17,7 +17,7 @@ import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AuthSurface } from '@/components/auth/AuthShell';
-import { colors, fonts } from '@/theme';
+import { colors, fonts, surfaces, type SurfaceMode } from '@/theme';
 
 export function OnboardingStepLayout({
   orb,
@@ -27,6 +27,7 @@ export function OnboardingStepLayout({
   children,
   cta,
   secondaryCta,
+  mode = 'day',
 }: {
   /** The shared `<Orb>` protagonist, pinned in the top header zone. */
   orb?: ReactNode;
@@ -39,13 +40,21 @@ export function OnboardingStepLayout({
   cta: ReactNode;
   /** Optional low-emphasis action under the CTA (e.g. "Skip for now"). */
   secondaryCta?: ReactNode;
+  /**
+   * Resolved surface for the scaffold. Night paints the low-glare navy bg + ink
+   * (roadmap §10 night-safety) so a 3am first frame isn't a cream/white shock.
+   * Defaults to 'day', which is byte-identical to the original cream scaffold.
+   */
+  mode?: SurfaceMode;
 }) {
   const insets = useSafeAreaInsets();
+  const surface = surfaces[mode];
   return (
     <AuthSurface>
       <View
         style={{
           flex: 1,
+          backgroundColor: surface.bg,
           paddingHorizontal: 22,
           paddingTop: insets.top + 24,
           paddingBottom: insets.bottom + 18,
@@ -64,7 +73,7 @@ export function OnboardingStepLayout({
             {eyebrow}
           </Text>
         )}
-        <Text style={{ fontFamily: fonts.display, fontSize: 28, color: colors.ink, marginTop: 6 }}>
+        <Text style={{ fontFamily: fonts.display, fontSize: 28, color: surface.ink, marginTop: 6 }}>
           {title}
         </Text>
         {subtitle != null && (
@@ -73,7 +82,7 @@ export function OnboardingStepLayout({
               fontFamily: fonts.body,
               fontSize: 14,
               lineHeight: 20,
-              color: colors.inkSoft,
+              color: surface.inkSoft,
               marginTop: 4,
             }}>
             {subtitle}
