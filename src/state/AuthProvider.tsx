@@ -94,6 +94,13 @@ type AuthContextValue = {
    * marking onboarding complete + revealing stays the gate's job (Phase 1A).
    */
   createLocalBaby: (input: CreateLocalBabyInput) => Promise<LocalBabyRecord>;
+  /**
+   * Keep using Lullaby locally without an account, from the account-entry surface
+   * shown in a configured build with no session. Persists the choice and drops
+   * into 'local-only' so the app renders on the local repository — the complement
+   * to signIn/signUp that keeps the "never force account creation" guardrail.
+   */
+  continueLocally: () => Promise<void>;
   /** Join an existing baby with an invite code (alternative to completeSetup). */
   joinWithInvite: (fields: JoinFields) => Promise<void>;
   signOut: () => Promise<void>;
@@ -110,6 +117,16 @@ function messageFrom(error: unknown, fallback: string): string {
   }
   return fallback;
 }
+
+/**
+ * Persisted "this guest chose to keep using Lullaby locally" flag. Set when
+ * "Continue locally" is tapped on the account-entry surface so a *configured*
+ * build doesn't re-show that surface on the next cold launch (local-first is
+ * sticky, not a per-launch nag). Namespaced + versioned like the other local
+ * stores; it only matters while there is no session — evaluate() owns the
+ * signed-in path and ignores it.
+ */
+const PREFERS_LOCAL_STORAGE_KEY = 'lullaby/auth/prefers-local/v1';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const configured = isSupabaseConfigured && supabase != null;
@@ -138,6 +155,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       mounted.current = false;
     };
   }, []);
+
+  // Cached "the guest chose to continue locally" preference, hydrated from
+  // storage on bootstrap and set by continueLocally(). A ref (not state) because
+  // it gates how a *no-session* resolution lands — local-only vs the
+  // account-entry surface — and must be readable synchronously inside the
+  // auth-change callback without re-subscribing.
+  const prefersLocalRef = useRef(false);
 
   // Map a session to a provisioning status. Safe to call repeatedly.
   const evaluate = useCallback(async (next: Session | null) => {
@@ -172,25 +196,79 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus('ready');
   }, []);
 
+  // Fill the active baby/caregiver from the onboarding-persisted local baby (or
+  // the demo seed as a fallback) so a "continue locally" guest in a *configured*
+  // build has a real identity. The local-only rehydrate effect below is skipped
+  // when configured, so this is the configured path's equivalent. setState only
+  // runs inside this async callback (never synchronously in an effect body), so
+  // the React Compiler's no-setState-in-effect rule holds.
+  const hydrateLocalIdentity = useCallback(async () => {
+    let record: LocalBabyRecord | null = null;
+    try {
+      record = parseLocalBaby(await AsyncStorage.getItem(LOCAL_BABY_STORAGE_KEY));
+    } catch {
+      record = null;
+    }
+    if (!mounted.current) return;
+    if (record) {
+      setCaregiver(record.caregiver);
+      setBaby(record.baby);
+      setCaregivers([record.caregiver]);
+    } else {
+      setCaregiver(seedCaregivers[0] ?? null);
+      setBaby(seedBaby);
+      setCaregivers(seedCaregivers);
+    }
+  }, []);
+
+  // Apply a resolved session to the status machine, honoring a standing "continue
+  // locally" preference: a configured build with NO session and the flag set
+  // renders the app local-first (local-only) rather than the account-entry
+  // surface — so a returning guest is never re-walled. With a session, evaluate()
+  // owns the path and the flag is irrelevant. Centralizing this keeps the
+  // bootstrap and the auth-change listener from diverging on the null case.
+  const applySession = useCallback(
+    async (next: Session | null) => {
+      if (!next && prefersLocalRef.current) {
+        if (mounted.current) setSession(null);
+        await hydrateLocalIdentity();
+        if (mounted.current) setStatus('local-only');
+        return;
+      }
+      await evaluate(next);
+    },
+    [evaluate, hydrateLocalIdentity],
+  );
+
   useEffect(() => {
     if (!configured) return;
     let active = true;
+    let unsub = () => {};
     (async () => {
-      const current = await getSupabaseSession();
-      if (active) await evaluate(current);
+      // Read the session AND the local-first preference before wiring the auth
+      // listener, so the initial INITIAL_SESSION(null) emit can't transiently
+      // flash the account-entry surface for a returning "continue locally" guest.
+      const [current, storedPref] = await Promise.all([
+        getSupabaseSession(),
+        AsyncStorage.getItem(PREFERS_LOCAL_STORAGE_KEY).catch(() => null),
+      ]);
+      if (!active) return;
+      prefersLocalRef.current = storedPref === 'true';
+      await applySession(current);
+      if (!active) return;
+      // Re-evaluate on any later auth change. Defer out of the callback (Supabase
+      // warns against awaiting client calls directly inside onAuthStateChange).
+      unsub = onSupabaseAuthChange((next) => {
+        setTimeout(() => {
+          void applySession(next);
+        }, 0);
+      });
     })();
-    // Re-evaluate on any auth change. Defer out of the callback (Supabase warns
-    // against awaiting client calls directly inside onAuthStateChange).
-    const unsub = onSupabaseAuthChange((next) => {
-      setTimeout(() => {
-        void evaluate(next);
-      }, 0);
-    });
     return () => {
       active = false;
       unsub();
     };
-  }, [configured, evaluate]);
+  }, [configured, applySession]);
 
   // Keep the access token fresh while the app is actually in use. Supabase only
   // runs its refresh ticker between startAutoRefresh()/stopAutoRefresh(); the
@@ -362,6 +440,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // "Continue locally" — the guest chooses to keep using Lullaby without an
+  // account from the account-entry surface. Persist the choice (so the surface
+  // doesn't reappear next launch), hydrate the local identity, then drop into
+  // 'local-only' — the same state an unconfigured build runs in, so the app
+  // renders on the local repository with no forced sign-up. This is an event
+  // handler, not an effect, so setState here is fine under the React Compiler.
+  const continueLocally = useCallback(async () => {
+    // Set the ref first so any in-flight auth-change null emit also resolves to
+    // local-only (not the wall) before the persisted write even lands.
+    prefersLocalRef.current = true;
+    try {
+      await AsyncStorage.setItem(PREFERS_LOCAL_STORAGE_KEY, 'true');
+    } catch {
+      // best-effort — a failed write only means the surface may reappear later
+    }
+    await hydrateLocalIdentity();
+    if (mounted.current) {
+      setErrorMessage(null);
+      setStatus('local-only');
+    }
+  }, [hydrateLocalIdentity]);
+
   // Sign out — drop the Supabase session and return to 'signed-out'. Hygiene:
   //  - Auth session/storage IS cleared: supabase.auth.signOut() calls the
   //    SecureStore adapter's removeItem, which deletes the session manifest AND
@@ -406,6 +506,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signUp,
       completeSetup,
       createLocalBaby,
+      continueLocally,
       joinWithInvite,
       signOut,
       clearError,
@@ -423,6 +524,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signUp,
       completeSetup,
       createLocalBaby,
+      continueLocally,
       joinWithInvite,
       signOut,
       clearError,
