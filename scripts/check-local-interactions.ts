@@ -70,6 +70,16 @@ import {
   onboardingStepIndex,
   type OnboardingFlowState,
 } from '../src/components/onboarding/onboardingFlow';
+import {
+  hasOnboardingFocusNeed,
+  toggleOnboardingFocusNeed,
+  type OnboardingFocusNeed,
+} from '../src/components/onboarding/onboardingFocus';
+import {
+  ONBOARDING_NIGHT_SHIFT_CHOICES,
+  hasOnboardingNightShiftChoice,
+  type OnboardingNightShiftChoice,
+} from '../src/components/onboarding/onboardingNightShift';
 // Logging v2 foundation (plan Phase 1.1) — new model lives beside the legacy one.
 import { createManualClock, systemClock } from '../src/features/logging/timer/clock';
 import { newClientEventId, newUuid } from '../src/features/logging/domain/ids';
@@ -1069,18 +1079,25 @@ check('X2. parseWeeks rejects blank / non-numeric / out-of-range input as null',
 });
 
 // Y. Onboarding flow reducer (Phase 1A foundation) — the pure step machine behind
-// useOnboardingFlow: beat → baby → creating → done, with skip ("Set up later" /
-// "Skip for now") jumping straight to creating. Renders one step at a time.
+// useOnboardingFlow: beat -> baby -> focus -> nightShift -> nightReassurance
+// -> creating -> done. Early skips jump straight to creating; night-shift skip
+// still pauses on the reassurance handoff before creation.
 const flow = (step: OnboardingFlowState['step']): OnboardingFlowState => ({ step });
 
 check('Y1. the flow starts on the emotional beat', () => {
   assert.equal(INITIAL_ONBOARDING_FLOW.step, 'beat');
 });
 
-check('Y2. begin → baby, submit → creating, created → done (the happy path)', () => {
+check('Y2. begin -> baby, submit -> focus -> nightShift -> nightReassurance -> creating -> done', () => {
   let s: OnboardingFlowState = INITIAL_ONBOARDING_FLOW;
   s = onboardingFlowReducer(s, { type: 'begin' });
   assert.equal(s.step, 'baby');
+  s = onboardingFlowReducer(s, { type: 'submit' });
+  assert.equal(s.step, 'focus');
+  s = onboardingFlowReducer(s, { type: 'submit' });
+  assert.equal(s.step, 'nightShift');
+  s = onboardingFlowReducer(s, { type: 'submit' });
+  assert.equal(s.step, 'nightReassurance');
   s = onboardingFlowReducer(s, { type: 'submit' });
   assert.equal(s.step, 'creating');
   s = onboardingFlowReducer(s, { type: 'created' });
@@ -1088,12 +1105,17 @@ check('Y2. begin → baby, submit → creating, created → done (the happy path
   assert.equal(INITIAL_ONBOARDING_FLOW.step, 'beat'); // the shared initial constant was not mutated
 });
 
-check('Y3. skip jumps to creating from either the beat or the baby step', () => {
+check('Y3. skip jumps early setup to creating, but nightShift skip routes to reassurance', () => {
   assert.equal(onboardingFlowReducer(flow('beat'), { type: 'skip' }).step, 'creating');
   assert.equal(onboardingFlowReducer(flow('baby'), { type: 'skip' }).step, 'creating');
+  assert.equal(onboardingFlowReducer(flow('focus'), { type: 'skip' }).step, 'creating');
+  assert.equal(onboardingFlowReducer(flow('nightShift'), { type: 'skip' }).step, 'nightReassurance');
 });
 
-check('Y4. back returns the baby step to the beat', () => {
+check('Y4. back returns reassurance to nightShift, then focus, baby, and beat', () => {
+  assert.equal(onboardingFlowReducer(flow('nightReassurance'), { type: 'back' }).step, 'nightShift');
+  assert.equal(onboardingFlowReducer(flow('nightShift'), { type: 'back' }).step, 'focus');
+  assert.equal(onboardingFlowReducer(flow('focus'), { type: 'back' }).step, 'baby');
   assert.equal(onboardingFlowReducer(flow('baby'), { type: 'back' }).step, 'beat');
 });
 
@@ -1108,18 +1130,83 @@ check('Y6. out-of-order actions are no-ops that return the same state reference'
   assert.equal(onboardingFlowReducer(creating, { type: 'begin' }), creating);
   assert.equal(onboardingFlowReducer(creating, { type: 'submit' }), creating);
   assert.equal(onboardingFlowReducer(creating, { type: 'back' }), creating);
+  const nightShift = flow('nightShift');
+  assert.equal(onboardingFlowReducer(nightShift, { type: 'begin' }), nightShift);
+  assert.equal(onboardingFlowReducer(nightShift, { type: 'created' }), nightShift);
+  const nightReassurance = flow('nightReassurance');
+  assert.equal(onboardingFlowReducer(nightReassurance, { type: 'begin' }), nightReassurance);
+  assert.equal(onboardingFlowReducer(nightReassurance, { type: 'created' }), nightReassurance);
+  assert.equal(onboardingFlowReducer(nightReassurance, { type: 'skip' }), nightReassurance);
+  const focus = flow('focus');
+  assert.equal(onboardingFlowReducer(focus, { type: 'begin' }), focus);
+  assert.equal(onboardingFlowReducer(focus, { type: 'created' }), focus);
   const done = flow('done');
   assert.equal(onboardingFlowReducer(done, { type: 'created' }), done);
   assert.equal(onboardingFlowReducer(done, { type: 'skip' }), done);
 });
 
 check('Y7. step index follows the canonical order and completion is done-only', () => {
-  assert.deepEqual([...ONBOARDING_STEP_ORDER], ['beat', 'baby', 'creating', 'done']);
+  assert.deepEqual([...ONBOARDING_STEP_ORDER], [
+    'beat',
+    'baby',
+    'focus',
+    'nightShift',
+    'nightReassurance',
+    'creating',
+    'done',
+  ]);
   assert.equal(onboardingStepIndex('beat'), 0);
-  assert.equal(onboardingStepIndex('done'), 3);
+  assert.equal(onboardingStepIndex('done'), 6);
+  assert.ok(onboardingStepIndex('baby') < onboardingStepIndex('focus'));
+  assert.ok(onboardingStepIndex('focus') < onboardingStepIndex('nightShift'));
+  assert.ok(onboardingStepIndex('nightShift') < onboardingStepIndex('nightReassurance'));
+  assert.ok(onboardingStepIndex('nightReassurance') < onboardingStepIndex('creating'));
+  assert.ok(onboardingStepIndex('nightShift') < onboardingStepIndex('creating'));
+  assert.ok(onboardingStepIndex('focus') < onboardingStepIndex('creating'));
   assert.ok(onboardingStepIndex('baby') < onboardingStepIndex('creating'));
+  assert.equal(isOnboardingComplete(flow('nightReassurance')), false);
   assert.equal(isOnboardingComplete(flow('creating')), false);
   assert.equal(isOnboardingComplete(flow('done')), true);
+});
+
+check('Y8. focus selection allows multi-select except everything is exclusive', () => {
+  let selected: OnboardingFocusNeed[] = [];
+  assert.equal(hasOnboardingFocusNeed(selected), false);
+
+  selected = toggleOnboardingFocusNeed(selected, 'sleep');
+  assert.deepEqual(selected, ['sleep']);
+  selected = toggleOnboardingFocusNeed(selected, 'feeding');
+  assert.deepEqual(selected, ['sleep', 'feeding']);
+  selected = toggleOnboardingFocusNeed(selected, 'everything');
+  assert.deepEqual(selected, ['everything']);
+  selected = toggleOnboardingFocusNeed(selected, 'reassurance');
+  assert.deepEqual(selected, ['reassurance']);
+  selected = toggleOnboardingFocusNeed(selected, 'sleep');
+  assert.deepEqual(selected, ['reassurance', 'sleep']);
+  selected = toggleOnboardingFocusNeed(selected, 'reassurance');
+  assert.deepEqual(selected, ['sleep']);
+  selected = toggleOnboardingFocusNeed(selected, 'sleep');
+  assert.deepEqual(selected, []);
+
+  selected = toggleOnboardingFocusNeed(selected, 'everything');
+  assert.equal(hasOnboardingFocusNeed(selected), true);
+  selected = toggleOnboardingFocusNeed(selected, 'everything');
+  assert.equal(hasOnboardingFocusNeed(selected), false);
+});
+
+check('Y9. night shift choice is single-select and later counts as a valid choice', () => {
+  let selected: OnboardingNightShiftChoice | null = null;
+  assert.deepEqual([...ONBOARDING_NIGHT_SHIFT_CHOICES], ['solo', 'partner', 'later']);
+  assert.equal(hasOnboardingNightShiftChoice(selected), false);
+  selected = 'solo';
+  assert.equal(hasOnboardingNightShiftChoice(selected), true);
+  selected = 'partner';
+  assert.equal(selected, 'partner');
+  selected = 'later';
+  assert.equal(selected, 'later');
+  assert.equal(hasOnboardingNightShiftChoice(selected), true);
+  selected = null;
+  assert.equal(hasOnboardingNightShiftChoice(selected), false);
 });
 
 // Z. Personalized Tonight (Phase 1A) — the brand-new-night greeting age label, the
