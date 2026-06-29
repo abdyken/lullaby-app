@@ -17,6 +17,7 @@ import { Pressable, Text, View } from 'react-native';
 import { useAuth } from '@/state/AuthProvider';
 import { colors, fonts, radii } from '@/theme';
 
+import { AppleSignInButton } from './AppleSignInButton';
 import { AuthScreen } from './AuthScreen';
 import { AuthButton, AuthLink, AuthShell } from './AuthShell';
 
@@ -106,6 +107,9 @@ export function AccountEntryScreen() {
       </View>
 
       <AuthButton label="Create account" onPress={() => openAuth('signUp')} disabled={busy} />
+      {/* Native "Sign in with Apple" — renders on iOS only; null elsewhere, so the
+          local-first "Continue locally" escape hatch always stays present. */}
+      <AppleSignInButton />
       <SecondaryButton label="Continue locally" onPress={() => void continueLocally()} disabled={busy} />
     </AuthShell>
   );

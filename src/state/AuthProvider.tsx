@@ -14,6 +14,7 @@
  * live in the sync layer (session + provisioning); this is the React seam.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import {
   createContext,
   useCallback,
@@ -24,7 +25,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 import {
   LOCAL_BABY_STORAGE_KEY,
@@ -90,6 +91,18 @@ type AuthContextValue = {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   /**
+   * Native "Sign in with Apple" (iOS only). Runs the system Apple sheet via
+   * `expo-apple-authentication`, then exchanges the returned identity token for a
+   * Supabase session with `signInWithIdToken({ provider: 'apple' })`. On success
+   * the session lands through `onAuthStateChange` → `applySession` (no state set
+   * here, mirroring `signIn`); failures surface through `errorMessage`. A
+   * user-cancelled sheet is a calm no-op, not an error. No-op without a configured
+   * Supabase client or off iOS — the affordance is already gated to iOS in the UI,
+   * so this guard is defense in depth. Required Apple Developer + Supabase provider
+   * setup is documented in `supabase/README.md` (no native credentials in repo).
+   */
+  signInWithApple: () => Promise<void>;
+  /**
    * Email a password-reset link (Supabase `resetPasswordForEmail`). Returns true
    * when the request was accepted so the caller can show a calm "check your
    * inbox" view; failures surface through `errorMessage`. No-op without a
@@ -136,6 +149,20 @@ function messageFrom(error: unknown, fallback: string): string {
     if (typeof m === 'string' && m.length > 0) return m;
   }
   return fallback;
+}
+
+/**
+ * True when an Apple sign-in rejection is just the parent dismissing the system
+ * sheet (`ERR_REQUEST_CANCELED`). A cancel is not a failure, so the caller stays
+ * calm and surfaces no error.
+ */
+function isAppleCancel(error: unknown): boolean {
+  return (
+    error != null &&
+    typeof error === 'object' &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ERR_REQUEST_CANCELED'
+  );
 }
 
 /**
@@ -410,6 +437,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Native Apple sign-in (iOS). The system sheet returns a short-lived identity
+  // token (a signed JWT); Supabase verifies it and mints a session via
+  // signInWithIdToken — the same onAuthStateChange → applySession path email
+  // sign-in uses, so we only surface failures here, never set the session
+  // ourselves. A cancelled sheet is a calm no-op. Gated to iOS + a configured
+  // client (expo-apple-authentication has no Android/web implementation); the UI
+  // already hides the affordance elsewhere, so this is defense in depth. The
+  // native flow needs no nonce (the documented Supabase/Expo path); errors route
+  // through the shared calm-copy mapper. setState only runs inside this async
+  // callback, never synchronously in an effect, so the React Compiler rule holds.
+  const signInWithApple = useCallback(async () => {
+    if (!supabase || Platform.OS !== 'ios') return;
+    setBusy(true);
+    setErrorMessage(null);
+    setPendingMessage(null);
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      const idToken = credential.identityToken;
+      if (!idToken) {
+        // Apple authenticated but returned no token — rare; treat as a soft retry.
+        if (mounted.current) {
+          setErrorMessage('Could not sign in with Apple just now. Please try again.');
+        }
+        return;
+      }
+      const { error } = await supabase.auth.signInWithIdToken({
+        provider: 'apple',
+        token: idToken,
+      });
+      if (error && mounted.current) {
+        setErrorMessage(
+          calmAuthErrorMessage(error, 'Could not sign in with Apple just now. Please try again.'),
+        );
+      }
+    } catch (e) {
+      // The parent dismissed the system sheet — not a failure, stay quiet.
+      if (isAppleCancel(e)) return;
+      if (mounted.current) {
+        setErrorMessage(
+          calmAuthErrorMessage(e, 'Could not sign in with Apple just now. Please try again.'),
+        );
+      }
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  }, []);
+
   // Send a password-reset email. Supabase intentionally returns success even for
   // an unknown address (anti-enumeration), so the calling screen shows the same
   // calm "check your inbox" copy regardless — only a real transport/rate-limit
@@ -606,6 +685,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       errorMessage,
       signIn,
       signUp,
+      signInWithApple,
       resetPassword,
       completeSetup,
       createLocalBaby,
@@ -626,6 +706,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       errorMessage,
       signIn,
       signUp,
+      signInWithApple,
       resetPassword,
       completeSetup,
       createLocalBaby,
