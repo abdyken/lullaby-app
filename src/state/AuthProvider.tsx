@@ -39,7 +39,13 @@ import { clearLocalEventStorage } from '@/data/localStorage';
 import { baby as seedBaby, caregivers as seedCaregivers } from '@/data/mock';
 import type { Baby, Caregiver, CaregiverRole } from '@/data/models';
 import { calmAuthErrorMessage } from '@/lib/authErrors';
-import { completeAuthRedirect, getAuthRedirectUrl, subscribeToAuthRedirects } from '@/lib/authLinking';
+import {
+  completeAuthRedirect,
+  getAuthRedirectUrl,
+  startGoogleOAuth,
+  subscribeToAuthRedirects,
+} from '@/lib/authLinking';
+import { isGoogleSignInConfigured } from '@/lib/googleAuth';
 import { hapticSuccess } from '@/lib/haptics';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
@@ -102,6 +108,21 @@ type AuthContextValue = {
    * setup is documented in `supabase/README.md` (no native credentials in repo).
    */
   signInWithApple: () => Promise<void>;
+  /**
+   * Google sign-in via the system browser (iOS + Android). Asks Supabase for the
+   * Google authorization URL and runs it through an `expo-web-browser` auth
+   * session that returns to `lullaby://auth-callback`; the shared redirect plumbing
+   * (Step 04) then exchanges the result for a session — so success lands through
+   * `onAuthStateChange` → `applySession`, exactly like email + Apple sign-in (no
+   * state set here). A dismissed browser is a calm no-op; failures surface through
+   * `errorMessage`. Gated on a configured Supabase client AND a Google OAuth client
+   * ID in the env (`isGoogleSignInConfigured`), and excluded on web — the affordance
+   * is already hidden when those are absent, so this guard is defense in depth.
+   * Deliberately the OAuth/browser flow (no native module), so the Android build
+   * path is unaffected. Required Google Cloud + Supabase provider setup is
+   * documented in `supabase/README.md` (no client IDs or dashboard config in repo).
+   */
+  signInWithGoogle: () => Promise<void>;
   /**
    * Email a password-reset link (Supabase `resetPasswordForEmail`). Returns true
    * when the request was accepted so the caller can show a calm "check your
@@ -489,6 +510,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Google sign-in (iOS + Android) via the system browser. We deliberately use the
+  // OAuth/browser flow rather than a native sign-in module: it needs no extra
+  // native config and keeps the Android build path untouched. `startGoogleOAuth`
+  // owns the Supabase `signInWithOAuth` → browser round-trip → `completeAuthRedirect`
+  // exchange; on success the session lands via onAuthStateChange → applySession (we
+  // set no session here, mirroring signIn / signInWithApple). A dismissed browser
+  // is a calm no-op. Gated to a configured client + a Google OAuth client ID in env
+  // + non-web; the UI already hides the button elsewhere, so this is defense in
+  // depth. A non-cancel failure shows one calm line (the underlying reasons are
+  // technical — init/exchange — not parent-actionable). setState only runs inside
+  // this async callback, so the React Compiler's no-setState-in-effect rule holds.
+  const signInWithGoogle = useCallback(async () => {
+    if (!supabase || !isGoogleSignInConfigured || Platform.OS === 'web') return;
+    setBusy(true);
+    setErrorMessage(null);
+    setPendingMessage(null);
+    try {
+      const outcome = await startGoogleOAuth(supabase);
+      if (outcome.status === 'error' && mounted.current) {
+        setErrorMessage('Could not sign in with Google just now. Please try again.');
+      }
+      // 'canceled' → calm no-op; 'success' → onAuthStateChange → applySession.
+    } catch (e) {
+      if (mounted.current) {
+        setErrorMessage(
+          calmAuthErrorMessage(e, 'Could not sign in with Google just now. Please try again.'),
+        );
+      }
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  }, []);
+
   // Send a password-reset email. Supabase intentionally returns success even for
   // an unknown address (anti-enumeration), so the calling screen shows the same
   // calm "check your inbox" copy regardless — only a real transport/rate-limit
@@ -686,6 +740,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signUp,
       signInWithApple,
+      signInWithGoogle,
       resetPassword,
       completeSetup,
       createLocalBaby,
@@ -707,6 +762,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signUp,
       signInWithApple,
+      signInWithGoogle,
       resetPassword,
       completeSetup,
       createLocalBaby,

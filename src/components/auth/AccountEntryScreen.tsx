@@ -20,6 +20,7 @@ import { colors, fonts, radii } from '@/theme';
 import { AppleSignInButton } from './AppleSignInButton';
 import { AuthScreen } from './AuthScreen';
 import { AuthButton, AuthLink, AuthShell } from './AuthShell';
+import { GoogleSignInButton } from './GoogleSignInButton';
 
 /** A quiet value line: a soft accent dot + calm body copy. */
 function Benefit({ text }: { text: string }) {
@@ -110,6 +111,9 @@ export function AccountEntryScreen() {
       {/* Native "Sign in with Apple" — renders on iOS only; null elsewhere, so the
           local-first "Continue locally" escape hatch always stays present. */}
       <AppleSignInButton />
+      {/* "Continue with Google" — iOS + Android via the system browser; null when
+          not configured (or on web), so the escape hatch below always stays. */}
+      <GoogleSignInButton />
       <SecondaryButton label="Continue locally" onPress={() => void continueLocally()} disabled={busy} />
     </AuthShell>
   );
