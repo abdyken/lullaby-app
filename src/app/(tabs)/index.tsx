@@ -35,6 +35,7 @@ import { buildQuickLogMeta, type PreviewState } from '@/data/currentState';
 import { LOCAL_CURSOR_CONTEXT } from '@/data/handoffCursor';
 import type { Baby } from '@/data/models';
 import { hapticSave } from '@/lib/haptics';
+import { isSupabaseConfigured } from '@/lib/supabase';
 import { baby as seedBaby } from '@/data/mock';
 import { useAuth } from '@/state/AuthProvider';
 import { useLocalEvents } from '@/state/LocalEventProvider';
@@ -194,8 +195,10 @@ export default function TonightScreen() {
   // Logging v2 Pump sheet (side + timer + optional volume draft). Behind the same
   // flag; the legacy LogSheet pump path stays default while off.
   const [pumpV2Open, setPumpV2Open] = useState(false);
-  // Account/sign-out lives behind the baby header (blueprint settings home), but
-  // only in real-sync mode — local demo keeps the header inert as before.
+  // Account surface lives behind the baby header (blueprint settings home),
+  // reachable in any *configured* build — for a signed-in caregiver and a
+  // "continue locally" guest alike, so it can show auth state and sign out / set
+  // up an account. The unconfigured local demo keeps the header inert as before.
   const [accountOpen, setAccountOpen] = useState(false);
 
   // Live render-only clock for elapsed labels and the hero progress ring. During
@@ -275,7 +278,7 @@ export default function TonightScreen() {
         ageWeeks={ageWeeks}
         caregivers={caregivers}
         surfaceMode={bodyMode}
-        onPress={syncMode === 'supabase' ? () => setAccountOpen(true) : undefined}
+        onPress={isSupabaseConfigured ? () => setAccountOpen(true) : undefined}
         onThemeToggle={handleThemeToggle}
         themeToggleDisabled={isTransitioning}
       />
