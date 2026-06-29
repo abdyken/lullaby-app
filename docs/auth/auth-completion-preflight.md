@@ -94,10 +94,12 @@ Evidence-backed against the current tree. Maps to the plan's later phases.
 
 1. **No password reset** — `resetPasswordForEmail` absent everywhere. (`AuthScreen` has no
    "forgot password"; no `ForgotPasswordScreen`.) → plan Phase 3.
-2. **No social sign-in** — only `signInWithPassword` exists; no `signInWithIdToken` / Apple / Google.
-   Deps `expo-apple-authentication` / `expo-auth-session` / Google sign-in are **not installed**
-   (`expo-secure-store`, `expo-linking`, `expo-web-browser` **are** present). → plan Phase 3 + Phase 0
-   provider config. **Gate Apple on iOS only** (hide on Android/web) per guardrails.
+2. **Social sign-in — Apple done (Step 06), Google pending.** Apple is now app-side prepared:
+   `AuthProvider.signInWithApple()` → `signInWithIdToken({ provider: 'apple' })`, an **iOS-only**
+   `AppleSignInButton` on the account-entry surface (null on Android/web), `expo-apple-authentication`
+   installed, and `app.json` `ios.usesAppleSignIn` + the config plugin. Manual Apple Developer +
+   Supabase provider setup is documented in `supabase/README.md` (no native credentials in repo).
+   **Google is still absent** (`expo-auth-session` / Google sign-in not installed). → plan Phase 3.
 3. **No account deletion** — no `deleteAccount` in code and **no `supabase/functions/`** (the planned
    `delete-account` Edge Function). App Store requires this once accounts exist. → plan Phase 3.
 4. **Guest is walled in configured builds** — `AuthGate` routes `signed-out → AuthScreen` (a sign-in
@@ -150,8 +152,11 @@ Documented (not fabricated) per guardrails — none of this is done in the repo:
   enable the **Email** auth provider, choose **Confirm email on/off**, set `EXPO_PUBLIC_SUPABASE_URL`
   + `EXPO_PUBLIC_SUPABASE_ANON_KEY` in `.env`. (See `supabase/README.md`.) Email-confirmation = on
   ⟹ a deep-link confirmation handler is required (gap #6).
-- **Apple Sign in (future Phase 3):** Apple Developer Service ID + key, `usesAppleSignIn`
-  entitlement/plugin in `app.json`, enable Apple provider in Supabase, redirect `lullaby://`.
+- **Apple Sign in (app-side done — Step 06; dashboards still required):** enable the **Sign In with
+  Apple** capability on the `com.lullaby.app` App ID, and enable the Apple provider in Supabase with
+  `com.lullaby.app` in Client IDs. Native-only iOS needs **no** Services ID / signing key. Full
+  runbook + build/runtime notes in `supabase/README.md`. (`usesAppleSignIn` + plugin already in
+  `app.json`; `AuthProvider.signInWithApple` already wired.)
 - **Google Sign in (future Phase 3):** Google Cloud OAuth client(s), enable Google provider in
   Supabase, dev-client build (native module — not Expo Go), redirect `lullaby://`.
 - **Account deletion (future Phase 3):** a Supabase **Edge Function** with the service-role key

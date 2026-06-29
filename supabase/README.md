@@ -79,6 +79,52 @@ URL is harmless until you allow-list it.
 > caregiver in on the recovery session; the parser/handler groundwork
 > (`src/lib/authRedirect.ts`, `src/lib/authLinking.ts`) is already in place.
 
+## Sign in with Apple (native, iOS)
+
+The account-entry surface shows a **Sign in with Apple** button **on iOS only**
+(`AppleSignInButton` returns `null` on Android/web and in the local-only demo, so
+nothing breaks off-iOS). It runs the native Apple sheet via
+`expo-apple-authentication` and exchanges the returned identity token for a
+Supabase session — `AuthProvider.signInWithApple()` calls
+`supabase.auth.signInWithIdToken({ provider: 'apple', token })`. The native flow
+needs **no nonce** and no web OAuth redirect.
+
+**App-side wiring already lives in the repo** (this slice): the handler in
+`src/state/AuthProvider.tsx`, the platform-gated button in
+`src/components/auth/AppleSignInButton.tsx`, and in `app.json` both
+`ios.usesAppleSignIn: true` and the `expo-apple-authentication` config plugin
+(these add the `com.apple.developer.applesignin` entitlement at prebuild). **No
+native credentials, provisioning profiles, or signing keys are committed** — those
+are created in the Apple Developer + Supabase dashboards below.
+
+### Manual setup required (dashboards, not code)
+
+1. **Apple Developer → Certificates, Identifiers & Profiles → Identifiers**: open
+   the **App ID** for `com.lullaby.app` (the app's `ios.bundleIdentifier`) and
+   enable the **Sign In with Apple** capability. Leave the "Server-to-Server
+   Notification Endpoint" blank.
+2. **Supabase → Authentication → Providers → Apple**: **enable** the provider and
+   add the bundle id `com.lullaby.app` to **Client IDs** (Authorized Client IDs).
+   For a **native-only iOS** sign-in that is all Supabase needs to verify the
+   token — the **Services ID + signing key are NOT required** (those are only for
+   the web / OAuth-redirect flow). If you also test inside **Expo Go**, add
+   `host.exp.Exponent` to the Client IDs as well.
+
+### Build / runtime notes
+
+- The Apple Sign In **entitlement isn't available in Expo Go** — run a
+  **dev-client** (`npm run dev`) or a store build (`expo run:ios`) to exercise it.
+- The **App ID capability must match the declared entitlement**, or an iOS build
+  fails to sign — which is why the capability in step 1 is required before a real
+  build even though `usesAppleSignIn` is already declared app-side.
+- **The Android build path is unaffected:** the plugin and `usesAppleSignIn` are
+  iOS-only config, and the button renders `null` on Android.
+
+**Nothing above is required for local checks.** Like password reset, the whole
+flow is gated: without Supabase env vars there is no client and `signInWithApple`
+no-ops, and the button is iOS-only — so `npm run lint`, `npx tsc --noEmit`, and
+`npm run check:local-interactions` all pass with no dashboard setup.
+
 ## First-run flow (configured builds)
 
 With both env vars set the app builds a Supabase client on launch and the
