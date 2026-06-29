@@ -4,7 +4,8 @@
  *   local-only         → first-run onboarding, then render the app
  *   ready              → first-run onboarding, then render the app
  *   loading            → calm spinner
- *   signed-out         → first-run onboarding, then sign-in / sign-up
+ *   signed-out         → first-run onboarding, then the account-entry surface
+ *                        (Continue locally / Create account / Sign in — never a wall)
  *   needs-setup        → first-run onboarding, then baby setup
  *
  * Crucially, the app's children (LocalEventProvider) only MOUNT in local-only or
@@ -17,8 +18,8 @@ import type { ReactNode } from 'react';
 import { OnboardingGate } from '@/components/onboarding/OnboardingGate';
 import { useAuth } from '@/state/AuthProvider';
 
+import { AccountEntryScreen } from './AccountEntryScreen';
 import { AuthLoading } from './AuthLoading';
-import { AuthScreen } from './AuthScreen';
 import { BabySetupScreen } from './BabySetupScreen';
 
 export function AuthGate({ children }: { children: ReactNode }) {
@@ -38,7 +39,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     case 'signed-out':
       return (
         <OnboardingGate>
-          <AuthScreen />
+          <AccountEntryScreen />
         </OnboardingGate>
       );
     case 'loading':

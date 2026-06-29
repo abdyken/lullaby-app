@@ -8,6 +8,7 @@
  * and is still single-caregiver until the realtime + invite slices land.
  */
 import { useState } from 'react';
+import { View } from 'react-native';
 
 import { useAuth } from '@/state/AuthProvider';
 
@@ -18,9 +19,17 @@ function isValid(email: string, password: string): boolean {
   return email.includes('@') && email.trim().length >= 3 && password.length >= 6;
 }
 
-export function AuthScreen() {
+export function AuthScreen({
+  /** Which mode to open in. Lets the account-entry surface jump straight to sign-up. */
+  initialMode = 'signIn',
+  /** When provided, render a "Back to options" link (returns to the entry surface). */
+  onBack,
+}: {
+  initialMode?: 'signIn' | 'signUp';
+  onBack?: () => void;
+} = {}) {
   const { signIn, signUp, busy, errorMessage, pendingMessage, clearError } = useAuth();
-  const [mode, setMode] = useState<'signIn' | 'signUp'>('signIn');
+  const [mode, setMode] = useState<'signIn' | 'signUp'>(initialMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -48,10 +57,21 @@ export function AuthScreen() {
           : 'Sign in to pick up your night log where you left off.'
       }
       footer={
-        <AuthLink
-          label={isSignUp ? 'Have an account? Sign in' : 'New here? Create an account'}
-          onPress={toggleMode}
-        />
+        <View style={{ gap: 12 }}>
+          <AuthLink
+            label={isSignUp ? 'Have an account? Sign in' : 'New here? Create an account'}
+            onPress={toggleMode}
+          />
+          {onBack != null && (
+            <AuthLink
+              label="Back to options"
+              onPress={() => {
+                clearError();
+                onBack();
+              }}
+            />
+          )}
+        </View>
       }>
       <AuthField
         label="Email"
