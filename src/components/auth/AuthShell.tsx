@@ -7,7 +7,7 @@
  * cards/inputs, warm shadow, Fredoka headline / Nunito body. Deliberately quiet
  * — never a marketing wall.
  */
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -95,11 +95,20 @@ export function AuthShell({
   );
 }
 
-/** A labeled text input in the app's surface style. */
+/**
+ * A labeled text input in the app's surface style.
+ *
+ * The keyboard/validation props (`onBlur`, `error`, `returnKeyType`,
+ * `submitBehavior`, `onSubmitEditing`, `inputRef`) are all optional and
+ * backward-compatible, so the setup/join screens that use this field are
+ * unaffected. When `error` is set, the border turns warm (terracotta) and a
+ * calm hint renders below the field.
+ */
 export function AuthField({
   label,
   value,
   onChangeText,
+  onBlur,
   placeholder,
   keyboardType,
   autoCapitalize = 'none',
@@ -107,10 +116,16 @@ export function AuthField({
   autoComplete,
   textContentType,
   maxLength,
+  error,
+  returnKeyType,
+  submitBehavior,
+  onSubmitEditing,
+  inputRef,
 }: {
   label: string;
   value: string;
   onChangeText: (text: string) => void;
+  onBlur?: () => void;
   placeholder?: string;
   keyboardType?: 'default' | 'email-address' | 'number-pad';
   autoCapitalize?: 'none' | 'words' | 'sentences';
@@ -118,7 +133,15 @@ export function AuthField({
   autoComplete?: 'email' | 'password' | 'name' | 'off';
   textContentType?: 'emailAddress' | 'password' | 'name' | 'none';
   maxLength?: number;
+  /** A calm validation/error hint; also warms the border when present. */
+  error?: string | null;
+  returnKeyType?: 'next' | 'go' | 'done' | 'send';
+  submitBehavior?: 'submit' | 'blurAndSubmit';
+  onSubmitEditing?: () => void;
+  /** Lets a parent advance focus to this field (e.g. email → password). */
+  inputRef?: Ref<TextInput>;
 }) {
+  const hasError = error != null && error.length > 0;
   return (
     <View>
       <Text
@@ -133,8 +156,11 @@ export function AuthField({
         {label}
       </Text>
       <TextInput
+        ref={inputRef}
         value={value}
         onChangeText={onChangeText}
+        onBlur={onBlur}
+        accessibilityLabel={label}
         placeholder={placeholder}
         placeholderTextColor={colors.inkFaint}
         keyboardType={keyboardType}
@@ -144,6 +170,9 @@ export function AuthField({
         autoComplete={autoComplete}
         textContentType={textContentType}
         maxLength={maxLength}
+        returnKeyType={returnKeyType}
+        submitBehavior={submitBehavior}
+        onSubmitEditing={onSubmitEditing}
         style={{
           fontFamily: fonts.body,
           fontSize: 15,
@@ -151,11 +180,23 @@ export function AuthField({
           backgroundColor: colors.surface,
           borderRadius: radii.small,
           borderWidth: 1,
-          borderColor: colors.line,
+          borderColor: hasError ? colors.feed : colors.line,
           paddingHorizontal: 14,
           paddingVertical: 13,
         }}
       />
+      {hasError && (
+        <Text
+          style={{
+            fontFamily: fonts.body,
+            fontSize: 12,
+            lineHeight: 16,
+            color: colors.feed,
+            marginTop: 6,
+          }}>
+          {error}
+        </Text>
+      )}
     </View>
   );
 }

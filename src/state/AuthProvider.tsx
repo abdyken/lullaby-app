@@ -37,6 +37,7 @@ import {
 import { clearLocalEventStorage } from '@/data/localStorage';
 import { baby as seedBaby, caregivers as seedCaregivers } from '@/data/mock';
 import type { Baby, Caregiver, CaregiverRole } from '@/data/models';
+import { calmAuthErrorMessage } from '@/lib/authErrors';
 import { hapticSuccess } from '@/lib/haptics';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
@@ -332,9 +333,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
       });
       // Success → onAuthStateChange drives evaluate(); only surface failures here.
-      if (error && mounted.current) setErrorMessage(error.message);
+      // Raw GoTrue messages are terse/technical, so map them to calm copy.
+      if (error && mounted.current) {
+        setErrorMessage(calmAuthErrorMessage(error, 'Could not sign in just now. Please try again.'));
+      }
     } catch (e) {
-      if (mounted.current) setErrorMessage(messageFrom(e, 'Could not sign in. Please try again.'));
+      if (mounted.current) {
+        setErrorMessage(calmAuthErrorMessage(e, 'Could not sign in just now. Please try again.'));
+      }
     } finally {
       if (mounted.current) setBusy(false);
     }
@@ -348,16 +354,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
       if (error) {
-        if (mounted.current) setErrorMessage(error.message);
+        if (mounted.current) {
+          setErrorMessage(
+            calmAuthErrorMessage(error, 'Could not create your account just now. Please try again.'),
+          );
+        }
         return;
       }
       // No session means the project requires email confirmation first.
       if (!data.session && mounted.current) {
-        setPendingMessage('Account created. Confirm via the email we sent, then sign in.');
+        setPendingMessage('Account created. Tap the link in the email we just sent, then sign in.');
       }
     } catch (e) {
       if (mounted.current) {
-        setErrorMessage(messageFrom(e, 'Could not create the account. Please try again.'));
+        setErrorMessage(
+          calmAuthErrorMessage(e, 'Could not create your account just now. Please try again.'),
+        );
       }
     } finally {
       if (mounted.current) setBusy(false);
