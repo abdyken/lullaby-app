@@ -15,37 +15,14 @@ import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import type { CaregiverRole } from '@/data/models';
+import { birthDateFromWeeks, parseWeeks } from '@/data/localBaby';
 import { useAuth } from '@/state/AuthProvider';
 import { colors, fonts, radii } from '@/theme';
 
 import { AuthButton, AuthField, AuthLink, AuthNote, AuthShell } from './AuthShell';
+import { RolePicker, colorForRole } from './RolePicker';
 
 type Mode = 'create' | 'join';
-
-/** Role → brand color (blueprint: Mom #FF9E5E / Dad #5560C6; Other = calm teal). */
-const ROLES: { role: CaregiverRole; label: string; color: string }[] = [
-  { role: 'mom', label: 'Mom', color: colors.mom },
-  { role: 'dad', label: 'Dad', color: colors.dad },
-  { role: 'other', label: 'Other', color: colors.diaper },
-];
-
-function colorForRole(role: CaregiverRole): string {
-  return ROLES.find((r) => r.role === role)?.color ?? colors.mom;
-}
-
-/** Convert a whole-week age into an ISO birth date (YYYY-MM-DD). */
-function birthDateFromWeeks(weeks: number): string {
-  const ms = Date.now() - weeks * 7 * 24 * 60 * 60 * 1000;
-  return new Date(ms).toISOString().slice(0, 10);
-}
-
-function parseWeeks(input: string): number | null {
-  const trimmed = input.trim();
-  if (trimmed === '') return null;
-  const n = Number(trimmed);
-  if (!Number.isFinite(n) || n < 0 || n > 260) return null;
-  return Math.floor(n);
-}
 
 /** Two-option segmented control (Create / Join). */
 function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
@@ -92,58 +69,6 @@ function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => voi
           </Pressable>
         );
       })}
-    </View>
-  );
-}
-
-/** The shared "You are" role picker. */
-function RolePicker({ role, onChange }: { role: CaregiverRole; onChange: (r: CaregiverRole) => void }) {
-  return (
-    <View>
-      <Text
-        style={{
-          fontFamily: fonts.bodyBold,
-          fontSize: 10,
-          letterSpacing: 0.8,
-          textTransform: 'uppercase',
-          color: colors.inkSoft,
-          marginBottom: 6,
-        }}>
-        You are
-      </Text>
-      <View style={{ flexDirection: 'row', gap: 9 }}>
-        {ROLES.map((opt) => {
-          const active = opt.role === role;
-          return (
-            <Pressable
-              key={opt.role}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-              accessibilityLabel={opt.label}
-              onPress={() => onChange(opt.role)}
-              style={({ pressed }) => ({
-                flex: 1,
-                minHeight: 48,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: radii.medium,
-                backgroundColor: active ? opt.color : colors.surface,
-                borderWidth: 2,
-                borderColor: active ? opt.color : colors.line,
-                transform: [{ scale: pressed ? 0.97 : 1 }],
-              })}>
-              <Text
-                style={{
-                  fontFamily: fonts.bodyBold,
-                  fontSize: 14,
-                  color: active ? colors.white : colors.inkSoft,
-                }}>
-                {opt.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
     </View>
   );
 }

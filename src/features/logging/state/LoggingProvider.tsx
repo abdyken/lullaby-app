@@ -166,8 +166,10 @@ function useLoggingActor(): LoggingActor | null {
   const { status, baby, caregiver } = useAuth();
   return useMemo<LoggingActor | null>(() => {
     if (status === 'local-only') {
-      const childId = seedBaby.id;
-      const userId = seedCaregivers[0]?.id ?? 'local-caregiver';
+      // The active local baby/caregiver now lives on AuthProvider; the seed
+      // identity (demo Mia / Mom) is the fallback if it is somehow unavailable.
+      const childId = baby?.id ?? seedBaby.id;
+      const userId = caregiver?.id ?? seedCaregivers[0]?.id ?? 'local-caregiver';
       return { familyId: childId, childId, userId };
     }
     if (status === 'ready' && baby && caregiver) {

@@ -31,10 +31,29 @@ import {
   calmDescription,
   deriveHandoff,
   deriveNightStatus,
+  formatBabyAge,
   getOrbView,
   recapSummaryLine,
 } from '../src/data/currentState';
+import {
+  FIRST_LOG_COACH_DISMISSED_KEY,
+  firstLogNudgeText,
+  firstLogThreadText,
+  resolveFirstLogCoachPhase,
+  tonightCalibratingText,
+} from '../src/components/firstLogCoach';
 import { buildSeedEvents, caregivers as seedCaregivers, getTonightTimeline } from '../src/data/mock';
+import {
+  DEFAULT_LOCAL_BABY_NAME,
+  DEFAULT_LOCAL_CAREGIVER_NAME,
+  LOCAL_BABY_ID,
+  LOCAL_CAREGIVER_ID,
+  birthDateFromWeeks,
+  createLocalBaby,
+  parseLocalBaby,
+  parseWeeks,
+  serializeLocalBaby,
+} from '../src/data/localBaby';
 import type { Caregiver, LogEvent, LogEventType } from '../src/data/models';
 import { resolveSurfaceMode } from '../src/theme';
 import { parsePersistedState, serializeState } from '../src/data/persistedState';
@@ -44,13 +63,23 @@ import {
   resolveOnboardingGateState,
 } from '../src/components/onboarding/onboardingStorage';
 import {
-  ONBOARDING_PANELS,
-  getNextOnboardingStep,
-  getOnboardingCtaLabel,
-  getOnboardingPrimaryActionState,
-  getOnboardingIntroDuration,
-  shouldShowOnboardingSkip,
-} from '../src/components/onboarding/onboardingContent';
+  INITIAL_ONBOARDING_FLOW,
+  ONBOARDING_STEP_ORDER,
+  isOnboardingComplete,
+  onboardingFlowReducer,
+  onboardingStepIndex,
+  type OnboardingFlowState,
+} from '../src/components/onboarding/onboardingFlow';
+import {
+  hasOnboardingFocusNeed,
+  toggleOnboardingFocusNeed,
+  type OnboardingFocusNeed,
+} from '../src/components/onboarding/onboardingFocus';
+import {
+  ONBOARDING_NIGHT_SHIFT_CHOICES,
+  hasOnboardingNightShiftChoice,
+  type OnboardingNightShiftChoice,
+} from '../src/components/onboarding/onboardingNightShift';
 // Logging v2 foundation (plan Phase 1.1) — new model lives beside the legacy one.
 import { createManualClock, systemClock } from '../src/features/logging/timer/clock';
 import { newClientEventId, newUuid } from '../src/features/logging/domain/ids';
@@ -283,7 +312,7 @@ check('G3. an empty event list with a known orbView is valid', () => {
 
 // G4-G6. First-run onboarding gate selection (pure resolver, no RN render needed)
 check('G4. onboarding not completed selects OnboardingScreen', () => {
-  assert.equal(ONBOARDING_COMPLETE_KEY, 'lullaby.onboarding.v1.complete');
+  assert.equal(ONBOARDING_COMPLETE_KEY, 'lullaby.onboarding.v2.complete');
   assert.equal(resolveOnboardingGateState(false, { rawFlag: 'false', isDev: true }), 'needed');
 });
 
@@ -295,50 +324,6 @@ check('G6. force onboarding selects OnboardingScreen even when completed', () =>
   assert.equal(isForceOnboardingEnabled({ rawFlag: 'true', isDev: true }), true);
   assert.equal(resolveOnboardingGateState(true, { rawFlag: 'true', isDev: true }), 'needed');
   assert.equal(resolveOnboardingGateState(true, { rawFlag: 'true', isDev: false }), 'complete');
-});
-
-check('G7. onboarding stays to three calm panels with final setup CTA', () => {
-  assert.equal(ONBOARDING_PANELS.length, 3);
-  assert.deepEqual(
-    ONBOARDING_PANELS.map((panel) => panel.eyebrow),
-    ['LOG THE NIGHT', 'WHAT HAPPENED', 'CALM NEXT STEP'],
-  );
-  assert.equal(getOnboardingCtaLabel(0), 'Next');
-  assert.equal(getOnboardingCtaLabel(0, true), 'Next');
-  assert.equal(getOnboardingCtaLabel(2), 'Set up baby');
-  assert.equal(getOnboardingCtaLabel(2, true), 'Setting up...');
-});
-
-check('G8. pressing through onboarding reaches the setup/app handoff', () => {
-  let step = 0;
-  step = getNextOnboardingStep(step) as number;
-  assert.equal(step, 1);
-  step = getNextOnboardingStep(step) as number;
-  assert.equal(step, 2);
-  assert.equal(getNextOnboardingStep(step), 'complete');
-});
-
-check('G9. reduce-motion onboarding duration stays short and valid', () => {
-  const fullMotion = getOnboardingIntroDuration(false);
-  const reducedMotion = getOnboardingIntroDuration(true);
-  assert.ok(fullMotion >= 800 && fullMotion <= 1_200);
-  assert.ok(reducedMotion > 0 && reducedMotion < fullMotion);
-});
-
-check('G10. Next never enters the completion loading state', () => {
-  assert.deepEqual(getOnboardingPrimaryActionState(0, false), { label: 'Next', loading: false });
-  assert.deepEqual(getOnboardingPrimaryActionState(1, true), { label: 'Next', loading: false });
-});
-
-check('G11. final CTA is the only primary action that can show setup loading', () => {
-  assert.deepEqual(getOnboardingPrimaryActionState(2, false), { label: 'Set up baby', loading: false });
-  assert.deepEqual(getOnboardingPrimaryActionState(2, true), { label: 'Setting up...', loading: true });
-});
-
-check('G12. Skip is hidden on the final onboarding screen', () => {
-  assert.equal(shouldShowOnboardingSkip(0), true);
-  assert.equal(shouldShowOnboardingSkip(1), true);
-  assert.equal(shouldShowOnboardingSkip(2), false);
 });
 
 // H. Note events
@@ -985,6 +970,299 @@ check('U10. CareEvent type guards narrow each event to its concrete shape', () =
   // The guard narrows: these property accesses are type-checked by tsc.
   assert.equal(breast.details.activeSide, 'left');
   assert.equal(bottle.details.amountMl, 120);
+});
+
+// W. Local baby creation (Phase 0b) — the pure createLocalBaby factory + the
+// weeks→birthDate helper that the live setup flow (Phase 1A) will write through
+// AuthProvider. The seed stays the fallback until createLocalBaby actually runs.
+const LB_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const lbDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+check('W1. birthDateFromWeeks maps whole weeks to an ISO date relative to now', () => {
+  assert.equal(birthDateFromWeeks(0, NOW), lbDay(NOW));
+  assert.equal(birthDateFromWeeks(6, NOW), lbDay(NOW - 6 * LB_WEEK_MS));
+});
+
+check('W2. birthDateFromWeeks clamps negative / non-finite weeks and floors fractions', () => {
+  assert.equal(birthDateFromWeeks(-3, NOW), lbDay(NOW)); // negative → newborn (today)
+  assert.equal(birthDateFromWeeks(Number.NaN, NOW), lbDay(NOW));
+  assert.equal(birthDateFromWeeks(2.9, NOW), lbDay(NOW - 2 * LB_WEEK_MS)); // 2.9 → 2 whole weeks
+});
+
+check('W3. createLocalBaby builds a baby + caregiver from full inputs (trimmed)', () => {
+  const { baby, caregiver } = createLocalBaby(
+    { babyName: '  Noa  ', birthDate: '2026-05-01', caregiverName: '  Sam ', role: 'dad' },
+    NOW,
+  );
+  assert.equal(baby.id, LOCAL_BABY_ID);
+  assert.equal(baby.name, 'Noa');
+  assert.equal(baby.birthDate, '2026-05-01');
+  assert.equal(baby.avatarKey, 'default');
+  assert.equal(baby.createdBy, LOCAL_CAREGIVER_ID);
+  assert.equal(caregiver.id, LOCAL_CAREGIVER_ID);
+  assert.equal(caregiver.displayName, 'Sam');
+  assert.equal(caregiver.role, 'dad');
+  assert.equal(caregiver.colorHex, '#5560C6'); // dad brand color
+  // The real local ids never collide with the demo seed (baby-mia / cg-mom).
+  assert.notEqual(baby.id, 'baby-mia');
+  assert.notEqual(caregiver.id, 'cg-mom');
+});
+
+check('W4. createLocalBaby fills calm defaults for the skip / "Set up later" path', () => {
+  const { baby, caregiver } = createLocalBaby({}, NOW);
+  assert.equal(baby.name, DEFAULT_LOCAL_BABY_NAME); // "Your baby"
+  assert.equal(baby.birthDate, birthDateFromWeeks(0, NOW)); // generic newborn
+  assert.equal(caregiver.displayName, DEFAULT_LOCAL_CAREGIVER_NAME); // "Mom"
+  assert.equal(caregiver.role, 'mom');
+  assert.equal(caregiver.colorHex, '#FF9E5E'); // mom brand color (role default)
+});
+
+check('W5. blank / whitespace-only inputs fall back to defaults', () => {
+  const { baby, caregiver } = createLocalBaby(
+    { babyName: '   ', caregiverName: '', colorHex: '   ' },
+    NOW,
+  );
+  assert.equal(baby.name, DEFAULT_LOCAL_BABY_NAME);
+  assert.equal(caregiver.displayName, DEFAULT_LOCAL_CAREGIVER_NAME);
+  assert.equal(caregiver.colorHex, '#FF9E5E'); // blank colorHex → role color
+});
+
+check('W6. an explicit colorHex overrides the role color', () => {
+  assert.equal(createLocalBaby({ role: 'mom', colorHex: '#123456' }, NOW).caregiver.colorHex, '#123456');
+});
+
+check('W7. createLocalBaby is pure — same (input, now) deep-equals', () => {
+  const input = { babyName: 'Mia', role: 'other' as const };
+  assert.deepEqual(createLocalBaby(input, NOW), createLocalBaby(input, NOW));
+});
+
+check('W8. birthDate from the age control flows through createLocalBaby unchanged', () => {
+  const birthDate = birthDateFromWeeks(8, NOW);
+  assert.equal(createLocalBaby({ babyName: 'Eli', birthDate }, NOW).baby.birthDate, birthDate);
+});
+
+check('W9. serialize → parse round-trips the local baby record', () => {
+  const record = createLocalBaby({ babyName: 'Ivy', birthDate: '2026-04-10', role: 'mom' }, NOW);
+  assert.deepEqual(parseLocalBaby(serializeLocalBaby(record)), record);
+});
+
+check('W10. parseLocalBaby rejects junk so the caller falls back to the seed', () => {
+  assert.equal(parseLocalBaby(null), null); // nothing saved
+  assert.equal(parseLocalBaby('not json {'), null); // unparseable
+  assert.equal(parseLocalBaby('42'), null); // not an object
+  assert.equal(parseLocalBaby('{"caregiver":{}}'), null); // missing baby
+  const onlyBaby = JSON.stringify({ baby: createLocalBaby({}, NOW).baby });
+  assert.equal(parseLocalBaby(onlyBaby), null); // missing caregiver
+  const badRole = JSON.stringify({
+    baby: createLocalBaby({}, NOW).baby,
+    caregiver: { ...createLocalBaby({}, NOW).caregiver, role: 'grandma' },
+  });
+  assert.equal(parseLocalBaby(badRole), null); // unknown caregiver role
+});
+
+// X. Setup field helpers (Phase 1A foundation) — parseWeeks now lives beside
+// birthDateFromWeeks in localBaby (single source, extracted from BabySetupScreen).
+check('X1. parseWeeks reads a whole-week number, trims, and floors fractions', () => {
+  assert.equal(parseWeeks('7'), 7);
+  assert.equal(parseWeeks('  12 '), 12); // surrounding whitespace trimmed
+  assert.equal(parseWeeks('2.9'), 2); // fraction floored to whole weeks
+  assert.equal(parseWeeks('0'), 0); // newborn
+});
+
+check('X2. parseWeeks rejects blank / non-numeric / out-of-range input as null', () => {
+  assert.equal(parseWeeks(''), null);
+  assert.equal(parseWeeks('   '), null);
+  assert.equal(parseWeeks('abc'), null);
+  assert.equal(parseWeeks('-1'), null); // negative age
+  assert.equal(parseWeeks('261'), null); // > 260 weeks (~5y) → out of range
+  assert.equal(parseWeeks('260'), 260); // upper boundary stays valid
+});
+
+// Y. Onboarding flow reducer (Phase 1A foundation) — the pure step machine behind
+// useOnboardingFlow: beat -> baby -> focus -> nightShift -> nightReassurance
+// -> creating -> done. Early skips jump straight to creating; night-shift skip
+// still pauses on the reassurance handoff before creation.
+const flow = (step: OnboardingFlowState['step']): OnboardingFlowState => ({ step });
+
+check('Y1. the flow starts on the emotional beat', () => {
+  assert.equal(INITIAL_ONBOARDING_FLOW.step, 'beat');
+});
+
+check('Y2. begin -> baby, submit -> focus -> nightShift -> nightReassurance -> creating -> done', () => {
+  let s: OnboardingFlowState = INITIAL_ONBOARDING_FLOW;
+  s = onboardingFlowReducer(s, { type: 'begin' });
+  assert.equal(s.step, 'baby');
+  s = onboardingFlowReducer(s, { type: 'submit' });
+  assert.equal(s.step, 'focus');
+  s = onboardingFlowReducer(s, { type: 'submit' });
+  assert.equal(s.step, 'nightShift');
+  s = onboardingFlowReducer(s, { type: 'submit' });
+  assert.equal(s.step, 'nightReassurance');
+  s = onboardingFlowReducer(s, { type: 'submit' });
+  assert.equal(s.step, 'creating');
+  s = onboardingFlowReducer(s, { type: 'created' });
+  assert.equal(s.step, 'done');
+  assert.equal(INITIAL_ONBOARDING_FLOW.step, 'beat'); // the shared initial constant was not mutated
+});
+
+check('Y3. skip jumps early setup to creating, but nightShift skip routes to reassurance', () => {
+  assert.equal(onboardingFlowReducer(flow('beat'), { type: 'skip' }).step, 'creating');
+  assert.equal(onboardingFlowReducer(flow('baby'), { type: 'skip' }).step, 'creating');
+  assert.equal(onboardingFlowReducer(flow('focus'), { type: 'skip' }).step, 'creating');
+  assert.equal(onboardingFlowReducer(flow('nightShift'), { type: 'skip' }).step, 'nightReassurance');
+});
+
+check('Y4. back returns reassurance to nightShift, then focus, baby, and beat', () => {
+  assert.equal(onboardingFlowReducer(flow('nightReassurance'), { type: 'back' }).step, 'nightShift');
+  assert.equal(onboardingFlowReducer(flow('nightShift'), { type: 'back' }).step, 'focus');
+  assert.equal(onboardingFlowReducer(flow('focus'), { type: 'back' }).step, 'baby');
+  assert.equal(onboardingFlowReducer(flow('baby'), { type: 'back' }).step, 'beat');
+});
+
+check('Y5. reset returns to the beat from anywhere (and is a no-op on the beat)', () => {
+  assert.equal(onboardingFlowReducer(flow('done'), { type: 'reset' }).step, 'beat');
+  const beat = flow('beat');
+  assert.equal(onboardingFlowReducer(beat, { type: 'reset' }), beat); // same reference
+});
+
+check('Y6. out-of-order actions are no-ops that return the same state reference', () => {
+  const creating = flow('creating');
+  assert.equal(onboardingFlowReducer(creating, { type: 'begin' }), creating);
+  assert.equal(onboardingFlowReducer(creating, { type: 'submit' }), creating);
+  assert.equal(onboardingFlowReducer(creating, { type: 'back' }), creating);
+  const nightShift = flow('nightShift');
+  assert.equal(onboardingFlowReducer(nightShift, { type: 'begin' }), nightShift);
+  assert.equal(onboardingFlowReducer(nightShift, { type: 'created' }), nightShift);
+  const nightReassurance = flow('nightReassurance');
+  assert.equal(onboardingFlowReducer(nightReassurance, { type: 'begin' }), nightReassurance);
+  assert.equal(onboardingFlowReducer(nightReassurance, { type: 'created' }), nightReassurance);
+  assert.equal(onboardingFlowReducer(nightReassurance, { type: 'skip' }), nightReassurance);
+  const focus = flow('focus');
+  assert.equal(onboardingFlowReducer(focus, { type: 'begin' }), focus);
+  assert.equal(onboardingFlowReducer(focus, { type: 'created' }), focus);
+  const done = flow('done');
+  assert.equal(onboardingFlowReducer(done, { type: 'created' }), done);
+  assert.equal(onboardingFlowReducer(done, { type: 'skip' }), done);
+});
+
+check('Y7. step index follows the canonical order and completion is done-only', () => {
+  assert.deepEqual([...ONBOARDING_STEP_ORDER], [
+    'beat',
+    'baby',
+    'focus',
+    'nightShift',
+    'nightReassurance',
+    'creating',
+    'done',
+  ]);
+  assert.equal(onboardingStepIndex('beat'), 0);
+  assert.equal(onboardingStepIndex('done'), 6);
+  assert.ok(onboardingStepIndex('baby') < onboardingStepIndex('focus'));
+  assert.ok(onboardingStepIndex('focus') < onboardingStepIndex('nightShift'));
+  assert.ok(onboardingStepIndex('nightShift') < onboardingStepIndex('nightReassurance'));
+  assert.ok(onboardingStepIndex('nightReassurance') < onboardingStepIndex('creating'));
+  assert.ok(onboardingStepIndex('nightShift') < onboardingStepIndex('creating'));
+  assert.ok(onboardingStepIndex('focus') < onboardingStepIndex('creating'));
+  assert.ok(onboardingStepIndex('baby') < onboardingStepIndex('creating'));
+  assert.equal(isOnboardingComplete(flow('nightReassurance')), false);
+  assert.equal(isOnboardingComplete(flow('creating')), false);
+  assert.equal(isOnboardingComplete(flow('done')), true);
+});
+
+check('Y8. focus selection allows multi-select except everything is exclusive', () => {
+  let selected: OnboardingFocusNeed[] = [];
+  assert.equal(hasOnboardingFocusNeed(selected), false);
+
+  selected = toggleOnboardingFocusNeed(selected, 'sleep');
+  assert.deepEqual(selected, ['sleep']);
+  selected = toggleOnboardingFocusNeed(selected, 'feeding');
+  assert.deepEqual(selected, ['sleep', 'feeding']);
+  selected = toggleOnboardingFocusNeed(selected, 'everything');
+  assert.deepEqual(selected, ['everything']);
+  selected = toggleOnboardingFocusNeed(selected, 'reassurance');
+  assert.deepEqual(selected, ['reassurance']);
+  selected = toggleOnboardingFocusNeed(selected, 'sleep');
+  assert.deepEqual(selected, ['reassurance', 'sleep']);
+  selected = toggleOnboardingFocusNeed(selected, 'reassurance');
+  assert.deepEqual(selected, ['sleep']);
+  selected = toggleOnboardingFocusNeed(selected, 'sleep');
+  assert.deepEqual(selected, []);
+
+  selected = toggleOnboardingFocusNeed(selected, 'everything');
+  assert.equal(hasOnboardingFocusNeed(selected), true);
+  selected = toggleOnboardingFocusNeed(selected, 'everything');
+  assert.equal(hasOnboardingFocusNeed(selected), false);
+});
+
+check('Y9. night shift choice is single-select and later counts as a valid choice', () => {
+  let selected: OnboardingNightShiftChoice | null = null;
+  assert.deepEqual([...ONBOARDING_NIGHT_SHIFT_CHOICES], ['solo', 'partner', 'later']);
+  assert.equal(hasOnboardingNightShiftChoice(selected), false);
+  selected = 'solo';
+  assert.equal(hasOnboardingNightShiftChoice(selected), true);
+  selected = 'partner';
+  assert.equal(selected, 'partner');
+  selected = 'later';
+  assert.equal(selected, 'later');
+  assert.equal(hasOnboardingNightShiftChoice(selected), true);
+  selected = null;
+  assert.equal(hasOnboardingNightShiftChoice(selected), false);
+});
+
+// Z. Personalized Tonight (Phase 1A) — the brand-new-night greeting age label, the
+// honest Calibrating line, and the first-log coach phase machine (pure parts; the
+// component owns the AsyncStorage dismissal + the "started empty" latch).
+check('Z1. formatBabyAge reads "Newborn" in week 0, singular at 1, plural after', () => {
+  assert.equal(formatBabyAge(0), 'Newborn');
+  assert.equal(formatBabyAge(0.6), 'Newborn'); // floored to 0 weeks
+  assert.equal(formatBabyAge(1), '1 week old');
+  assert.equal(formatBabyAge(8), '8 weeks old');
+  assert.equal(formatBabyAge(-3), 'Newborn'); // clamped
+  assert.equal(formatBabyAge(Number.NaN), 'Newborn'); // non-finite → newborn
+});
+
+check('Z2. the Calibrating + coach copy is personal, honest, and not fake-precise', () => {
+  assert.match(tonightCalibratingText('Mia'), /Mia's nights/);
+  assert.match(tonightCalibratingText('Mia'), /rhythm will fill in/);
+  assert.match(firstLogNudgeText('Mia'), /Mia's first feed/);
+  assert.match(firstLogNudgeText('Mia'), /timeline/);
+  assert.match(firstLogThreadText(), /thread/);
+  // Honest empty state: never a fake number, never the false "both caregivers".
+  assert.ok(!/\d/.test(tonightCalibratingText('Mia')));
+  assert.ok(!/both caregivers/i.test(firstLogThreadText()));
+});
+
+check('Z3. a blank baby name falls back to "your baby" in the possessive copy', () => {
+  assert.match(tonightCalibratingText('   '), /your baby's nights/);
+  assert.match(firstLogNudgeText(''), /your baby's first feed/);
+});
+
+check('Z4. the coach stays hidden until hydrated and once dismissed', () => {
+  const live = { dismissed: false, hasRealEvents: false, startedEmpty: true };
+  assert.equal(resolveFirstLogCoachPhase({ ...live, hydrated: false }), 'hidden');
+  assert.equal(
+    resolveFirstLogCoachPhase({ hydrated: true, dismissed: true, hasRealEvents: false, startedEmpty: true }),
+    'hidden',
+  );
+  assert.equal(FIRST_LOG_COACH_DISMISSED_KEY, 'lullaby.coach.firstLog.v1.dismissed');
+});
+
+check('Z5. zero real events nudges the first log; the first log points at the thread', () => {
+  assert.equal(
+    resolveFirstLogCoachPhase({ hydrated: true, dismissed: false, hasRealEvents: false, startedEmpty: true }),
+    'nudge',
+  );
+  assert.equal(
+    resolveFirstLogCoachPhase({ hydrated: true, dismissed: false, hasRealEvents: true, startedEmpty: true }),
+    'thread',
+  );
+});
+
+check('Z6. a returning parent with a timeline never sees the coach (started non-empty)', () => {
+  assert.equal(
+    resolveFirstLogCoachPhase({ hydrated: true, dismissed: false, hasRealEvents: true, startedEmpty: false }),
+    'hidden',
+  );
 });
 
 // V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are
