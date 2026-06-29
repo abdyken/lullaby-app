@@ -9,6 +9,7 @@
  * and the 4-item timeline cap.
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   addDiaper,
@@ -57,6 +58,15 @@ import {
 import type { Caregiver, LogEvent, LogEventType } from '../src/data/models';
 import { resolveSurfaceMode } from '../src/theme';
 import { parsePersistedState, serializeState } from '../src/data/persistedState';
+// Guest / local-first data preservation contract (auth Step 08) — the keys that
+// must survive every auth transition + the "no silent data loss" predicate.
+import {
+  GUEST_OWNED_STORAGE_KEYS,
+  LOCAL_BABY_STORAGE_KEY,
+  LOCAL_EVENTS_STORAGE_KEY,
+  LOGGING_STORAGE_KEY,
+  isGuestDataPreserved,
+} from '../src/data/guestData';
 import {
   ONBOARDING_COMPLETE_KEY,
   isForceOnboardingEnabled,
@@ -1337,6 +1347,126 @@ check('AR7. params are read from both query and fragment together', () => {
   assert.equal(r.kind, 'recovery');
   assert.equal(r.accessToken, 't1');
   assert.equal(r.refreshToken, 't2');
+});
+
+// GP. Guest / local-first data preservation (auth Step 08). The guest baby +
+// local logs must survive every auth transition a guest can reach — opening the
+// account-entry surface, sign-in, sign-up, sign-out, and an app restart — with no
+// destructive clear before an explicit, confirmed action. GP1–GP3 pin the
+// preservation contract (src/data/guestData.ts) against the REAL serializers;
+// GP4–GP6 read the auth state machine's source and guard its transitions so a
+// future edit can't silently re-introduce a guest-data wipe. The pure modules
+// can't import AuthProvider/LocalEventProvider (React Native), so the transition
+// guards scan source text — the only way to cover them here. See
+// docs/auth/guest-data-preservation.md.
+const AUTH_PROVIDER_SRC = readFileSync(
+  new URL('../src/state/AuthProvider.tsx', import.meta.url),
+  'utf8',
+);
+const LOCAL_EVENT_PROVIDER_SRC = readFileSync(
+  new URL('../src/state/LocalEventProvider.tsx', import.meta.url),
+  'utf8',
+);
+
+// A guest storage snapshot built with the production serializers, so the
+// round-trip below exercises real (de)serialization, not a stand-in.
+function seedGuestSnapshot(): Record<string, string> {
+  return {
+    [LOCAL_BABY_STORAGE_KEY]: serializeLocalBaby(
+      createLocalBaby({ babyName: 'Aria', caregiverName: 'Sam' }, NOW),
+    ),
+    [LOCAL_EVENTS_STORAGE_KEY]: serializeState(initTonightState(seedEvents)),
+    [LOGGING_STORAGE_KEY]: serializeLoggingSnapshot({ events: [], syncQueue: ['evt-1'] }),
+  };
+}
+
+check('GP1. the guest-owned key set is exactly the three local-first stores', () => {
+  assert.deepEqual(
+    [...GUEST_OWNED_STORAGE_KEYS],
+    ['lullaby/local-baby/v1', 'lullaby/local-events/v1', 'lullaby/logging-v2/v1'],
+  );
+  // The sticky "prefers local" flag and the Supabase session are auth-owned, not
+  // guest data — clearing them is allowed, so they must NOT be in the protected set.
+  const keys = GUEST_OWNED_STORAGE_KEYS as readonly string[];
+  assert.ok(!keys.includes('lullaby/auth/prefers-local/v1'));
+});
+
+check('GP2. guest data survives a transition that touches only auth/session keys', () => {
+  // Model "open account entry" (goToAccountEntry) + "sign out": both only remove
+  // auth-owned keys (the prefers-local flag here; sign-out also drops the chunked
+  // Supabase session, likewise not a guest key).
+  const before: Record<string, string> = {
+    ...seedGuestSnapshot(),
+    'lullaby/auth/prefers-local/v1': 'true',
+  };
+  const after: Record<string, string> = { ...before };
+  delete after['lullaby/auth/prefers-local/v1'];
+
+  assert.ok(isGuestDataPreserved(before, after));
+  // …and each store still re-parses to its original record (no silent corruption).
+  assert.equal(parseLocalBaby(after[LOCAL_BABY_STORAGE_KEY])?.baby.name, 'Aria');
+  const reEvents = parsePersistedState(after[LOCAL_EVENTS_STORAGE_KEY]);
+  assert.ok(reEvents !== null);
+  assert.equal(reEvents.events.length, initTonightState(seedEvents).events.length);
+  assert.deepEqual(parseLoggingSnapshot(after[LOGGING_STORAGE_KEY]), {
+    events: [],
+    syncQueue: ['evt-1'],
+  });
+});
+
+check('GP3. the preservation predicate catches a wipe (not vacuously true)', () => {
+  const before = seedGuestSnapshot();
+  const wiped: Record<string, string> = { ...before };
+  delete wiped[LOCAL_EVENTS_STORAGE_KEY]; // a sign-out that cleared the local night
+  assert.ok(!isGuestDataPreserved(before, wiped));
+  const corrupted: Record<string, string> = { ...before, [LOCAL_BABY_STORAGE_KEY]: '{}' };
+  assert.ok(!isGuestDataPreserved(before, corrupted));
+});
+
+check('GP4. AuthProvider never bulk-clears or removes a guest-owned store', () => {
+  // No nuclear clears anywhere in the auth state machine.
+  assert.ok(!/AsyncStorage\.clear\s*\(/.test(AUTH_PROVIDER_SRC), 'AuthProvider must not call AsyncStorage.clear()');
+  assert.ok(!/\.multiRemove\s*\(/.test(AUTH_PROVIDER_SRC), 'AuthProvider must not multiRemove keys');
+  // The only local-store clear is the onboarding baby mint (createLocalBaby drops
+  // the seed night). It must appear exactly once and never creep into a transition.
+  const clearCalls = AUTH_PROVIDER_SRC.match(/clearLocalEventStorage\s*\(/g) ?? [];
+  assert.equal(clearCalls.length, 1, 'clearLocalEventStorage must be called exactly once (createLocalBaby only)');
+  // The logging-v2 store is never even referenced here, so its clear() can't be wired to sign-out.
+  assert.ok(!AUTH_PROVIDER_SRC.includes('LOGGING_STORAGE_KEY'));
+  // Every removeItem in AuthProvider targets the auth-owned prefers-local flag —
+  // never the guest baby / night / logging stores.
+  const removeArgs = [...AUTH_PROVIDER_SRC.matchAll(/\.removeItem\(\s*([A-Za-z_][\w.]*)/g)].map((m) => m[1]);
+  assert.ok(removeArgs.length >= 1, 'expected at least one removeItem (the prefers-local clear)');
+  for (const arg of removeArgs) {
+    assert.equal(arg, 'PREFERS_LOCAL_STORAGE_KEY', `removeItem(${arg}) would drop a non-auth key`);
+  }
+});
+
+check('GP5. signOut clears only the Supabase session, never local-first data', () => {
+  // Isolate the signOut callback body (declaration → the next callback, clearError).
+  const start = AUTH_PROVIDER_SRC.indexOf('const signOut = useCallback');
+  const end = AUTH_PROVIDER_SRC.indexOf('const clearError', start);
+  assert.ok(start !== -1 && end !== -1 && end > start, 'could not locate the signOut callback');
+  const signOutBody = AUTH_PROVIDER_SRC.slice(start, end);
+  assert.ok(signOutBody.includes('supabase.auth.signOut()'), 'signOut must clear the Supabase session');
+  for (const forbidden of ['clearLocalEventStorage', 'removeItem', 'multiRemove', 'AsyncStorage']) {
+    assert.ok(!signOutBody.includes(forbidden), `signOut must not reference ${forbidden} (would touch guest data)`);
+  }
+});
+
+check('GP6. LocalEventProvider clears the local night only via the local-only debug reset', () => {
+  // The single repository.clear() lives in resetLocalEvents, which early-returns
+  // in Supabase mode and reseeds the demo locally — never reachable from an auth
+  // transition. Guard the count + the supabase-mode early return so no new clear
+  // path can slip in unnoticed.
+  const clears = LOCAL_EVENT_PROVIDER_SRC.match(/repositoryRef\.current\.clear\(\)/g) ?? [];
+  assert.equal(clears.length, 1, 'only resetLocalEvents may clear the local repository');
+  const clearIdx = LOCAL_EVENT_PROVIDER_SRC.indexOf('repositoryRef.current.clear()');
+  const guardWindow = LOCAL_EVENT_PROVIDER_SRC.slice(Math.max(0, clearIdx - 250), clearIdx);
+  assert.ok(
+    guardWindow.includes("=== 'supabase'") && guardWindow.includes('return;'),
+    'the local repository.clear() must stay behind the supabase-mode early return',
+  );
 });
 
 // V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are
