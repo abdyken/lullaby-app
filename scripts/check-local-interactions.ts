@@ -80,6 +80,16 @@ import {
   hasOnboardingNightShiftChoice,
   type OnboardingNightShiftChoice,
 } from '../src/components/onboarding/onboardingNightShift';
+// Auth Phase 1 — secure session storage: the pure chunking core behind the
+// SecureStore adapter. The adapter itself (secureSessionStore.ts) imports
+// react-native / expo-secure-store and can't load here, so the chunk logic lives
+// in this dependency-free leaf and is covered directly.
+import {
+  CHUNK_SIZE,
+  createChunkedStorage,
+  splitIntoChunks,
+  type ChunkBackend,
+} from '../src/lib/chunkedSessionStorage';
 // Logging v2 foundation (plan Phase 1.1) — new model lives beside the legacy one.
 import { createManualClock, systemClock } from '../src/features/logging/timer/clock';
 import { newClientEventId, newUuid } from '../src/features/logging/domain/ids';
@@ -3174,6 +3184,101 @@ async function runAsyncChecks(): Promise<void> {
     assert.ok((await startSleep(deps2, {})).ok); // a "second device" Start
     const activeSleeps = (await repo2.getActiveSessions(feedScope)).filter(isSleepEvent);
     assert.equal(activeSleeps.length, 1); // exactly one active sleep per child — never two
+  });
+
+  // SS. Secure session storage (auth Phase 1) — exercise the REAL chunked-storage
+  // logic that persists the Supabase auth session, against an in-memory backend.
+  // The adapter module (secureSessionStore.ts) imports react-native / expo-secure-
+  // store and can't load here, so the pure core was split into chunkedSessionStorage.ts;
+  // this covers chunk split, reassembly, the manifest, fault tolerance, leftover-
+  // chunk cleanup on shrink, and full removal on sign-out.
+  const createMemorySecureBackend = (): { store: Map<string, string>; backend: ChunkBackend } => {
+    const store = new Map<string, string>();
+    return {
+      store,
+      backend: {
+        // A real keystore returns null for an absent key; a stored value (even '')
+        // comes back verbatim — Map.get's undefined ?? null models exactly that.
+        getItemAsync: async (key) => store.get(key) ?? null,
+        setItemAsync: async (key, value) => {
+          store.set(key, value);
+        },
+        deleteItemAsync: async (key) => {
+          store.delete(key);
+        },
+      },
+    };
+  };
+  const SECURE_SESSION_KEY = 'sb-lullaby-auth-token';
+
+  await checkAsync('SS1. a small value round-trips as one chunk + a "1" manifest; an absent key is null', async () => {
+    const { store, backend } = createMemorySecureBackend();
+    const storage = createChunkedStorage(backend);
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), null); // nothing stored yet
+    await storage.setItem(SECURE_SESSION_KEY, 'session-token');
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), 'session-token');
+    assert.equal(store.get(SECURE_SESSION_KEY), '1'); // base key holds the chunk count
+    assert.equal(store.get(`${SECURE_SESSION_KEY}.chunk.0`), 'session-token');
+  });
+
+  await checkAsync('SS2. a value larger than CHUNK_SIZE splits into chunks and reassembles exactly', async () => {
+    const { store, backend } = createMemorySecureBackend();
+    const storage = createChunkedStorage(backend);
+    const big = 'A'.repeat(CHUNK_SIZE * 2 + 123); // spans 3 chunks
+    await storage.setItem(SECURE_SESSION_KEY, big);
+    assert.equal(store.get(SECURE_SESSION_KEY), '3'); // manifest reflects 3 chunks
+    assert.equal(store.get(`${SECURE_SESSION_KEY}.chunk.2`)?.length, 123); // last chunk is the remainder
+    assert.equal(store.get(`${SECURE_SESSION_KEY}.chunk.3`), undefined); // no extra chunk
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), big); // round-trips character-for-character
+  });
+
+  await checkAsync('SS3. splitIntoChunks handles empty, exact-boundary, and over-boundary lengths', async () => {
+    assert.deepEqual(splitIntoChunks(''), ['']); // empty → one (empty) chunk
+    assert.equal(splitIntoChunks('z'.repeat(CHUNK_SIZE)).length, 1); // exactly one chunk
+    const two = splitIntoChunks('z'.repeat(CHUNK_SIZE + 1));
+    assert.equal(two.length, 2);
+    assert.equal(two[0].length, CHUNK_SIZE);
+    assert.equal(two[1].length, 1);
+  });
+
+  await checkAsync('SS4. a missing interior chunk fails safe to null (never a half-decoded session)', async () => {
+    const { store, backend } = createMemorySecureBackend();
+    const storage = createChunkedStorage(backend);
+    await storage.setItem(SECURE_SESSION_KEY, 'B'.repeat(CHUNK_SIZE * 2 + 5)); // 3 chunks
+    store.delete(`${SECURE_SESSION_KEY}.chunk.1`); // simulate a torn/partial write
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), null);
+  });
+
+  await checkAsync('SS5. a corrupt or empty manifest reads as null', async () => {
+    const { store, backend } = createMemorySecureBackend();
+    const storage = createChunkedStorage(backend);
+    store.set(SECURE_SESSION_KEY, 'not-a-number');
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), null);
+    store.set(SECURE_SESSION_KEY, '0'); // a count < 1 is not a real session
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), null);
+    store.set(SECURE_SESSION_KEY, ''); // empty manifest
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), null);
+  });
+
+  await checkAsync('SS6. overwriting with a smaller value drops the leftover chunks (no stale bleed)', async () => {
+    const { store, backend } = createMemorySecureBackend();
+    const storage = createChunkedStorage(backend);
+    await storage.setItem(SECURE_SESSION_KEY, 'C'.repeat(CHUNK_SIZE * 3)); // 3 chunks
+    await storage.setItem(SECURE_SESSION_KEY, 'small'); // now 1 chunk
+    assert.equal(store.get(SECURE_SESSION_KEY), '1');
+    assert.equal(store.get(`${SECURE_SESSION_KEY}.chunk.1`), undefined); // stale chunks removed
+    assert.equal(store.get(`${SECURE_SESSION_KEY}.chunk.2`), undefined);
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), 'small');
+  });
+
+  await checkAsync('SS7. removeItem clears the manifest and every chunk (sign-out leaves nothing)', async () => {
+    const { store, backend } = createMemorySecureBackend();
+    const storage = createChunkedStorage(backend);
+    await storage.setItem(SECURE_SESSION_KEY, 'D'.repeat(CHUNK_SIZE + 10)); // 2 chunks
+    await storage.removeItem(SECURE_SESSION_KEY);
+    assert.equal(store.size, 0); // base key + both chunks gone
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), null);
+    await storage.removeItem(SECURE_SESSION_KEY); // idempotent — no throw on an empty store
   });
 }
 

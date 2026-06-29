@@ -24,6 +24,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { AppState } from 'react-native';
 
 import {
   LOCAL_BABY_STORAGE_KEY,
@@ -191,6 +192,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [configured, evaluate]);
 
+  // Keep the access token fresh while the app is actually in use. Supabase only
+  // runs its refresh ticker between startAutoRefresh()/stopAutoRefresh(); the
+  // documented React Native pattern is to drive those off AppState so the token
+  // refreshes in the foreground and the timer is released in the background
+  // (RN background timers are throttled/unreliable). Configured builds only —
+  // the local-only demo has no Supabase session to refresh. No setState here, so
+  // the React Compiler's no-setState-in-effect rule is satisfied.
+  useEffect(() => {
+    if (!configured || !supabase) return;
+    const client = supabase;
+    // AppState only emits on *transitions*, so prime the ticker when we mount
+    // already foregrounded (a cold launch straight into the active app).
+    if (AppState.currentState === 'active') void client.auth.startAutoRefresh();
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next === 'active') {
+        void client.auth.startAutoRefresh();
+      } else {
+        void client.auth.stopAutoRefresh();
+      }
+    });
+    return () => {
+      subscription.remove();
+      // Release the ticker when the provider unmounts so it can't outlive auth.
+      void client.auth.stopAutoRefresh();
+    };
+  }, [configured]);
+
   // Local-only builds rehydrate a previously-created local baby on cold launch so
   // a returning parent sees their baby, not the seed. Absent → the seed fallback
   // set in initial state stays. Configured builds resolve identity via `evaluate`,
@@ -334,13 +362,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // Sign out — drop the Supabase session and return to 'signed-out'. Hygiene:
+  //  - Auth session/storage IS cleared: supabase.auth.signOut() calls the
+  //    SecureStore adapter's removeItem, which deletes the session manifest AND
+  //    every chunk (no token fragment is left in the keystore); then
+  //    onAuthStateChange → evaluate(null) drops the in-memory caregiver/baby and
+  //    AuthGate unmounts the signed-in app surface.
+  //  - Local-first data is deliberately PRESERVED: we do NOT clear the local
+  //    night (lullaby/local-events/v1), local baby (lullaby/local-baby/v1) or
+  //    Logging-v2 store (lullaby/logging-v2/v1). In a configured build the
+  //    signed-in night persists to Supabase, never those stores (LocalEvent
+  //    Provider writes AsyncStorage only in local-only mode), so there is no
+  //    signed-in cached night to leak — those keys only ever hold local-first /
+  //    guest data, which must survive a sign-out. The handoff cursor is already
+  //    per-<caregiver:baby> scoped, so it can't bleed between accounts either.
+  //    Clearing any of them would destroy guest data for no hygiene benefit.
   const signOut = useCallback(async () => {
     if (!supabase) return;
     setBusy(true);
     setErrorMessage(null);
     try {
       await supabase.auth.signOut();
-      // onAuthStateChange → evaluate() → 'signed-out'.
     } catch (e) {
       if (mounted.current) setErrorMessage(messageFrom(e, 'Could not sign out.'));
     } finally {
