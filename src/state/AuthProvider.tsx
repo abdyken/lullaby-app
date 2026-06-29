@@ -38,6 +38,7 @@ import { clearLocalEventStorage } from '@/data/localStorage';
 import { baby as seedBaby, caregivers as seedCaregivers } from '@/data/mock';
 import type { Baby, Caregiver, CaregiverRole } from '@/data/models';
 import { calmAuthErrorMessage } from '@/lib/authErrors';
+import { completeAuthRedirect, getAuthRedirectUrl, subscribeToAuthRedirects } from '@/lib/authLinking';
 import { hapticSuccess } from '@/lib/haptics';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
@@ -88,6 +89,14 @@ type AuthContextValue = {
   errorMessage: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
+  /**
+   * Email a password-reset link (Supabase `resetPasswordForEmail`). Returns true
+   * when the request was accepted so the caller can show a calm "check your
+   * inbox" view; failures surface through `errorMessage`. No-op without a
+   * configured Supabase client. To avoid account enumeration, success does not
+   * confirm whether an account exists for the address.
+   */
+  resetPassword: (email: string) => Promise<boolean>;
   completeSetup: (fields: SetupFields) => Promise<void>;
   /**
    * Create + persist the active local baby/caregiver (local-only onboarding),
@@ -298,6 +307,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [configured]);
 
+  // Deep-link foundation: receive the redirect Supabase sends back after a
+  // password-reset / email-confirmation email (lullaby://auth-callback) and
+  // exchange its credentials for a session. The resulting auth change flows
+  // through onSupabaseAuthChange → applySession, so this effect sets no React
+  // state itself (React-Compiler-safe). Configured builds only — the local demo
+  // never wires a listener — and inert unless a real auth redirect arrives, so
+  // ordinary launches and router deep links are untouched.
+  useEffect(() => {
+    if (!configured || !supabase) return;
+    const client = supabase;
+    return subscribeToAuthRedirects((redirect) => {
+      void completeAuthRedirect(client, redirect);
+    });
+  }, [configured]);
+
   // Local-only builds rehydrate a previously-created local baby on cold launch so
   // a returning parent sees their baby, not the seed. Absent → the seed fallback
   // set in initial state stays. Configured builds resolve identity via `evaluate`,
@@ -371,6 +395,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           calmAuthErrorMessage(e, 'Could not create your account just now. Please try again.'),
         );
       }
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  }, []);
+
+  // Send a password-reset email. Supabase intentionally returns success even for
+  // an unknown address (anti-enumeration), so the calling screen shows the same
+  // calm "check your inbox" copy regardless — only a real transport/rate-limit
+  // failure surfaces, mapped to calm copy. `redirectTo` is our gated deep link
+  // (lullaby://auth-callback); it's harmless until the project allowlists it.
+  const resetPassword = useCallback(async (email: string): Promise<boolean> => {
+    if (!supabase) return false;
+    setBusy(true);
+    setErrorMessage(null);
+    setPendingMessage(null);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: getAuthRedirectUrl(),
+      });
+      if (error) {
+        if (mounted.current) {
+          setErrorMessage(
+            calmAuthErrorMessage(error, 'Could not start a password reset just now. Please try again.'),
+          );
+        }
+        return false;
+      }
+      return true;
+    } catch (e) {
+      if (mounted.current) {
+        setErrorMessage(
+          calmAuthErrorMessage(e, 'Could not start a password reset just now. Please try again.'),
+        );
+      }
+      return false;
     } finally {
       if (mounted.current) setBusy(false);
     }
@@ -516,6 +575,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       errorMessage,
       signIn,
       signUp,
+      resetPassword,
       completeSetup,
       createLocalBaby,
       continueLocally,
@@ -534,6 +594,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       errorMessage,
       signIn,
       signUp,
+      resetPassword,
       completeSetup,
       createLocalBaby,
       continueLocally,
