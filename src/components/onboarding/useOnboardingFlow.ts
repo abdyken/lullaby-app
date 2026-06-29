@@ -20,13 +20,13 @@ export type OnboardingFlowController = {
   isComplete: boolean;
   /** Beat "Begin" → baby step. */
   begin: () => void;
-  /** Baby "Continue" → start creating the real local baby. */
+  /** Decision-step "Continue" → baby to focus to nightShift to reassurance to creating. */
   submit: () => void;
-  /** "Set up later" / "Skip for now" → minimal baby, straight to creating. */
+  /** "Set up later" / "Skip for now"; night-shift skip still pauses on reassurance. */
   skip: () => void;
   /** Local baby written + seed cleared → reveal Tonight. */
   created: () => void;
-  /** Back out of the baby step to the beat. */
+  /** Back out of the current decision step. */
   back: () => void;
   /** Return to the first step. */
   reset: () => void;

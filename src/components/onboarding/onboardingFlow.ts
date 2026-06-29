@@ -8,11 +8,20 @@
  * the live screen (next slice) renders one step at a time off `state.step` — never
  * a scroll index (recorded blank-frame postmortem).
  *
- * Steps: `beat` (emotional landing) → `baby` (age + optional name) → `creating`
- * (writing the real local baby) → `done` (reveal Tonight). "Set up later" / "Skip
- * for now" jump straight to `creating` (a minimal valid baby is still created).
+ * Steps: `beat` (emotional landing) → `baby` (age + optional name) → `focus`
+ * (what help they need tonight) → `nightShift` (caregiver setup) →
+ * `nightReassurance` (warm handoff) → `creating` (writing the real local baby)
+ * → `done` (reveal Tonight). "Set up later" / early "Skip for now" still create
+ * a minimal valid baby; the night-shift skip pauses on the reassurance handoff.
  */
-export type OnboardingStep = 'beat' | 'baby' | 'creating' | 'done';
+export type OnboardingStep =
+  | 'beat'
+  | 'baby'
+  | 'focus'
+  | 'nightShift'
+  | 'nightReassurance'
+  | 'creating'
+  | 'done';
 
 export type OnboardingFlowState = {
   step: OnboardingStep;
@@ -21,18 +30,26 @@ export type OnboardingFlowState = {
 export type OnboardingFlowAction =
   /** Beat "Begin" → ask about the baby. */
   | { type: 'begin' }
-  /** Baby step "Continue" → start writing the real local baby. */
+  /** Decision-step "Continue" → baby to focus to nightShift to reassurance to creating. */
   | { type: 'submit' }
-  /** "Set up later" / "Skip for now" → minimal baby, straight to creation. */
+  /** "Set up later" / "Skip for now"; night-shift skip still shows reassurance. */
   | { type: 'skip' }
   /** Local baby written + seed cleared → reveal Tonight. */
   | { type: 'created' }
-  /** Back out of the baby step to the beat (no data collected yet). */
+  /** Back out of the current decision step. */
   | { type: 'back' }
   /** Return to the first step (e.g. a dev reset / re-run). */
   | { type: 'reset' };
 
-export const ONBOARDING_STEP_ORDER: readonly OnboardingStep[] = ['beat', 'baby', 'creating', 'done'];
+export const ONBOARDING_STEP_ORDER: readonly OnboardingStep[] = [
+  'beat',
+  'baby',
+  'focus',
+  'nightShift',
+  'nightReassurance',
+  'creating',
+  'done',
+];
 
 export const INITIAL_ONBOARDING_FLOW: OnboardingFlowState = { step: 'beat' };
 
@@ -51,14 +68,25 @@ export function onboardingFlowReducer(
     case 'begin':
       return state.step === 'beat' ? { step: 'baby' } : state;
     case 'submit':
-      return state.step === 'baby' ? { step: 'creating' } : state;
+      if (state.step === 'baby') return { step: 'focus' };
+      if (state.step === 'focus') return { step: 'nightShift' };
+      if (state.step === 'nightShift') return { step: 'nightReassurance' };
+      if (state.step === 'nightReassurance') return { step: 'creating' };
+      return state;
     case 'skip':
-      // Reachable from the landing beat or the baby step; both create a minimal baby.
-      return state.step === 'beat' || state.step === 'baby' ? { step: 'creating' } : state;
+      if (state.step === 'nightShift') return { step: 'nightReassurance' };
+      // Early skips create a minimal baby; the reassurance step itself has no skip CTA.
+      return state.step === 'beat' || state.step === 'baby' || state.step === 'focus'
+        ? { step: 'creating' }
+        : state;
     case 'created':
       return state.step === 'creating' ? { step: 'done' } : state;
     case 'back':
-      return state.step === 'baby' ? { step: 'beat' } : state;
+      if (state.step === 'nightReassurance') return { step: 'nightShift' };
+      if (state.step === 'nightShift') return { step: 'focus' };
+      if (state.step === 'focus') return { step: 'baby' };
+      if (state.step === 'baby') return { step: 'beat' };
+      return state;
     default:
       return state;
   }

@@ -21,6 +21,7 @@ import { colors, fonts, surfaces, type SurfaceMode } from '@/theme';
 
 export function OnboardingStepLayout({
   orb,
+  hero,
   eyebrow,
   title,
   subtitle,
@@ -28,9 +29,17 @@ export function OnboardingStepLayout({
   cta,
   secondaryCta,
   mode = 'day',
+  centerContent = false,
+  topBar,
 }: {
   /** The shared `<Orb>` protagonist, pinned in the top header zone. */
   orb?: ReactNode;
+  /**
+   * Optional alternate top hero visual that takes the header zone in place of the
+   * orb (e.g. the family illustration on the first beat). When provided it renders
+   * instead of `orb`; omitting it preserves the original orb-only behavior.
+   */
+  hero?: ReactNode;
   eyebrow?: string;
   title: string;
   subtitle?: string;
@@ -46,9 +55,61 @@ export function OnboardingStepLayout({
    * Defaults to 'day', which is byte-identical to the original cream scaffold.
    */
   mode?: SurfaceMode;
+  /**
+   * When true the hero + title + copy block is vertically centered in the space
+   * above the pinned CTA, instead of sitting flush against the top (used by the
+   * first beat so the family illustration reads as a centered hero). Defaults to
+   * false, which is byte-identical to the original top-aligned scaffold.
+   */
+  centerContent?: boolean;
+  /**
+   * Optional compact top bar (e.g. Back + step-progress on the baby step), pinned
+   * above the heading inside the safe-area padding. Omitting it is byte-identical
+   * to the original scaffold, so steps without a top bar are unaffected.
+   */
+  topBar?: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
   const surface = surfaces[mode];
+
+  // Hero header zone + heading, shared by both the top-aligned and centered
+  // layouts so the spacing tokens stay identical in either mode.
+  const header = (
+    <>
+      {(hero ?? orb) != null && (
+        <View style={{ alignItems: 'center', marginBottom: 18 }}>{hero ?? orb}</View>
+      )}
+
+      {eyebrow != null && (
+        <Text
+          style={{
+            fontFamily: fonts.bodyBold,
+            fontSize: 11,
+            letterSpacing: 1.4,
+            textTransform: 'uppercase',
+            color: colors.sleep,
+          }}>
+          {eyebrow}
+        </Text>
+      )}
+      <Text style={{ fontFamily: fonts.display, fontSize: 28, color: surface.ink, marginTop: 6 }}>
+        {title}
+      </Text>
+      {subtitle != null && (
+        <Text
+          style={{
+            fontFamily: fonts.body,
+            fontSize: 14,
+            lineHeight: 20,
+            color: surface.inkSoft,
+            marginTop: 4,
+          }}>
+          {subtitle}
+        </Text>
+      )}
+    </>
+  );
+
   return (
     <AuthSurface>
       <View
@@ -59,43 +120,32 @@ export function OnboardingStepLayout({
           paddingTop: insets.top + 24,
           paddingBottom: insets.bottom + 18,
         }}>
-        {orb != null && <View style={{ alignItems: 'center', marginBottom: 18 }}>{orb}</View>}
+        {topBar != null && <View style={{ marginBottom: 18 }}>{topBar}</View>}
 
-        {eyebrow != null && (
-          <Text
-            style={{
-              fontFamily: fonts.bodyBold,
-              fontSize: 11,
-              letterSpacing: 1.4,
-              textTransform: 'uppercase',
-              color: colors.sleep,
-            }}>
-            {eyebrow}
-          </Text>
-        )}
-        <Text style={{ fontFamily: fonts.display, fontSize: 28, color: surface.ink, marginTop: 6 }}>
-          {title}
-        </Text>
-        {subtitle != null && (
-          <Text
-            style={{
-              fontFamily: fonts.body,
-              fontSize: 14,
-              lineHeight: 20,
-              color: surface.inkSoft,
-              marginTop: 4,
-            }}>
-            {subtitle}
-          </Text>
-        )}
+        {centerContent ? (
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingVertical: 24 }}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}>
+            <View>
+              {header}
+              <View style={{ marginTop: 22, gap: 14 }}>{children}</View>
+            </View>
+          </ScrollView>
+        ) : (
+          <>
+            {header}
 
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ paddingTop: 22, gap: 14 }}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}>
-          {children}
-        </ScrollView>
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingTop: 22, gap: 14 }}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}>
+              {children}
+            </ScrollView>
+          </>
+        )}
 
         <View style={{ gap: 12, paddingTop: 16 }}>
           {cta}

@@ -96,6 +96,9 @@ export function OnboardingFamilyMoment({
   // never starts the loops and the scene holds a still, intentional frame.
   const [breathe] = useState(() => new Animated.Value(0));
   const [pulse] = useState(() => new Animated.Value(0));
+  // The second caregiver breathes on her own driver — same calm motion, slightly
+  // slower + phase-offset, so the family breathes together but never in lockstep.
+  const [breatheBack] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     if (reduceMotion) return;
@@ -106,13 +109,21 @@ export function OnboardingFamilyMoment({
           Animated.timing(value, { toValue: 0, duration: halfMs, useNativeDriver: true }),
         ]),
       );
-    const animations = [loop(breathe, 3000), loop(pulse, 2400)];
+    const animations = [
+      loop(breathe, 1900),
+      loop(pulse, 2400),
+      // ~500ms later + a touch slower (4100ms loop) → her breath sits just off the
+      // father/baby's, so the whole family reads as softly breathing together.
+      Animated.sequence([Animated.delay(500), loop(breatheBack, 2050)]),
+    ];
     animations.forEach((a) => a.start());
     return () => animations.forEach((a) => a.stop());
-  }, [breathe, pulse, reduceMotion]);
+  }, [breathe, pulse, breatheBack, reduceMotion]);
 
-  const groupScale = breathe.interpolate({ inputRange: [0, 1], outputRange: [1, 1.014] });
-  const groupTranslate = breathe.interpolate({ inputRange: [0, 1], outputRange: [0, -2.4] });
+  const groupScale = breathe.interpolate({ inputRange: [0, 1], outputRange: [1, 1.016] });
+  const groupTranslate = breathe.interpolate({ inputRange: [0, 1], outputRange: [0, -3] });
+  const backScale = breatheBack.interpolate({ inputRange: [0, 1], outputRange: [1, 1.012] });
+  const backTranslate = breatheBack.interpolate({ inputRange: [0, 1], outputRange: [0, -2] });
   const heartTranslate = pulse.interpolate({ inputRange: [0, 1], outputRange: [0, -5] });
   const heartScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
 
@@ -125,7 +136,7 @@ export function OnboardingFamilyMoment({
         { width: '100%', maxWidth, aspectRatio: VIEW_W / VIEW_H, alignSelf: 'center' },
         style,
       ]}>
-      {/* ── Back layer: glow, backplate, orb mark, the second caregiver. Static. ── */}
+      {/* ── Back layer: glow, backplate, grounding cloud. Static. ── */}
       <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}>
         <Defs>
           <RadialGradient id="famGlowOuter" cx="50%" cy="48%" r="64%">
@@ -155,29 +166,42 @@ export function OnboardingFamilyMoment({
         {/* a soft grounding cloud the family rests on — barely-there, just enough to
             seat the scene rather than have it float in a void */}
         <Ellipse cx={108} cy={152} rx={98} ry={28} fill={P.cloud} opacity={night ? 0.5 : 0.7} />
-
-        {/* second caregiver — softer, leaning in from behind so the moment reads as
-            "parents", not a lone figure. Hair cap frames the face; the face itself
-            is grouped about the head centre (mirrored offsets → centered + level). */}
-        <Path d="M122 150 C122 118 138 100 156 100 C174 100 186 118 186 150 Z" fill={P.bodyBack} />
-        {/* longer hair — a soft drape behind the head falling down the sides to the
-            shoulders, dipping at the centre so it never reaches under the chin.
-            Drawn before the head, so it frames the face without covering it. */}
-        <Path
-          d="M138 70 C133 80 134 96 141 104 C146 100 150 99 156 99 C162 99 166 100 171 104 C178 96 179 80 174 70 C168 64 144 64 138 70 Z"
-          fill={P.hairBack}
-        />
-        <Circle cx={156} cy={71} r={19} fill={P.hairBack} />
-        <Circle cx={156} cy={80} r={16} fill={P.headBack} />
-        <G transform="translate(156 80)">
-          <Path d="M-6 -1 Q-3.5 1.4 -1 -1" stroke={P.faceInk} strokeWidth={1.5} strokeLinecap="round" fill="none" />
-          <Path d="M1 -1 Q3.5 1.4 6 -1" stroke={P.faceInk} strokeWidth={1.5} strokeLinecap="round" fill="none" />
-          <Path d="M-1 1 Q0 2.6 1 1" stroke={P.faceInk} strokeWidth={1.2} strokeLinecap="round" fill="none" />
-          <Path d="M-3.5 4.6 Q0 7 3.5 4.6" stroke={P.faceInk} strokeWidth={1.4} strokeLinecap="round" fill="none" />
-          <Circle cx={-7.5} cy={2.4} r={2.2} fill={P.blush} />
-          <Circle cx={7.5} cy={2.4} r={2.2} fill={P.blush} />
-        </G>
       </Svg>
+
+      {/* ── Second-caregiver layer: she "leans in from behind", so she sits above the
+            glow/cloud but below the front caregiver+baby. Lifted into her own
+            Animated layer (identical paths, identical layering) so she breathes too,
+            on a slightly slower + phase-offset driver. ── */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFill,
+          { transform: [{ translateY: backTranslate }, { scale: backScale }] },
+        ]}>
+        <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}>
+          {/* second caregiver — softer, leaning in from behind so the moment reads as
+              "parents", not a lone figure. Hair cap frames the face; the face itself
+              is grouped about the head centre (mirrored offsets → centered + level). */}
+          <Path d="M122 150 C122 118 138 100 156 100 C174 100 186 118 186 150 Z" fill={P.bodyBack} />
+          {/* longer hair — a soft drape behind the head falling down the sides to the
+              shoulders, dipping at the centre so it never reaches under the chin.
+              Drawn before the head, so it frames the face without covering it. */}
+          <Path
+            d="M138 70 C133 80 134 96 141 104 C146 100 150 99 156 99 C162 99 166 100 171 104 C178 96 179 80 174 70 C168 64 144 64 138 70 Z"
+            fill={P.hairBack}
+          />
+          <Circle cx={156} cy={71} r={19} fill={P.hairBack} />
+          <Circle cx={156} cy={80} r={16} fill={P.headBack} />
+          <G transform="translate(156 80)">
+            <Path d="M-6 -1 Q-3.5 1.4 -1 -1" stroke={P.faceInk} strokeWidth={1.5} strokeLinecap="round" fill="none" />
+            <Path d="M1 -1 Q3.5 1.4 6 -1" stroke={P.faceInk} strokeWidth={1.5} strokeLinecap="round" fill="none" />
+            <Path d="M-1 1 Q0 2.6 1 1" stroke={P.faceInk} strokeWidth={1.2} strokeLinecap="round" fill="none" />
+            <Path d="M-3.5 4.6 Q0 7 3.5 4.6" stroke={P.faceInk} strokeWidth={1.4} strokeLinecap="round" fill="none" />
+            <Circle cx={-7.5} cy={2.4} r={2.2} fill={P.blush} />
+            <Circle cx={7.5} cy={2.4} r={2.2} fill={P.blush} />
+          </G>
+        </Svg>
+      </Animated.View>
 
       {/* ── Mid layer: the caregiver + baby group. This is what breathes. ── */}
       <Animated.View
