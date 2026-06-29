@@ -15,6 +15,7 @@
  * follow-up — see supabase/README.md ("Password reset (deep link)").
  */
 import * as Linking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
 
 import { AUTH_CALLBACK_PATH, parseAuthRedirect, type AuthRedirect } from './authRedirect';
 
@@ -103,4 +104,64 @@ export function subscribeToAuthRedirects(onRedirect: (redirect: AuthRedirect) =>
     active = false;
     subscription.remove();
   };
+}
+
+/** Outcome of the interactive Google OAuth round-trip (browser → session). */
+export type OAuthOutcome =
+  | { status: 'success' }
+  | { status: 'canceled' }
+  | { status: 'error'; error: string };
+
+/**
+ * Run interactive Google sign-in via the system browser and land a Supabase
+ * session — WITHOUT a native sign-in module (so the Android build path is
+ * untouched and no extra native config is needed).
+ *
+ * Flow: ask Supabase for the Google authorization URL (`signInWithOAuth` with
+ * `skipBrowserRedirect`, so WE own the browser), open it in an `expo-web-browser`
+ * auth session that returns to our `lullaby://auth-callback` redirect, then reuse
+ * the SAME redirect plumbing as the email reset/confirmation links
+ * (`parseAuthRedirect` → `completeAuthRedirect`) to exchange the returned PKCE
+ * code or implicit tokens for a session. On success the client's
+ * `onAuthStateChange` fires and AuthProvider re-evaluates — no React state is set
+ * here. A dismissed browser is a calm `canceled` (not an error); all errors are
+ * returned, never thrown.
+ *
+ * Because it reuses the existing redirect URL + parser, the project's existing
+ * `lullaby://auth-callback` allowlist entry covers this too — the only extra
+ * dashboard step is enabling the Google provider (see supabase/README.md).
+ */
+export async function startGoogleOAuth(client: SupabaseClient): Promise<OAuthOutcome> {
+  const redirectTo = getAuthRedirectUrl();
+
+  let authorizeUrl: string | null;
+  try {
+    const { data, error } = await client.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo,
+        // We open the browser ourselves (below) instead of a top-level redirect.
+        skipBrowserRedirect: true,
+        // Always show the account chooser rather than silently reusing one login.
+        queryParams: { prompt: 'select_account' },
+      },
+    });
+    if (error) return { status: 'error', error: error.message };
+    authorizeUrl = data?.url ?? null;
+  } catch (e) {
+    return { status: 'error', error: e instanceof Error ? e.message : 'oauth_init_failed' };
+  }
+  if (authorizeUrl == null) return { status: 'error', error: 'no_oauth_url' };
+
+  const result = await WebBrowser.openAuthSessionAsync(authorizeUrl, redirectTo);
+  // Anything but a returned redirect URL is a dismissal/cancel — stay calm.
+  if (result.type !== 'success') return { status: 'canceled' };
+
+  const redirect = parseAuthRedirect(result.url);
+  if (redirect == null) return { status: 'error', error: 'no_redirect_credentials' };
+
+  const outcome = await completeAuthRedirect(client, redirect);
+  return outcome.ok
+    ? { status: 'success' }
+    : { status: 'error', error: outcome.error ?? 'exchange_failed' };
 }

@@ -94,12 +94,18 @@ Evidence-backed against the current tree. Maps to the plan's later phases.
 
 1. **No password reset** — `resetPasswordForEmail` absent everywhere. (`AuthScreen` has no
    "forgot password"; no `ForgotPasswordScreen`.) → plan Phase 3.
-2. **Social sign-in — Apple done (Step 06), Google pending.** Apple is now app-side prepared:
+2. **Social sign-in — Apple done (Step 06), Google done (Step 07).** Apple is app-side prepared:
    `AuthProvider.signInWithApple()` → `signInWithIdToken({ provider: 'apple' })`, an **iOS-only**
    `AppleSignInButton` on the account-entry surface (null on Android/web), `expo-apple-authentication`
-   installed, and `app.json` `ios.usesAppleSignIn` + the config plugin. Manual Apple Developer +
-   Supabase provider setup is documented in `supabase/README.md` (no native credentials in repo).
-   **Google is still absent** (`expo-auth-session` / Google sign-in not installed). → plan Phase 3.
+   installed, and `app.json` `ios.usesAppleSignIn` + the config plugin. Google is now app-side prepared
+   too via the **browser OAuth flow** (no native module): `AuthProvider.signInWithGoogle()` →
+   `startGoogleOAuth` (`src/lib/authLinking.ts`) → `signInWithOAuth({ provider: 'google' })` +
+   `expo-web-browser` + the existing `lullaby://auth-callback` redirect plumbing; a
+   `GoogleSignInButton` shows on **iOS + Android** when `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` is set
+   (gate in `src/lib/googleAuth.ts`), null otherwise/on web. **No `package.json` or `app.json`
+   change** (`expo-web-browser` already installed; scheme already set). Manual Google Cloud + Supabase
+   provider setup is documented in `supabase/README.md` (no client IDs/secrets in repo). The optional
+   native id-token upgrade (`@react-native-google-signin/google-signin`) is deliberately deferred. → plan Phase 3.
 3. **No account deletion** — no `deleteAccount` in code and **no `supabase/functions/`** (the planned
    `delete-account` Edge Function). App Store requires this once accounts exist. → plan Phase 3.
 4. **Guest is walled in configured builds** — `AuthGate` routes `signed-out → AuthScreen` (a sign-in
@@ -157,8 +163,13 @@ Documented (not fabricated) per guardrails — none of this is done in the repo:
   `com.lullaby.app` in Client IDs. Native-only iOS needs **no** Services ID / signing key. Full
   runbook + build/runtime notes in `supabase/README.md`. (`usesAppleSignIn` + plugin already in
   `app.json`; `AuthProvider.signInWithApple` already wired.)
-- **Google Sign in (future Phase 3):** Google Cloud OAuth client(s), enable Google provider in
-  Supabase, dev-client build (native module — not Expo Go), redirect `lullaby://`.
+- **Google Sign in (app-side done — Step 07; dashboards still required):** create a Google Cloud
+  **Web** OAuth client (authorized redirect = the Supabase `…/auth/v1/callback`), enable the Google
+  provider in Supabase with that Web client ID + secret, and set `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`
+  to gate the button on. Browser-OAuth flow → dev-client / standalone build (not Expo Go); the
+  `lullaby://auth-callback` redirect is shared with password reset (no new allowlist entry). Full
+  runbook in `supabase/README.md`. (`signInWithGoogle` + `GoogleSignInButton` already wired; **no
+  native module / `app.json` change** — the native id-token upgrade is the only part deferred.)
 - **Account deletion (future Phase 3):** a Supabase **Edge Function** with the service-role key
   (`auth.admin.deleteUser` + cascade). Never ship the service-role key in the client.
 

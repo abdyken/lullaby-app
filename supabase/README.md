@@ -125,6 +125,83 @@ flow is gated: without Supabase env vars there is no client and `signInWithApple
 no-ops, and the button is iOS-only — so `npm run lint`, `npx tsc --noEmit`, and
 `npm run check:local-interactions` all pass with no dashboard setup.
 
+## Sign in with Google (browser OAuth, iOS + Android)
+
+The account-entry surface shows a **Continue with Google** button on **iOS and
+Android** when the build is configured for it — `GoogleSignInButton` returns
+`null` on web, in the local-only demo, and whenever the Google client ID is unset,
+so nothing breaks and "Continue locally" always remains.
+
+Unlike Apple (a native sheet), Google uses the **system-browser OAuth flow** — no
+native sign-in module, so **the Android build path is unaffected** and there is no
+new `app.json` plugin or `package.json` dependency (`expo-web-browser` is already
+installed). `AuthProvider.signInWithGoogle()` calls
+`supabase.auth.signInWithOAuth({ provider: 'google' })`, opens the returned URL in
+an `expo-web-browser` auth session, and reuses the **same redirect plumbing as
+password reset** (`parseAuthRedirect` → `completeAuthRedirect` in
+`src/lib/authLinking.ts`) to exchange the `lullaby://auth-callback` result for a
+session. A dismissed browser is a calm no-op.
+
+**App-side wiring already lives in the repo** (this slice): the handler in
+`src/state/AuthProvider.tsx` (`signInWithGoogle`), the browser-OAuth helper
+`startGoogleOAuth` in `src/lib/authLinking.ts`, the config gate
+`src/lib/googleAuth.ts`, and the gated button
+`src/components/auth/GoogleSignInButton.tsx`. **No OAuth client IDs or secrets are
+committed** — they live in the env / Supabase + Google dashboards below.
+
+### Manual setup required (dashboards, not code)
+
+1. **Google Cloud Console → APIs & Services → Credentials → Create OAuth client
+   ID:** create a **Web application** client. Under **Authorized redirect URIs**
+   add the Supabase callback `https://<project-ref>.supabase.co/auth/v1/callback`
+   (Supabase shows the exact URL on the Google provider page). The OAuth consent
+   screen must be configured (app name, support email, scopes `email`/`profile`).
+   *(Native iOS/Android OAuth client IDs are only needed for the native id-token
+   upgrade — see below — not for this browser flow.)*
+2. **Supabase → Authentication → Providers → Google:** **enable** the provider and
+   paste the **Web** client ID + client **secret** from step 1. The secret stays
+   server-side in Supabase — never in the app bundle.
+3. **Redirect allowlist — already covered.** `lullaby://auth-callback` is the same
+   redirect the password-reset flow registers (Auth → URL Configuration → Redirect
+   URLs). If you haven't added it yet, add it now; no Google-specific entry is
+   needed.
+4. **App env:** set `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` (the same Web client ID) in
+   `.env` and restart the dev server. This **gates the button** on/off; the value
+   is a public identifier, and for the browser flow the app doesn't transmit it
+   (Supabase holds the real config) — it just signals "Google is wired for this
+   build."
+
+### Build / runtime notes
+
+- **Custom-scheme deep link → dev-client / standalone build.** Like password
+  reset, `lullaby://auth-callback` resolves in a **dev-client** (`npm run dev`) or
+  a store build, **not in Expo Go** (where the redirect is an unstable `exp://…`
+  URL). The `scheme` (`lullaby`) is already set in `app.json`; no native config is
+  required for the browser flow.
+- **Android is unaffected** — no native module, no Google Play Services / SHA-1
+  fingerprint requirement, no config plugin. The browser session uses
+  `expo-web-browser`, which is already a dependency.
+- **Implicit-flow friendly.** The client keeps its default (non-PKCE) flow, so the
+  redirect carries tokens in the fragment; `completeAuthRedirect` handles both
+  that and a PKCE `?code=` (forward-compatible), so no client-config change is
+  needed.
+
+### Optional future upgrade: native id-token flow
+
+For a native Google sheet (no browser hop), a later step can add
+`@react-native-google-signin/google-signin`, obtain a Google **id token**
+client-side, and call `supabase.auth.signInWithIdToken({ provider: 'google',
+token })` — mirroring Apple. That path **does** need the native **iOS/Android**
+OAuth client IDs (and an iOS URL-scheme config plugin + Play Services / SHA-1 on
+Android), which is why it's deferred; the env var `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`
+is named to carry forward into that flow (`webClientId`).
+
+**Nothing above is required for local checks.** The whole flow is gated: without
+Supabase env vars there is no client and `signInWithGoogle` no-ops; without
+`EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` the button is hidden — so `npm run lint`,
+`npx tsc --noEmit`, and `npm run check:local-interactions` all pass with no
+dashboard setup.
+
 ## First-run flow (configured builds)
 
 With both env vars set the app builds a Supabase client on launch and the
