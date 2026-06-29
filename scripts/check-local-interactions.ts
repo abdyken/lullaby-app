@@ -90,6 +90,11 @@ import {
   splitIntoChunks,
   type ChunkBackend,
 } from '../src/lib/chunkedSessionStorage';
+// Auth deep-link foundation (Step 04) — the pure redirect parser behind the
+// password-reset / email-confirmation handler. authLinking.ts imports
+// expo-linking + the Supabase client and can't load here, so the parsing logic
+// lives in this dependency-free leaf and is covered directly.
+import { parseAuthRedirect } from '../src/lib/authRedirect';
 // Logging v2 foundation (plan Phase 1.1) — new model lives beside the legacy one.
 import { createManualClock, systemClock } from '../src/features/logging/timer/clock';
 import { newClientEventId, newUuid } from '../src/features/logging/domain/ids';
@@ -1273,6 +1278,65 @@ check('Z6. a returning parent with a timeline never sees the coach (started non-
     resolveFirstLogCoachPhase({ hydrated: true, dismissed: false, hasRealEvents: true, startedEmpty: false }),
     'hidden',
   );
+});
+
+// AR. Auth deep-link redirect parsing (Step 04) — the pure classifier behind the
+// password-reset / email-confirmation deep-link foundation. Covers the implicit
+// (fragment tokens) + PKCE (query code) + error shapes Supabase redirects with,
+// and the "not an auth link → ignore" guard that keeps ordinary deep links safe.
+check('AR1. an implicit recovery redirect yields kind "recovery" with both tokens', () => {
+  const r = parseAuthRedirect('lullaby://auth-callback#access_token=aaa&refresh_token=bbb&type=recovery');
+  assert.ok(r);
+  assert.equal(r.kind, 'recovery');
+  assert.equal(r.accessToken, 'aaa');
+  assert.equal(r.refreshToken, 'bbb');
+  assert.equal(r.code, null);
+});
+
+check('AR2. an email-confirmation (signup) redirect is classified "signup"', () => {
+  const r = parseAuthRedirect('lullaby://auth-callback#access_token=x&refresh_token=y&type=signup');
+  assert.ok(r);
+  assert.equal(r.kind, 'signup');
+  assert.equal(r.accessToken, 'x');
+});
+
+check('AR3. a PKCE code redirect (query ?code=) carries the code', () => {
+  const r = parseAuthRedirect('lullaby://auth-callback?code=abc123');
+  assert.ok(r);
+  assert.equal(r.code, 'abc123');
+  assert.equal(r.accessToken, null);
+  assert.equal(r.kind, 'unknown'); // no `type` hint with a bare PKCE code
+});
+
+check('AR4. an error redirect is "error" with a decoded description', () => {
+  const r = parseAuthRedirect(
+    'lullaby://auth-callback#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired',
+  );
+  assert.ok(r);
+  assert.equal(r.kind, 'error');
+  assert.equal(r.errorCode, 'otp_expired');
+  assert.equal(r.errorDescription, 'Email link is invalid or has expired');
+});
+
+check('AR5. a non-auth URL (no credentials/error) returns null', () => {
+  assert.equal(parseAuthRedirect('lullaby://auth-callback'), null);
+  assert.equal(parseAuthRedirect('lullaby://tonight?ref=home'), null);
+  assert.equal(parseAuthRedirect('https://example.com/page?foo=bar'), null);
+});
+
+check('AR6. null / empty / non-string input is a calm null (no throw)', () => {
+  assert.equal(parseAuthRedirect(null), null);
+  assert.equal(parseAuthRedirect(undefined), null);
+  assert.equal(parseAuthRedirect(''), null);
+});
+
+check('AR7. params are read from both query and fragment together', () => {
+  // Supabase can place `type` in the query and tokens in the fragment.
+  const r = parseAuthRedirect('lullaby://auth-callback?type=recovery#access_token=t1&refresh_token=t2');
+  assert.ok(r);
+  assert.equal(r.kind, 'recovery');
+  assert.equal(r.accessToken, 't1');
+  assert.equal(r.refreshToken, 't2');
 });
 
 // V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are

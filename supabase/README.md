@@ -40,6 +40,45 @@ avoids recursive RLS on the link table itself).
    - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
 5. Restart the Expo dev server (env vars are inlined at build time).
 
+## Password reset (deep link)
+
+The sign-in screen has a **Forgot password?** link → a calm "email me a reset
+link" screen that calls Supabase `resetPasswordForEmail`. To make the emailed
+link open the app, Supabase needs to know our redirect URL — this is **dashboard
+config, not code or SQL**:
+
+1. **Add the redirect URL to the allowlist.** Auth → **URL Configuration** →
+   **Redirect URLs** → add `lullaby://auth-callback`. The app passes this exact
+   URL (built by `getAuthRedirectUrl()` in `src/lib/authLinking.ts`) as
+   `redirectTo`; Supabase only redirects to allow-listed URLs.
+2. **No template change needed for the smoothest path.** The default **Reset
+   Password** email template already links through Supabase's verify endpoint,
+   which redirects to `redirectTo` with the recovery credentials. (The same
+   `lullaby://auth-callback` callback also receives the **Confirm signup** link,
+   so a tapped confirmation email lands the caregiver straight in the app instead
+   of the "confirm, then sign in" fallback.)
+
+**Custom scheme requires a dev-client / standalone build.** `lullaby://…` deep
+links resolve in a dev-client (`npm run dev`) or a store build — not in Expo Go,
+where `getAuthRedirectUrl()` returns an `exp://…/--/auth-callback` dev URL that
+can't be allow-listed stably. The app's `scheme` (`lullaby`) is already set in
+`app.json`, so no native config is required for the custom scheme itself.
+
+**Nothing above is required for local checks.** The whole flow is gated: without
+Supabase env vars there is no client, `resetPassword` no-ops, and the deep-link
+listener is never wired — so `npm run lint`, `npx tsc --noEmit`, and
+`npm run check:local-interactions` all pass with no dashboard setup. The redirect
+URL is harmless until you allow-list it.
+
+> **Foundation scope.** This slice sends the reset email and *receives* the
+> redirect (it establishes the Supabase session from the link — which fully
+> completes the email-confirmation case). The dedicated in-app **"set a new
+> password"** screen that a `recovery` link should lead to (it would call
+> `supabase.auth.updateUser({ password })` on the recovery session) is a
+> deliberate next step. Until it lands, a tapped recovery link signs the
+> caregiver in on the recovery session; the parser/handler groundwork
+> (`src/lib/authRedirect.ts`, `src/lib/authLinking.ts`) is already in place.
+
 ## First-run flow (configured builds)
 
 With both env vars set the app builds a Supabase client on launch and the

@@ -18,6 +18,7 @@ import { TextInput, View } from 'react-native';
 import { useAuth } from '@/state/AuthProvider';
 
 import { AuthButton, AuthField, AuthLink, AuthNote, AuthShell } from './AuthShell';
+import { ForgotPasswordScreen } from './ForgotPasswordScreen';
 
 /** Lenient shape check — local@domain.tld — enough to catch the common typo. */
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
@@ -59,6 +60,9 @@ export function AuthScreen({
     password: false,
   });
   const passwordRef = useRef<TextInput>(null);
+  // The "Forgot password?" sub-view (sign-in only). Kept here so the back link
+  // returns to this exact form with the typed email intact.
+  const [showForgot, setShowForgot] = useState(false);
 
   const isSignUp = mode === 'signUp';
   const rawEmailIssue = emailIssue(email);
@@ -87,6 +91,24 @@ export function AuthScreen({
     setMode((m) => (m === 'signIn' ? 'signUp' : 'signIn'));
   };
 
+  const openForgot = () => {
+    clearError();
+    setShowForgot(true);
+  };
+
+  // Sub-view: the reset-password surface, with a way back to this form.
+  if (showForgot) {
+    return (
+      <ForgotPasswordScreen
+        initialEmail={email}
+        onBack={() => {
+          clearError();
+          setShowForgot(false);
+        }}
+      />
+    );
+  }
+
   return (
     <AuthShell
       eyebrow="Lullaby"
@@ -98,6 +120,7 @@ export function AuthScreen({
       }
       footer={
         <View style={{ gap: 12 }}>
+          {!isSignUp && <AuthLink label="Forgot password?" onPress={openForgot} />}
           <AuthLink
             label={isSignUp ? 'Have an account? Sign in' : 'New here? Create an account'}
             onPress={toggleMode}
