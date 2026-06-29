@@ -1,6 +1,7 @@
 import { Pressable, Text, View } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg';
 
+import { formatBabyAge } from '@/data/currentState';
 import type { Baby, Caregiver } from '@/data/models';
 import { colors, fonts, surfaces, type SurfaceMode } from '@/theme';
 import { ThemeIconButton, type ThemeToggleHandler } from './ThemeIconButton';
@@ -83,7 +84,7 @@ export function BabyHeader({
             {baby.name}
           </Text>
           <Text style={{ fontFamily: fonts.body, fontSize: 12, color: palette.inkSoft, marginTop: 1 }}>
-            {ageWeeks} weeks old
+            {formatBabyAge(ageWeeks)}
           </Text>
         </View>
       </Pressable>

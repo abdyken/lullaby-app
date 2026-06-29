@@ -176,16 +176,19 @@ function filterHistoryEvents(events: HistorySourceEvent[], filter: Filter): Hist
 export default function LogScreen() {
   const { events, fullTimeline, resetLocalEvents } = useLocalEvents();
   const logging = useLogging();
-  const { caregivers: remoteCaregivers, caregiver: ownCaregiver } = useAuth();
+  const { caregivers: activeCaregivers, caregiver: ownCaregiver } = useAuth();
   const { mode } = useTheme();
   const palette = surfaces[mode];
   const [filter, setFilter] = useState<Filter>('all');
   // Stamp "now" once (for Today/Yesterday headings) so render stays pure.
   const [now] = useState(() => Date.now());
   const loggingV2 = isLoggingV2Enabled();
+  // Active caregivers come from AuthProvider (real ones in Supabase mode, the
+  // seed Mom/Dad in local-only mode); the direct seed import stays only as the
+  // ultimate fallback for a transient empty read.
   const v2Caregivers = useMemo(
-    () => (remoteCaregivers.length > 0 ? remoteCaregivers : ownCaregiver ? [ownCaregiver] : seedCaregivers),
-    [remoteCaregivers, ownCaregiver],
+    () => (activeCaregivers.length > 0 ? activeCaregivers : ownCaregiver ? [ownCaregiver] : seedCaregivers),
+    [activeCaregivers, ownCaregiver],
   );
 
   const v2Timeline = useMemo(

@@ -22,6 +22,21 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fonts, radii, shadows } from '@/theme';
 
+/**
+ * The cream, keyboard-aware full-screen surface shared by the auth + setup
+ * screens. `OnboardingStepLayout` builds on this same scaffold instead of
+ * duplicating a parallel cream background (roadmap §13).
+ */
+export function AuthSurface({ children }: { children: ReactNode }) {
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: colors.cream }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {children}
+    </KeyboardAvoidingView>
+  );
+}
+
 export function AuthShell({
   eyebrow,
   title,
@@ -37,9 +52,7 @@ export function AuthShell({
 }) {
   const insets = useSafeAreaInsets();
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: colors.cream }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <AuthSurface>
       <ScrollView
         contentContainerStyle={{
           flexGrow: 1,
@@ -78,7 +91,7 @@ export function AuthShell({
 
         {footer != null && <View style={{ marginTop: 18 }}>{footer}</View>}
       </ScrollView>
-    </KeyboardAvoidingView>
+    </AuthSurface>
   );
 }
 

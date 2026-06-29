@@ -62,3 +62,6 @@ debug/
 .claude/*.log
 .claude/nohup-*.out
 .claude/autopilot-round-*.out
+
+# Local Claude run logs
+.claude/logs/

@@ -1,6 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export const ONBOARDING_COMPLETE_KEY = 'lullaby.onboarding.v1.complete';
+// Relative imports (not `@/`): this module is loaded by the Node/tsx smoke test,
+// which does not resolve the path alias. Both are pure key constants.
+import { LOCAL_BABY_STORAGE_KEY } from '../../data/localBaby';
+import { STORAGE_KEY as LOCAL_EVENTS_STORAGE_KEY } from '../../data/persistedState';
+
+export const ONBOARDING_COMPLETE_KEY = 'lullaby.onboarding.v2.complete';
 
 const COMPLETE_VALUE = 'true';
 
@@ -46,11 +51,21 @@ export async function markOnboardingComplete(): Promise<void> {
   }
 }
 
+/**
+ * Dev-only reset back to a true first-run: drops the onboarding-complete flag,
+ * the persisted local baby/caregiver, AND the persisted local night events, so
+ * the next launch re-runs onboarding from a clean slate (no leftover real baby or
+ * its events). Returns whether the reset ran (false outside development).
+ */
 export async function resetOnboardingCompleteForDevelopment(): Promise<boolean> {
   if (!isDevelopmentRuntime()) return false;
 
   try {
-    await AsyncStorage.removeItem(ONBOARDING_COMPLETE_KEY);
+    await AsyncStorage.multiRemove([
+      ONBOARDING_COMPLETE_KEY,
+      LOCAL_BABY_STORAGE_KEY,
+      LOCAL_EVENTS_STORAGE_KEY,
+    ]);
     return true;
   } catch {
     return false;

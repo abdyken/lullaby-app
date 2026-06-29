@@ -1,5 +1,4 @@
 import type { OrbCoreKind, OrbSky, OrbStateIconKind } from '@/components/OrbHero';
-import { events } from '@/data/mock';
 import type { Caregiver, LogEvent } from '@/data/models';
 import type { AccentState } from '@/theme';
 
@@ -152,8 +151,6 @@ function diaperDetailLabel(kind: 'wet' | 'dirty' | 'both' | undefined): string {
   return 'Wet';
 }
 
-const DEMO_NOW = new Date('2026-06-16T05:24:00.000Z');
-
 function byNewestStart(a: LogEvent, b: LogEvent) {
   return new Date(b.startAt).getTime() - new Date(a.startAt).getTime();
 }
@@ -181,8 +178,8 @@ function elapsedProgress(startAt: string, reference: Date, fullScaleMinutes: num
 }
 
 export function getCurrentBabyState(
-  eventList: LogEvent[] = events,
-  reference: Date = DEMO_NOW,
+  eventList: LogEvent[] = [],
+  reference: Date = new Date(),
 ): CurrentBabyState {
   const activeSleep = eventList
     .filter((event) => event.type === 'sleep' && event.endAt === null)
@@ -649,6 +646,18 @@ export function buildTonightStatus(
     },
     { key: 'sleep', label: sleep.label, value: sleep.value },
   ];
+}
+
+/**
+ * Honest, calm age label for the Tonight greeting (`BabyHeader`). "Newborn" in
+ * the first week (no clinical "0 weeks old" for a brand-new baby), singular "1
+ * week old", else "N weeks old". Clamps negative / non-finite weeks to Newborn.
+ */
+export function formatBabyAge(weeks: number): string {
+  const wholeWeeks = Number.isFinite(weeks) ? Math.max(0, Math.floor(weeks)) : 0;
+  if (wholeWeeks < 1) return 'Newborn';
+  if (wholeWeeks === 1) return '1 week old';
+  return `${wholeWeeks} weeks old`;
 }
 
 /* ------------------------------------------------------------------ *
