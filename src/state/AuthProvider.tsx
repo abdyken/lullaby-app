@@ -111,6 +111,16 @@ type AuthContextValue = {
    * to signIn/signUp that keeps the "never force account creation" guardrail.
    */
   continueLocally: () => Promise<void>;
+  /**
+   * Inverse of continueLocally(): from the in-app account surface a "continue
+   * locally" guest chooses to set up an account. Clears the sticky local-first
+   * preference and drops to 'signed-out' (where AuthGate renders the account-entry
+   * surface). The persisted local baby + night are left untouched, so tapping
+   * "Continue locally" again returns the guest exactly where they were — the
+   * "never force account creation" guardrail still holds. No-op when Supabase
+   * isn't configured. (Local→account data migration is a separate, later step.)
+   */
+  goToAccountEntry: () => Promise<void>;
   /** Join an existing baby with an invite code (alternative to completeSetup). */
   joinWithInvite: (fields: JoinFields) => Promise<void>;
   signOut: () => Promise<void>;
@@ -533,6 +543,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [hydrateLocalIdentity]);
 
+  // "Create account or sign in" from the in-app account surface — the inverse of
+  // continueLocally(). Clear the sticky local-first preference (ref first, then
+  // the persisted flag) so a no-session resolution can no longer bounce back to
+  // local-only, then drop to 'signed-out' where AuthGate shows AccountEntryScreen.
+  // No local data is touched: the persisted baby/night survive, so "Continue
+  // locally" round-trips the guest back unchanged. Configured builds only; it's an
+  // event handler, not an effect, so setState here is fine under the React Compiler.
+  const goToAccountEntry = useCallback(async () => {
+    if (!configured) return;
+    prefersLocalRef.current = false;
+    try {
+      await AsyncStorage.removeItem(PREFERS_LOCAL_STORAGE_KEY);
+    } catch {
+      // best-effort — a failed clear only risks a re-bounce to local on relaunch
+    }
+    if (mounted.current) {
+      setErrorMessage(null);
+      setStatus('signed-out');
+    }
+  }, [configured]);
+
   // Sign out — drop the Supabase session and return to 'signed-out'. Hygiene:
   //  - Auth session/storage IS cleared: supabase.auth.signOut() calls the
   //    SecureStore adapter's removeItem, which deletes the session manifest AND
@@ -579,6 +610,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       completeSetup,
       createLocalBaby,
       continueLocally,
+      goToAccountEntry,
       joinWithInvite,
       signOut,
       clearError,
@@ -598,6 +630,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       completeSetup,
       createLocalBaby,
       continueLocally,
+      goToAccountEntry,
       joinWithInvite,
       signOut,
       clearError,
