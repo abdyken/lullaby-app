@@ -64,8 +64,10 @@ export function GoogleSignInButton() {
           opacity: busy ? 0.55 : 1,
           ...shadows.card,
         }}>
+        {/* While a sign-in is launching/completing, the label reads as progress so
+            a repeated tap (already guarded above) is clearly unnecessary. */}
         <Text style={{ fontFamily: fonts.bodyBold, fontSize: 15, color: colors.ink }}>
-          Continue with Google
+          {busy ? 'Signing in…' : 'Continue with Google'}
         </Text>
       </View>
     </Pressable>

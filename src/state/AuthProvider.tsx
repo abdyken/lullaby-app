@@ -243,6 +243,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       return;
     }
+    // A session resolved — clear any transient auth error left over from a
+    // cancelled/failed earlier attempt (e.g. a Google round-trip that the user
+    // retried). Sign-in actually landing must never leave a stale error note
+    // hanging behind the app surface.
+    if (mounted.current) setErrorMessage(null);
     const [babyId, profile] = await Promise.all([
       getLinkedBabyId(next.user.id),
       getCaregiverProfile(next.user.id),
