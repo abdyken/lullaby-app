@@ -51,10 +51,12 @@
   },
   "scripts": {
     "start": "expo start",
-    "dev": "expo start --dev-client",
+    "dev": "node scripts/dev-client.mjs",
+    "dev:raw": "expo start --dev-client --clear --port 8081 --host localhost",
     "dev:clear": "expo start --dev-client --clear",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "node scripts/android-dev.mjs",
+    "android:reset": "node scripts/android-reset.mjs",
     "android:expo": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
