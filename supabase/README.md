@@ -40,6 +40,168 @@ avoids recursive RLS on the link table itself).
    - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
 5. Restart the Expo dev server (env vars are inlined at build time).
 
+## Password reset (deep link)
+
+The sign-in screen has a **Forgot password?** link → a calm "email me a reset
+link" screen that calls Supabase `resetPasswordForEmail`. To make the emailed
+link open the app, Supabase needs to know our redirect URL — this is **dashboard
+config, not code or SQL**:
+
+1. **Add the redirect URL to the allowlist.** Auth → **URL Configuration** →
+   **Redirect URLs** → add `lullaby://auth-callback`. The app passes this exact
+   URL (built by `getAuthRedirectUrl()` in `src/lib/authLinking.ts`) as
+   `redirectTo`; Supabase only redirects to allow-listed URLs.
+2. **No template change needed for the smoothest path.** The default **Reset
+   Password** email template already links through Supabase's verify endpoint,
+   which redirects to `redirectTo` with the recovery credentials. (The same
+   `lullaby://auth-callback` callback also receives the **Confirm signup** link,
+   so a tapped confirmation email lands the caregiver straight in the app instead
+   of the "confirm, then sign in" fallback.)
+
+**Custom scheme requires a dev-client / standalone build.** `lullaby://…` deep
+links resolve in a dev-client (`npm run dev`) or a store build — not in Expo Go,
+where `getAuthRedirectUrl()` returns an `exp://…/--/auth-callback` dev URL that
+can't be allow-listed stably. The app's `scheme` (`lullaby`) is already set in
+`app.json`, so no native config is required for the custom scheme itself.
+
+**Nothing above is required for local checks.** The whole flow is gated: without
+Supabase env vars there is no client, `resetPassword` no-ops, and the deep-link
+listener is never wired — so `npm run lint`, `npx tsc --noEmit`, and
+`npm run check:local-interactions` all pass with no dashboard setup. The redirect
+URL is harmless until you allow-list it.
+
+> **Foundation scope.** This slice sends the reset email and *receives* the
+> redirect (it establishes the Supabase session from the link — which fully
+> completes the email-confirmation case). The dedicated in-app **"set a new
+> password"** screen that a `recovery` link should lead to (it would call
+> `supabase.auth.updateUser({ password })` on the recovery session) is a
+> deliberate next step. Until it lands, a tapped recovery link signs the
+> caregiver in on the recovery session; the parser/handler groundwork
+> (`src/lib/authRedirect.ts`, `src/lib/authLinking.ts`) is already in place.
+
+## Sign in with Apple (native, iOS)
+
+The account-entry surface shows a **Sign in with Apple** button **on iOS only**
+(`AppleSignInButton` returns `null` on Android/web and in the local-only demo, so
+nothing breaks off-iOS). It runs the native Apple sheet via
+`expo-apple-authentication` and exchanges the returned identity token for a
+Supabase session — `AuthProvider.signInWithApple()` calls
+`supabase.auth.signInWithIdToken({ provider: 'apple', token })`. The native flow
+needs **no nonce** and no web OAuth redirect.
+
+**App-side wiring already lives in the repo** (this slice): the handler in
+`src/state/AuthProvider.tsx`, the platform-gated button in
+`src/components/auth/AppleSignInButton.tsx`, and in `app.json` both
+`ios.usesAppleSignIn: true` and the `expo-apple-authentication` config plugin
+(these add the `com.apple.developer.applesignin` entitlement at prebuild). **No
+native credentials, provisioning profiles, or signing keys are committed** — those
+are created in the Apple Developer + Supabase dashboards below.
+
+### Manual setup required (dashboards, not code)
+
+1. **Apple Developer → Certificates, Identifiers & Profiles → Identifiers**: open
+   the **App ID** for `com.lullaby.app` (the app's `ios.bundleIdentifier`) and
+   enable the **Sign In with Apple** capability. Leave the "Server-to-Server
+   Notification Endpoint" blank.
+2. **Supabase → Authentication → Providers → Apple**: **enable** the provider and
+   add the bundle id `com.lullaby.app` to **Client IDs** (Authorized Client IDs).
+   For a **native-only iOS** sign-in that is all Supabase needs to verify the
+   token — the **Services ID + signing key are NOT required** (those are only for
+   the web / OAuth-redirect flow). If you also test inside **Expo Go**, add
+   `host.exp.Exponent` to the Client IDs as well.
+
+### Build / runtime notes
+
+- The Apple Sign In **entitlement isn't available in Expo Go** — run a
+  **dev-client** (`npm run dev`) or a store build (`expo run:ios`) to exercise it.
+- The **App ID capability must match the declared entitlement**, or an iOS build
+  fails to sign — which is why the capability in step 1 is required before a real
+  build even though `usesAppleSignIn` is already declared app-side.
+- **The Android build path is unaffected:** the plugin and `usesAppleSignIn` are
+  iOS-only config, and the button renders `null` on Android.
+
+**Nothing above is required for local checks.** Like password reset, the whole
+flow is gated: without Supabase env vars there is no client and `signInWithApple`
+no-ops, and the button is iOS-only — so `npm run lint`, `npx tsc --noEmit`, and
+`npm run check:local-interactions` all pass with no dashboard setup.
+
+## Sign in with Google (browser OAuth, iOS + Android)
+
+The account-entry surface shows a **Continue with Google** button on **iOS and
+Android** when the build is configured for it — `GoogleSignInButton` returns
+`null` on web, in the local-only demo, and whenever the Google client ID is unset,
+so nothing breaks and "Continue locally" always remains.
+
+Unlike Apple (a native sheet), Google uses the **system-browser OAuth flow** — no
+native sign-in module, so **the Android build path is unaffected** and there is no
+new `app.json` plugin or `package.json` dependency (`expo-web-browser` is already
+installed). `AuthProvider.signInWithGoogle()` calls
+`supabase.auth.signInWithOAuth({ provider: 'google' })`, opens the returned URL in
+an `expo-web-browser` auth session, and reuses the **same redirect plumbing as
+password reset** (`parseAuthRedirect` → `completeAuthRedirect` in
+`src/lib/authLinking.ts`) to exchange the `lullaby://auth-callback` result for a
+session. A dismissed browser is a calm no-op.
+
+**App-side wiring already lives in the repo** (this slice): the handler in
+`src/state/AuthProvider.tsx` (`signInWithGoogle`), the browser-OAuth helper
+`startGoogleOAuth` in `src/lib/authLinking.ts`, the config gate
+`src/lib/googleAuth.ts`, and the gated button
+`src/components/auth/GoogleSignInButton.tsx`. **No OAuth client IDs or secrets are
+committed** — they live in the env / Supabase + Google dashboards below.
+
+### Manual setup required (dashboards, not code)
+
+1. **Google Cloud Console → APIs & Services → Credentials → Create OAuth client
+   ID:** create a **Web application** client. Under **Authorized redirect URIs**
+   add the Supabase callback `https://<project-ref>.supabase.co/auth/v1/callback`
+   (Supabase shows the exact URL on the Google provider page). The OAuth consent
+   screen must be configured (app name, support email, scopes `email`/`profile`).
+   *(Native iOS/Android OAuth client IDs are only needed for the native id-token
+   upgrade — see below — not for this browser flow.)*
+2. **Supabase → Authentication → Providers → Google:** **enable** the provider and
+   paste the **Web** client ID + client **secret** from step 1. The secret stays
+   server-side in Supabase — never in the app bundle.
+3. **Redirect allowlist — already covered.** `lullaby://auth-callback` is the same
+   redirect the password-reset flow registers (Auth → URL Configuration → Redirect
+   URLs). If you haven't added it yet, add it now; no Google-specific entry is
+   needed.
+4. **App env:** set `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` (the same Web client ID) in
+   `.env` and restart the dev server. This **gates the button** on/off; the value
+   is a public identifier, and for the browser flow the app doesn't transmit it
+   (Supabase holds the real config) — it just signals "Google is wired for this
+   build."
+
+### Build / runtime notes
+
+- **Custom-scheme deep link → dev-client / standalone build.** Like password
+  reset, `lullaby://auth-callback` resolves in a **dev-client** (`npm run dev`) or
+  a store build, **not in Expo Go** (where the redirect is an unstable `exp://…`
+  URL). The `scheme` (`lullaby`) is already set in `app.json`; no native config is
+  required for the browser flow.
+- **Android is unaffected** — no native module, no Google Play Services / SHA-1
+  fingerprint requirement, no config plugin. The browser session uses
+  `expo-web-browser`, which is already a dependency.
+- **Implicit-flow friendly.** The client keeps its default (non-PKCE) flow, so the
+  redirect carries tokens in the fragment; `completeAuthRedirect` handles both
+  that and a PKCE `?code=` (forward-compatible), so no client-config change is
+  needed.
+
+### Optional future upgrade: native id-token flow
+
+For a native Google sheet (no browser hop), a later step can add
+`@react-native-google-signin/google-signin`, obtain a Google **id token**
+client-side, and call `supabase.auth.signInWithIdToken({ provider: 'google',
+token })` — mirroring Apple. That path **does** need the native **iOS/Android**
+OAuth client IDs (and an iOS URL-scheme config plugin + Play Services / SHA-1 on
+Android), which is why it's deferred; the env var `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`
+is named to carry forward into that flow (`webClientId`).
+
+**Nothing above is required for local checks.** The whole flow is gated: without
+Supabase env vars there is no client and `signInWithGoogle` no-ops; without
+`EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` the button is hidden — so `npm run lint`,
+`npx tsc --noEmit`, and `npm run check:local-interactions` all pass with no
+dashboard setup.
+
 ## First-run flow (configured builds)
 
 With both env vars set the app builds a Supabase client on launch and the

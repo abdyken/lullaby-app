@@ -16,9 +16,14 @@
  * Row Level Security (see supabase/migrations) is what actually protects data.
  */
 import 'react-native-url-polyfill/auto';
+// WebCrypto polyfill (crypto.subtle.digest + getRandomValues) so GoTrue's PKCE
+// uses real SHA-256 on Hermes instead of warning and falling back to `plain`.
+// Side-effect import; must run before createClient wires up PKCE auth.
+import './cryptoPolyfill';
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+
+import { secureSessionStorage } from './secureSessionStore';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
@@ -31,18 +36,27 @@ export const isSupabaseConfigured =
   supabaseAnonKey.length > 0;
 
 /**
- * The shared Supabase client, or null in local-only demo mode. Session is
- * persisted in AsyncStorage (same store as the local night state) so a returning
- * caregiver stays signed in. URL detection is off — this is a native app, not a
- * web OAuth redirect flow.
+ * The shared Supabase client, or null in local-only demo mode. The auth session
+ * is persisted through a secure, chunked SecureStore adapter on native (web/dev
+ * fall back to AsyncStorage) so a returning caregiver stays signed in without
+ * tokens sitting in plaintext. URL detection is off — this is a native app, not
+ * a web OAuth redirect flow.
  */
 export const supabase: SupabaseClient | null = isSupabaseConfigured
   ? createClient(supabaseUrl as string, supabaseAnonKey as string, {
       auth: {
-        storage: AsyncStorage,
+        storage: secureSessionStorage,
         autoRefreshToken: true,
         persistSession: true,
         detectSessionInUrl: false,
+        // PKCE flow: OAuth + email links return to lullaby://auth-callback with a
+        // `?code=` in the QUERY (exchanged via exchangeCodeForSession), rather than
+        // implicit `#access_token=…` tokens in the FRAGMENT. This matters on native:
+        // Android routinely drops the URL fragment when delivering a custom-scheme
+        // deep link, so an implicit redirect arrives with no credentials and the
+        // callback can never complete (the endless-loading bug). A query code
+        // survives intent delivery. App-side only — no credential/dashboard change.
+        flowType: 'pkce',
       },
     })
   : null;

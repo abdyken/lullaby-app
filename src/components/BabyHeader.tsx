@@ -3,7 +3,7 @@ import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg'
 
 import { formatBabyAge } from '@/data/currentState';
 import type { Baby, Caregiver } from '@/data/models';
-import { colors, fonts, surfaces, type SurfaceMode } from '@/theme';
+import { colors, fonts, shadows, surfaces, type SurfaceMode } from '@/theme';
 import { ThemeIconButton, type ThemeToggleHandler } from './ThemeIconButton';
 
 type Props = {
@@ -11,11 +11,58 @@ type Props = {
   ageWeeks: number;
   caregivers: Caregiver[];
   onPress?: () => void;
+  /**
+   * Opens the account / backup surface. Rendered as an explicit, labeled icon
+   * button in the header so the account entry is obvious — the app must not rely
+   * on the user discovering that tapping the baby header opens it.
+   */
+  onAccount?: () => void;
   onThemeToggle?: ThemeToggleHandler;
   themeToggleDisabled?: boolean;
   /** surface palette — 'day' (default) or 'night' for low-glare text */
   surfaceMode?: SurfaceMode;
 };
+
+/** A calm person glyph for the account button (stroke style matches the theme icons). */
+function AccountGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={8} r={3.6} stroke={color} strokeWidth={2.1} />
+      <Path d="M5.5 19.5a6.5 6.5 0 0 1 13 0" stroke={color} strokeWidth={2.1} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/**
+ * The explicit account/backup entry in the header. A glass icon button mirroring
+ * ThemeIconButton's surface-aware styling, so it reads as a real, tappable
+ * affordance (not part of the baby illustration). Labeled for discoverability + a11y.
+ */
+function AccountIconButton({ surfaceMode, onPress }: { surfaceMode: SurfaceMode; onPress: () => void }) {
+  const isNight = surfaceMode === 'night';
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Account and backup"
+      onPress={onPress}
+      hitSlop={8}
+      style={({ pressed }) => ({
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: isNight ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.74)',
+        borderWidth: 1,
+        borderColor: isNight ? 'transparent' : 'rgba(255,255,255,0.88)',
+        transform: [{ scale: pressed ? 0.94 : 1 }],
+        ...shadows.card,
+        shadowColor: isNight ? 'rgb(0,0,0)' : shadows.card.shadowColor,
+      })}>
+      <AccountGlyph color={colors.sleep} />
+    </Pressable>
+  );
+}
 
 function BabyAvatar() {
   return (
@@ -46,6 +93,7 @@ export function BabyHeader({
   ageWeeks,
   caregivers,
   onPress,
+  onAccount,
   onThemeToggle,
   themeToggleDisabled = false,
   surfaceMode = 'day',
@@ -124,6 +172,10 @@ export function BabyHeader({
           </View>
         ))}
       </Pressable>
+
+      {/* Explicit, labeled account entry — sits inline left of the (absolute)
+          theme toggle, inside the reserved right padding. */}
+      {onAccount ? <AccountIconButton surfaceMode={surfaceMode} onPress={onAccount} /> : null}
 
       {onThemeToggle ? (
         <View style={{ position: 'absolute', top: 6, right: 2 }}>

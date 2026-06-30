@@ -75,6 +75,11 @@ function RootShell({ fontsReady }: { fontsReady: boolean }) {
             contentStyle: { backgroundColor: surfaces[mode].bg },
           }}>
           <Stack.Screen name="(tabs)" />
+          {/* OAuth / email auth deep-link landing (lullaby://auth-callback). A
+              real route here is what stops Expo Router rendering "Unmatched
+              Route" for the Supabase redirect; it fades in as a calm interstitial
+              while the session exchange completes. */}
+          <Stack.Screen name="auth-callback" options={{ animation: 'fade' }} />
         </Stack>
       </BrandSplashGate>
     </>

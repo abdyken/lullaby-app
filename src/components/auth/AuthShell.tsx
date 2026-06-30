@@ -7,7 +7,8 @@
  * cards/inputs, warm shadow, Fredoka headline / Nunito body. Deliberately quiet
  * — never a marketing wall.
  */
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
+import { useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -95,11 +96,20 @@ export function AuthShell({
   );
 }
 
-/** A labeled text input in the app's surface style. */
+/**
+ * A labeled text input in the app's surface style.
+ *
+ * The keyboard/validation props (`onBlur`, `error`, `returnKeyType`,
+ * `submitBehavior`, `onSubmitEditing`, `inputRef`) are all optional and
+ * backward-compatible, so the setup/join screens that use this field are
+ * unaffected. When `error` is set, the border turns warm (terracotta) and a
+ * calm hint renders below the field.
+ */
 export function AuthField({
   label,
   value,
   onChangeText,
+  onBlur,
   placeholder,
   keyboardType,
   autoCapitalize = 'none',
@@ -107,10 +117,16 @@ export function AuthField({
   autoComplete,
   textContentType,
   maxLength,
+  error,
+  returnKeyType,
+  submitBehavior,
+  onSubmitEditing,
+  inputRef,
 }: {
   label: string;
   value: string;
   onChangeText: (text: string) => void;
+  onBlur?: () => void;
   placeholder?: string;
   keyboardType?: 'default' | 'email-address' | 'number-pad';
   autoCapitalize?: 'none' | 'words' | 'sentences';
@@ -118,7 +134,19 @@ export function AuthField({
   autoComplete?: 'email' | 'password' | 'name' | 'off';
   textContentType?: 'emailAddress' | 'password' | 'name' | 'none';
   maxLength?: number;
+  /** A calm validation/error hint; also warms the border when present. */
+  error?: string | null;
+  returnKeyType?: 'next' | 'go' | 'done' | 'send';
+  submitBehavior?: 'submit' | 'blurAndSubmit';
+  onSubmitEditing?: () => void;
+  /** Lets a parent advance focus to this field (e.g. email → password). */
+  inputRef?: Ref<TextInput>;
 }) {
+  const hasError = error != null && error.length > 0;
+  // A calm focus ring: the indigo accent on focus, warm terracotta on error.
+  // Border width stays constant across states so the field never shifts layout.
+  const [focused, setFocused] = useState(false);
+  const borderColor = hasError ? colors.feed : focused ? colors.sleep : colors.line;
   return (
     <View>
       <Text
@@ -133,8 +161,15 @@ export function AuthField({
         {label}
       </Text>
       <TextInput
+        ref={inputRef}
         value={value}
         onChangeText={onChangeText}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          onBlur?.();
+        }}
+        accessibilityLabel={label}
         placeholder={placeholder}
         placeholderTextColor={colors.inkFaint}
         keyboardType={keyboardType}
@@ -144,18 +179,34 @@ export function AuthField({
         autoComplete={autoComplete}
         textContentType={textContentType}
         maxLength={maxLength}
+        returnKeyType={returnKeyType}
+        submitBehavior={submitBehavior}
+        onSubmitEditing={onSubmitEditing}
         style={{
           fontFamily: fonts.body,
           fontSize: 15,
           color: colors.ink,
           backgroundColor: colors.surface,
           borderRadius: radii.small,
-          borderWidth: 1,
-          borderColor: colors.line,
-          paddingHorizontal: 14,
-          paddingVertical: 13,
+          borderWidth: 1.5,
+          borderColor,
+          minHeight: 52,
+          paddingHorizontal: 16,
+          paddingVertical: 14,
         }}
       />
+      {hasError && (
+        <Text
+          style={{
+            fontFamily: fonts.body,
+            fontSize: 12,
+            lineHeight: 16,
+            color: colors.feed,
+            marginTop: 6,
+          }}>
+          {error}
+        </Text>
+      )}
     </View>
   );
 }
@@ -175,6 +226,9 @@ export function AuthButton({
   accentColor?: string;
 }) {
   const inactive = busy || disabled;
+  // A disabled CTA reads as a calm, intentionally-quiet pill (soft lavender fill,
+  // faint label, no lift) — never a washed-out version of the live button.
+  const isDisabled = disabled && !busy;
   return (
     <Pressable
       accessibilityRole="button"
@@ -189,14 +243,14 @@ export function AuthButton({
       {/* Solid fill lives on an inner View — paints reliably on Android. */}
       <View
         style={{
-          minHeight: 50,
+          minHeight: 52,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: accentColor,
+          backgroundColor: isDisabled ? colors.sleepTint : accentColor,
           borderRadius: radii.pill,
           paddingHorizontal: 24,
-          opacity: inactive ? 0.55 : 1,
-          ...shadows.card,
+          // Lift only when the button is live, so a disabled CTA sits flat (calm).
+          ...(isDisabled ? null : shadows.card),
         }}>
         {busy ? (
           <ActivityIndicator color={colors.white} />
@@ -206,7 +260,7 @@ export function AuthButton({
               fontFamily: fonts.bodyBold,
               fontSize: 15,
               letterSpacing: 0.2,
-              color: colors.white,
+              color: isDisabled ? colors.inkFaint : colors.white,
             }}>
             {label}
           </Text>
@@ -216,16 +270,43 @@ export function AuthButton({
   );
 }
 
-/** Low-emphasis text link (toggle sign-in/up, sign out, etc). */
-export function AuthLink({ label, onPress }: { label: string; onPress: () => void }) {
+/**
+ * Low-emphasis text link. `tone` sets the hierarchy so a column of secondary
+ * actions never reads as a noisy stack of equal-weight purple links:
+ *   'accent' (default) → the one meaningful secondary (indigo, bold)
+ *   'quiet'            → a calm tertiary action like "Back" (soft ink, regular)
+ * `align` lets a link sit inline-right (e.g. "Forgot password?") instead of centered.
+ */
+export function AuthLink({
+  label,
+  onPress,
+  tone = 'accent',
+  align = 'center',
+}: {
+  label: string;
+  onPress: () => void;
+  tone?: 'accent' | 'quiet';
+  align?: 'center' | 'end';
+}) {
+  const quiet = tone === 'quiet';
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
       hitSlop={8}
-      style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, alignSelf: 'center' })}>
-      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, color: colors.sleep }}>{label}</Text>
+      style={({ pressed }) => ({
+        opacity: pressed ? 0.6 : 1,
+        alignSelf: align === 'end' ? 'flex-end' : 'center',
+      })}>
+      <Text
+        style={{
+          fontFamily: quiet ? fonts.body : fonts.bodyBold,
+          fontSize: 13,
+          color: quiet ? colors.inkSoft : colors.sleep,
+        }}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
