@@ -112,22 +112,18 @@ export function AuthScreen({
   return (
     <AuthShell
       eyebrow="Lullaby"
-      title={isSignUp ? 'Create your account' : 'Welcome back'}
-      subtitle={
-        isSignUp
-          ? 'Set up an account to keep your night log safe across devices.'
-          : 'Sign in to pick up your night log where you left off.'
-      }
+      title={isSignUp ? 'Create account' : 'Welcome back'}
+      subtitle={isSignUp ? "Back up your baby's care history." : 'Continue your night log.'}
       footer={
-        <View style={{ gap: 12 }}>
-          {!isSignUp && <AuthLink label="Forgot password?" onPress={openForgot} />}
+        <View style={{ gap: 10 }}>
           <AuthLink
-            label={isSignUp ? 'Have an account? Sign in' : 'New here? Create an account'}
+            label={isSignUp ? 'Have an account? Sign in' : 'New here? Create account'}
             onPress={toggleMode}
           />
           {onBack != null && (
             <AuthLink
-              label="Back to options"
+              label="Back"
+              tone="quiet"
               onPress={() => {
                 clearError();
                 onBack();
@@ -170,6 +166,12 @@ export function AuthScreen({
         returnKeyType="go"
         onSubmitEditing={submit}
       />
+
+      {/* Sign-in only: a quiet, inline reset link sits with the password instead of
+          stacking another equal-weight link in the footer. */}
+      {!isSignUp && (
+        <AuthLink label="Forgot password?" tone="quiet" align="end" onPress={openForgot} />
+      )}
 
       {errorMessage != null && <AuthNote message={errorMessage} tone="error" />}
       {pendingMessage != null && <AuthNote message={pendingMessage} tone="info" />}
