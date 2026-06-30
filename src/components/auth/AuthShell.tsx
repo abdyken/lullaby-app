@@ -8,6 +8,7 @@
  * — never a marketing wall.
  */
 import type { ReactNode, Ref } from 'react';
+import { useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -142,6 +143,10 @@ export function AuthField({
   inputRef?: Ref<TextInput>;
 }) {
   const hasError = error != null && error.length > 0;
+  // A calm focus ring: the indigo accent on focus, warm terracotta on error.
+  // Border width stays constant across states so the field never shifts layout.
+  const [focused, setFocused] = useState(false);
+  const borderColor = hasError ? colors.feed : focused ? colors.sleep : colors.line;
   return (
     <View>
       <Text
@@ -159,7 +164,11 @@ export function AuthField({
         ref={inputRef}
         value={value}
         onChangeText={onChangeText}
-        onBlur={onBlur}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          onBlur?.();
+        }}
         accessibilityLabel={label}
         placeholder={placeholder}
         placeholderTextColor={colors.inkFaint}
@@ -179,10 +188,11 @@ export function AuthField({
           color: colors.ink,
           backgroundColor: colors.surface,
           borderRadius: radii.small,
-          borderWidth: 1,
-          borderColor: hasError ? colors.feed : colors.line,
-          paddingHorizontal: 14,
-          paddingVertical: 13,
+          borderWidth: 1.5,
+          borderColor,
+          minHeight: 52,
+          paddingHorizontal: 16,
+          paddingVertical: 14,
         }}
       />
       {hasError && (
@@ -216,6 +226,9 @@ export function AuthButton({
   accentColor?: string;
 }) {
   const inactive = busy || disabled;
+  // A disabled CTA reads as a calm, intentionally-quiet pill (soft lavender fill,
+  // faint label, no lift) — never a washed-out version of the live button.
+  const isDisabled = disabled && !busy;
   return (
     <Pressable
       accessibilityRole="button"
@@ -230,14 +243,14 @@ export function AuthButton({
       {/* Solid fill lives on an inner View — paints reliably on Android. */}
       <View
         style={{
-          minHeight: 50,
+          minHeight: 52,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: accentColor,
+          backgroundColor: isDisabled ? colors.sleepTint : accentColor,
           borderRadius: radii.pill,
           paddingHorizontal: 24,
-          opacity: inactive ? 0.55 : 1,
-          ...shadows.card,
+          // Lift only when the button is live, so a disabled CTA sits flat (calm).
+          ...(isDisabled ? null : shadows.card),
         }}>
         {busy ? (
           <ActivityIndicator color={colors.white} />
@@ -247,7 +260,7 @@ export function AuthButton({
               fontFamily: fonts.bodyBold,
               fontSize: 15,
               letterSpacing: 0.2,
-              color: colors.white,
+              color: isDisabled ? colors.inkFaint : colors.white,
             }}>
             {label}
           </Text>
@@ -257,16 +270,43 @@ export function AuthButton({
   );
 }
 
-/** Low-emphasis text link (toggle sign-in/up, sign out, etc). */
-export function AuthLink({ label, onPress }: { label: string; onPress: () => void }) {
+/**
+ * Low-emphasis text link. `tone` sets the hierarchy so a column of secondary
+ * actions never reads as a noisy stack of equal-weight purple links:
+ *   'accent' (default) → the one meaningful secondary (indigo, bold)
+ *   'quiet'            → a calm tertiary action like "Back" (soft ink, regular)
+ * `align` lets a link sit inline-right (e.g. "Forgot password?") instead of centered.
+ */
+export function AuthLink({
+  label,
+  onPress,
+  tone = 'accent',
+  align = 'center',
+}: {
+  label: string;
+  onPress: () => void;
+  tone?: 'accent' | 'quiet';
+  align?: 'center' | 'end';
+}) {
+  const quiet = tone === 'quiet';
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
       hitSlop={8}
-      style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, alignSelf: 'center' })}>
-      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, color: colors.sleep }}>{label}</Text>
+      style={({ pressed }) => ({
+        opacity: pressed ? 0.6 : 1,
+        alignSelf: align === 'end' ? 'flex-end' : 'center',
+      })}>
+      <Text
+        style={{
+          fontFamily: quiet ? fonts.body : fonts.bodyBold,
+          fontSize: 13,
+          color: quiet ? colors.inkSoft : colors.sleep,
+        }}>
+        {label}
+      </Text>
     </Pressable>
   );
 }

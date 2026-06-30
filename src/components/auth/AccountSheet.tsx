@@ -137,7 +137,7 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
             <>
               <Text
                 style={{ fontFamily: fonts.body, fontSize: 13, color: colors.inkSoft, marginTop: 4 }}>
-                You{'’'}re using Lullaby locally
+                Back up and sync your logs.
               </Text>
               <Text
                 style={{
@@ -145,10 +145,9 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
                   fontSize: 12,
                   lineHeight: 18,
                   color: colors.inkFaint,
-                  marginTop: 8,
+                  marginTop: 6,
                 }}>
-                Your baby profile and night log stay on this phone. Add an account whenever you
-                {'’'}d like a backup and sync — there{'’'}s no rush.
+                You{'’'}re local right now — your baby and logs stay safe on this phone.
               </Text>
 
               {configured ? (

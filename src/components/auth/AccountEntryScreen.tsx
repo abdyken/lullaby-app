@@ -23,17 +23,28 @@ import { AuthScreen } from './AuthScreen';
 import { AuthButton, AuthLink, AuthShell } from './AuthShell';
 import { GoogleSignInButton } from './GoogleSignInButton';
 
-/** A quiet value line: a soft accent dot + calm body copy. */
-function Benefit({ text }: { text: string }) {
+/** One compact value chip — a soft lavender tint with a short label. */
+function ValueChip({ label }: { label: string }) {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
-      <View
-        style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.sleep, marginTop: 6 }}
-      />
-      <Text
-        style={{ flex: 1, fontFamily: fonts.body, fontSize: 14, lineHeight: 20, color: colors.inkSoft }}>
-        {text}
-      </Text>
+    <View
+      style={{
+        backgroundColor: colors.sleepTint,
+        borderRadius: radii.pill,
+        paddingHorizontal: 13,
+        paddingVertical: 7,
+      }}>
+      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.sleep }}>{label}</Text>
+    </View>
+  );
+}
+
+/** A single calm row of value chips — replaces a heavy paragraph + bullet list. */
+function ValueChips() {
+  return (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+      <ValueChip label="Backup" />
+      <ValueChip label="Sync" />
+      <ValueChip label="Caregiver sharing" />
     </View>
   );
 }
@@ -133,18 +144,14 @@ export function AccountEntryScreen() {
   return (
     <AuthShell
       eyebrow="Lullaby"
-      title="Keep your nights safe"
-      subtitle="Lullaby works fully on this phone. Add an account when you want a backup and sync — there's no rush."
+      title="Save your night log"
+      subtitle="Create an account to back up your baby's care history and pick up on another device."
       footer={
         configured ? (
           <AuthLink label="Already have an account? Sign in" onPress={() => openAuth('signIn')} />
         ) : undefined
       }>
-      <View style={{ gap: 12 }}>
-        <Benefit text="Back up your night log, so a lost phone never loses it" />
-        <Benefit text="Pick up on any of your devices" />
-        <Benefit text="Share with caregivers — coming soon" />
-      </View>
+      <ValueChips />
 
       {configured ? (
         <>
