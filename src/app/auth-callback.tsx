@@ -48,6 +48,10 @@ export default function AuthCallbackScreen() {
   // expo-router strips for routing but any implicit-flow tokens live in.
   const url = Linking.useURL();
   const [phase, setPhase] = useState<'working' | 'error'>('working');
+  // Dev-only failure reason, shown under the calm copy in __DEV__ so a tester can
+  // see WHY (missing code / provider error / exchange failed) without reading logs.
+  // Always null in production builds, so the user only ever sees the calm message.
+  const [devReason, setDevReason] = useState<string | null>(null);
   // One-shot outcome guard: whichever path (success / error / timeout) lands
   // first wins, so a racing exchange or a late URL can't double-resolve.
   const settled = useRef(false);
@@ -61,7 +65,10 @@ export default function AuthCallbackScreen() {
       if (ok) {
         router.replace('/');
       } else {
-        if (reason) warnCallback(reason);
+        if (reason) {
+          warnCallback(reason);
+          if (__DEV__) setDevReason(reason);
+        }
         setPhase('error');
       }
     };
@@ -98,11 +105,16 @@ export default function AuthCallbackScreen() {
         // effect re-runs when `url` changes; the timeout backstops the worst case).
         // A present-but-credential-less URL can't be completed → calm error.
         if (incoming == null) return;
-        finish(false, 'redirect carried no auth credentials');
+        warnCallback('callback URL had no recognizable auth params (hasCode=false hasAccessToken=false)');
+        finish(false, 'Missing code in callback');
         return;
       }
+      // Sanitized diagnostic — keys only, never the URL/code/tokens.
+      warnCallback(
+        `received hasCode=${redirect.code != null} hasAccessToken=${redirect.accessToken != null} error=${redirect.errorCode ?? 'none'}`,
+      );
       if (redirect.kind === 'error') {
-        finish(false, `provider returned ${redirect.errorCode ?? 'an error'}`);
+        finish(false, `OAuth provider returned ${redirect.errorCode ?? 'an error'}`);
         return;
       }
 
@@ -111,13 +123,19 @@ export default function AuthCallbackScreen() {
 
       // The PKCE code is single-use: if a racer exchanged it first, our call
       // returns an error even though sign-in actually succeeded — so trust a
-      // now-present session over the exchange result.
-      const after = await client.auth.getSession().catch(() => null);
+      // now-present session over the exchange result, with a brief grace for an
+      // in-flight racer to land the session before we declare failure.
+      let after = await client.auth.getSession().catch(() => null);
+      if (!result.ok && after?.data.session == null) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        if (!active || settled.current) return;
+        after = await client.auth.getSession().catch(() => null);
+      }
       if (!active || settled.current) return;
       if (result.ok || after?.data.session != null) {
         finish(true);
       } else {
-        finish(false, result.error ?? 'session exchange failed');
+        finish(false, `Supabase exchange failed: ${result.error ?? 'unknown'}`);
       }
     })();
 
@@ -153,6 +171,20 @@ export default function AuthCallbackScreen() {
           That sign-in link could not be completed. Head back and try again — your baby and logs on
           this phone are safe.
         </Text>
+        {/* Dev-only: the exact reason, so a tester can act without reading logs.
+            Never rendered in production (devReason stays null there). */}
+        {__DEV__ && devReason != null && (
+          <Text
+            style={{
+              fontFamily: fonts.body,
+              fontSize: 12,
+              lineHeight: 16,
+              color: colors.inkFaint,
+              textAlign: 'center',
+            }}>
+            {`dev: ${devReason}`}
+          </Text>
+        )}
         <View style={{ alignSelf: 'stretch' }}>
           <AuthButton label="Back to sign in" onPress={() => router.replace('/')} />
         </View>
