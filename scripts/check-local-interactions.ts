@@ -108,6 +108,8 @@ import { AUTH_CALLBACK_PATH, parseAuthRedirect } from '../src/lib/authRedirect';
 // Account-entry visibility (this task) — the pure "no Supabase session → which
 // surface?" decision behind the AuthProvider bootstrap.
 import { resolveNoSessionStatus } from '../src/state/authStatusResolver';
+// Pure-JS SHA-256 behind the WebCrypto polyfill (PKCE S256 code challenge).
+import { sha256Bytes } from '../src/lib/sha256';
 // Logging v2 foundation (plan Phase 1.1) — new model lives beside the legacy one.
 import { createManualClock, systemClock } from '../src/features/logging/timer/clock';
 import { newClientEventId, newUuid } from '../src/features/logging/domain/ids';
@@ -1771,6 +1773,32 @@ check('OC16. a WebCrypto polyfill backs PKCE so GoTrue uses sha256, not plain (n
   assert.ok(/subtle/.test(polyfill) && /digest/.test(polyfill), 'polyfill must provide crypto.subtle.digest');
   assert.ok(polyfill.includes('getRandomValues'), 'polyfill must provide crypto.getRandomValues for the verifier');
   assert.ok(polyfill.includes('SHA256') || polyfill.includes('SHA-256'), 'digest must be SHA-256');
+  // PURE-JS only: a native module (expo-crypto / react-native-get-random-values)
+  // would crash an already-built dev client ("Cannot find native module …").
+  assert.ok(!/from ['"]expo-crypto['"]/.test(polyfill), 'polyfill must not import a native crypto module');
+  assert.ok(
+    !/from ['"]react-native-get-random-values['"]/.test(polyfill),
+    'polyfill must stay pure-JS (no native RNG module)',
+  );
+});
+
+check('OC17. the pure-JS SHA-256 matches the NIST test vectors (correct PKCE S256 challenge)', () => {
+  const enc = (s: string) => new Uint8Array(Buffer.from(s, 'utf8'));
+  const hex = (bytes: Uint8Array) =>
+    Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  assert.equal(hex(sha256Bytes(enc(''))), 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+  assert.equal(hex(sha256Bytes(enc('abc'))), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  assert.equal(
+    hex(sha256Bytes(enc('The quick brown fox jumps over the lazy dog'))),
+    'd7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592',
+  );
+  // A multi-block message (> 64 bytes) exercises the padding path used by long verifiers.
+  assert.equal(
+    hex(sha256Bytes(enc('a'.repeat(100)))),
+    '2816597888e4a0d3a36b82b83316ab32680eb8f00f8cd3b904d681246d285a0e',
+  );
 });
 
 // V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are
