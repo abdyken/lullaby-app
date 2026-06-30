@@ -37,6 +37,7 @@ import { ActivityIndicator, Text, View } from 'react-native';
 
 import { AuthButton, AuthLink } from '@/components/auth/AuthShell';
 import { exchangeAuthCallback, parseAuthCallbackUrl } from '@/lib/authLinking';
+import { authDebug, authError } from '@/lib/authLogger';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts } from '@/theme';
 
@@ -52,11 +53,6 @@ const CALLBACK_TIMEOUT_MS = 15_000;
 /** How long to keep polling getSession after firing an exchange (10 × 300ms = 3s). */
 const SESSION_POLL_ATTEMPTS = 10;
 const SESSION_POLL_INTERVAL_MS = 300;
-
-/** Dev-only diagnostic. Never logs the URL/code/tokens — only a short reason. */
-function warnCallback(reason: string): void {
-  if (__DEV__) console.warn(`[auth] auth-callback: ${reason}`);
-}
 
 export default function AuthCallbackScreen() {
   // The full deep link that opened/resumed the app — includes the fragment, which
@@ -80,6 +76,8 @@ export default function AuthCallbackScreen() {
     const succeed = () => {
       if (!active || settled.current) return;
       settled.current = true;
+      // Normal, expected breadcrumb (silent by default; never a LogBox warning).
+      authDebug('auth-callback: session resolved → routing home');
       // Hand off to AuthGate, which routes by status — straight to baby setup
       // (signed-in, no baby) or Tonight (signed-in + baby), never the intro.
       router.replace('/');
@@ -88,7 +86,9 @@ export default function AuthCallbackScreen() {
     const fail = (reason: string) => {
       if (!active || settled.current) return;
       settled.current = true;
-      warnCallback(reason);
+      // A terminal failure that blocks the user (provider error, exchange failed
+      // with no session, or the hard timeout) — a real error, so it surfaces.
+      authError(`auth-callback: ${reason}`);
       if (__DEV__) setDevReason(reason);
       setPhase('error');
     };
@@ -136,8 +136,9 @@ export default function AuthCallbackScreen() {
       }
 
       const cb = parseAuthCallbackUrl(incoming);
-      // Sanitized diagnostic — type only, never the URL/code/tokens.
-      warnCallback(`received type=${cb.type}`);
+      // Normal, expected breadcrumb — type only, never the URL/code/tokens. Silent
+      // unless EXPO_PUBLIC_AUTH_DEBUG=1; never a LogBox warning.
+      authDebug(`auth-callback: received type=${cb.type}`);
 
       if (cb.type === 'oauth_error') {
         // A real provider error (?error=access_denied, …) is the one genuinely
@@ -150,8 +151,9 @@ export default function AuthCallbackScreen() {
         // NOT a failure. A bare / stale / duplicate callback with no credentials:
         // keep "Finishing sign-in…" and wait for the real URL (this effect re-runs
         // when `url` changes), the in-browser exchange's session (the watcher
-        // above), or — worst case — the timeout. Never "Missing code" here.
-        warnCallback('empty callback — awaiting the real redirect / session');
+        // above), or — worst case — the timeout. Never "Missing code" here. A
+        // normal, expected state → authDebug (silent by default, never a LogBox warning).
+        authDebug('auth-callback: empty callback — awaiting the real redirect / session');
         return;
       }
 
@@ -179,7 +181,9 @@ export default function AuthCallbackScreen() {
       if (!result.ok) {
         fail(`Supabase exchange failed: ${result.error ?? 'unknown'}`);
       } else {
-        warnCallback('exchange ok but no session yet — waiting for onAuthStateChange / timeout');
+        // Expected transient state — the session may still arrive via
+        // onAuthStateChange before the timeout. Not a problem → authDebug.
+        authDebug('auth-callback: exchange ok but no session yet — awaiting onAuthStateChange / timeout');
       }
     })();
 

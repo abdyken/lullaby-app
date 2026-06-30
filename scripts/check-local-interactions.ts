@@ -1653,6 +1653,7 @@ try {
 const SUPABASE_SRC = readFileSync(new URL('../src/lib/supabase.ts', import.meta.url), 'utf8');
 const AUTH_LINKING_SRC = readFileSync(new URL('../src/lib/authLinking.ts', import.meta.url), 'utf8');
 const AUTH_GATE_SRC = readFileSync(new URL('../src/components/auth/AuthGate.tsx', import.meta.url), 'utf8');
+const AUTH_LOGGER_SRC = readFileSync(new URL('../src/lib/authLogger.ts', import.meta.url), 'utf8');
 
 check('OC1. an Expo Router screen exists at the auth-callback path (no more Unmatched Route)', () => {
   // The file name maps lullaby://auth-callback → app/auth-callback.tsx, so the
@@ -1914,6 +1915,111 @@ check('OC21. a blank baby name is saved as a calm default — never the demo "Mi
   assert.equal(blankName.baby.name, 'Your baby', 'a whitespace-only name still falls back to the default');
   // A real typed name is preserved verbatim (the placeholder logic never overrides it).
   assert.equal(createLocalBaby({ babyName: 'Noah' }, NOW).baby.name, 'Noah');
+});
+
+// LG. Auth logging policy. Expected auth-callback states (empty/duplicate
+// callback, waiting for the redirect/session, route replaced) are NORMAL, not
+// problems — they must NEVER reach React Native's LogBox (which only surfaces
+// console.warn / console.error), or a scary warning drawer pops during a healthy
+// sign-in. The authLogger leaf encodes the severity policy; these guard it and
+// the call sites so a future edit can't reintroduce a warn for a normal state.
+// (authLogger references the `__DEV__` global at module load, so it can't be
+// imported under tsx/node — the policy is covered by source scans, GP-style.)
+function sliceFn(src: string, name: string, nextName: string): string {
+  const start = src.indexOf(`export function ${name}`);
+  const end = src.indexOf(`export function ${nextName}`, start);
+  assert.ok(start !== -1, `authLogger must export ${name}`);
+  return src.slice(start, end === -1 ? undefined : end);
+}
+
+check('LG1. normal auth diagnostics are silent by default + LogBox-safe (debug/log, opt-in)', () => {
+  // Gated behind an explicit dev-only opt-in, so default dev runs print nothing.
+  assert.ok(
+    /AUTH_DEBUG_ENABLED\s*=\s*__DEV__\s*&&\s*process\.env\.EXPO_PUBLIC_AUTH_DEBUG === '1'/.test(
+      AUTH_LOGGER_SRC,
+    ),
+    'normal diagnostics must gate on __DEV__ && EXPO_PUBLIC_AUTH_DEBUG === "1"',
+  );
+  // authDebug / authInfo must use console.debug / console.log — sinks LogBox does
+  // NOT intercept — and must early-return when the opt-in is off.
+  const debugBody = sliceFn(AUTH_LOGGER_SRC, 'authDebug', 'authInfo');
+  assert.ok(debugBody.includes('if (!AUTH_DEBUG_ENABLED) return;'), 'authDebug must be silent by default');
+  assert.ok(debugBody.includes('console.debug'), 'authDebug must use console.debug (LogBox-safe)');
+  assert.ok(!/console\.(warn|error)/.test(debugBody), 'authDebug must NOT use console.warn/console.error');
+  const infoBody = sliceFn(AUTH_LOGGER_SRC, 'authInfo', 'authWarn');
+  assert.ok(infoBody.includes('if (!AUTH_DEBUG_ENABLED) return;'), 'authInfo must be silent by default');
+  assert.ok(infoBody.includes('console.log'), 'authInfo must use console.log (LogBox-safe)');
+  assert.ok(!/console\.(warn|error)/.test(infoBody), 'authInfo must NOT use console.warn/console.error');
+});
+
+check('LG2. authWarn is dev-only console.warn; authError always uses console.error', () => {
+  const warnBody = sliceFn(AUTH_LOGGER_SRC, 'authWarn', 'authError');
+  assert.ok(warnBody.includes('if (!__DEV__) return;'), 'authWarn must be dev-only (never warns in production)');
+  assert.ok(warnBody.includes('console.warn'), 'authWarn must use console.warn');
+  assert.ok(!warnBody.includes('console.error'), 'authWarn must not escalate to console.error');
+  const errorBody = AUTH_LOGGER_SRC.slice(AUTH_LOGGER_SRC.indexOf('export function authError'));
+  assert.ok(errorBody.includes('console.error'), 'authError must use console.error');
+  assert.ok(!/if \(!__DEV__\) return;/.test(errorBody), 'authError must log in production too (no __DEV__ gate)');
+});
+
+check('LG3. the callback route never uses a direct console.* — normal states → authDebug, failures → authError', () => {
+  for (const sink of ['console.warn', 'console.error', 'console.log', 'console.debug']) {
+    assert.ok(!AUTH_CALLBACK_SRC.includes(sink), `auth-callback must route logs through authLogger, not ${sink}`);
+  }
+  assert.ok(AUTH_CALLBACK_SRC.includes('authDebug('), 'normal states must use authDebug');
+  assert.ok(AUTH_CALLBACK_SRC.includes('authError('), 'terminal failures must use authError');
+});
+
+check('LG4. the EMPTY / duplicate callback path logs via authDebug — never a warn/error (no LogBox drawer)', () => {
+  // The exact regression: the empty/waiting state used to console.warn → LogBox.
+  const emptyIdx = AUTH_CALLBACK_SRC.indexOf("cb.type === 'empty'");
+  assert.ok(emptyIdx !== -1, 'route must branch on an empty callback');
+  // Bound the slice to the branch's own `return;` so it can't read the next branch.
+  const emptyBranch = AUTH_CALLBACK_SRC.slice(emptyIdx, AUTH_CALLBACK_SRC.indexOf('return;', emptyIdx));
+  assert.ok(emptyBranch.includes('authDebug('), 'the empty-callback branch must log via authDebug');
+  assert.ok(
+    !/authWarn\(|authError\(|console\./.test(emptyBranch),
+    'the empty-callback branch must not warn/error — it is a normal waiting state',
+  );
+  // The "received type=…" breadcrumb is also a normal state → authDebug, not warn.
+  assert.ok(
+    /authDebug\(`auth-callback: received type=/.test(AUTH_CALLBACK_SRC),
+    'the received-type breadcrumb must be an authDebug, not a warn',
+  );
+});
+
+check('LG5. a real OAuth error still routes through the error path (authError + friendly UI)', () => {
+  // oauth_error → fail(); fail() must log via authError (a real, surfaced failure)
+  // AND flip to the recoverable error UI — diagnostics quieting must not weaken it.
+  assert.ok(AUTH_CALLBACK_SRC.includes("cb.type === 'oauth_error'"), 'route must detect a provider error');
+  const failIdx = AUTH_CALLBACK_SRC.indexOf('const fail =');
+  const failBody = AUTH_CALLBACK_SRC.slice(failIdx, AUTH_CALLBACK_SRC.indexOf('};', failIdx));
+  assert.ok(failBody.includes('authError('), 'fail() must log a real failure via authError');
+  assert.ok(failBody.includes("setPhase('error')"), 'fail() must still show the recoverable error UI');
+});
+
+check('LG6. authLinking + AuthProvider route auth logs through the logger (no direct auth console.warn)', () => {
+  for (const sink of ['console.warn', 'console.error', 'console.log', 'console.debug']) {
+    assert.ok(!AUTH_LINKING_SRC.includes(sink), `authLinking must route logs through authLogger, not ${sink}`);
+  }
+  assert.ok(AUTH_LINKING_SRC.includes('authWarn('), 'authLinking must warn via authWarn (dev-only, recoverable)');
+  // AuthProvider's only auth log (the Google error outcome) must be authWarn, not console.warn.
+  assert.ok(!/console\.warn/.test(AUTH_PROVIDER_SRC), 'AuthProvider must not console.warn (use authWarn)');
+  const gStart = AUTH_PROVIDER_SRC.indexOf('const signInWithGoogle = useCallback');
+  const gEnd = AUTH_PROVIDER_SRC.indexOf('const resetPassword = useCallback', gStart);
+  assert.ok(AUTH_PROVIDER_SRC.slice(gStart, gEnd).includes('authWarn('), 'signInWithGoogle must warn via authWarn');
+});
+
+check('LG7. no auth log interpolates a URL / code / token (secrets never reach a log sink)', () => {
+  // Guard the privacy rule: a logger call must not splice in the raw deep-link URL
+  // or any credential. authLogger also ships sanitizeAuthUrl for when a URL must
+  // be logged (strips the query + fragment where ?code= / #access_token= live).
+  const authSources = `${AUTH_CALLBACK_SRC}\n${AUTH_LINKING_SRC}`;
+  const leak =
+    /auth(Debug|Info|Warn|Error)\([^)]*\$\{\s*(url|incoming|accessToken|refreshToken|cb\.code|result\.url|redirect\.code)/;
+  assert.ok(!leak.test(authSources), 'an auth log must not interpolate a URL / code / token');
+  assert.ok(AUTH_LOGGER_SRC.includes('export function sanitizeAuthUrl'), 'authLogger must offer a URL sanitizer');
+  assert.ok(/[?#]/.test(AUTH_LOGGER_SRC) && /sanitizeAuthUrl/.test(AUTH_LOGGER_SRC), 'sanitizer must strip query/fragment');
 });
 
 check('OC16. a WebCrypto polyfill backs PKCE so GoTrue uses sha256, not plain (no warning)', () => {
