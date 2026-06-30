@@ -16,6 +16,10 @@
  * Row Level Security (see supabase/migrations) is what actually protects data.
  */
 import 'react-native-url-polyfill/auto';
+// WebCrypto polyfill (crypto.subtle.digest + getRandomValues) so GoTrue's PKCE
+// uses real SHA-256 on Hermes instead of warning and falling back to `plain`.
+// Side-effect import; must run before createClient wires up PKCE auth.
+import './cryptoPolyfill';
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
