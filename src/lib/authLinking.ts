@@ -17,12 +17,18 @@
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 
-import { AUTH_CALLBACK_PATH, parseAuthRedirect, type AuthRedirect } from './authRedirect';
+import {
+  AUTH_CALLBACK_PATH,
+  parseAuthCallbackUrl,
+  parseAuthRedirect,
+  type AuthCallbackResult,
+  type AuthRedirect,
+} from './authRedirect';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-export { AUTH_CALLBACK_PATH, parseAuthRedirect };
-export type { AuthRedirect, AuthRedirectKind } from './authRedirect';
+export { AUTH_CALLBACK_PATH, parseAuthCallbackUrl, parseAuthRedirect };
+export type { AuthCallbackResult, AuthRedirect, AuthRedirectKind } from './authRedirect';
 
 /**
  * The redirect URL Supabase should send the caregiver back to after a reset /
@@ -80,6 +86,74 @@ export async function completeAuthRedirect(
       error: e instanceof Error ? e.message : 'exchange_failed',
     };
   }
+}
+
+/**
+ * In-flight (and resolved) exchange promises, keyed by the single-use credential
+ * (the PKCE code or the access token). A PKCE code can be exchanged exactly ONCE,
+ * yet the same callback can reach us twice — the in-browser `startGoogleOAuth`
+ * path AND the `/auth-callback` deep-link route can both fire for one sign-in on
+ * Android. Without dedup the second caller's `exchangeCodeForSession` fails with
+ * a benign "code already used", which used to read as a real error. Keyed dedup
+ * makes the exchange IDEMPOTENT: the second caller awaits (and resolves to) the
+ * SAME result as the first, so a duplicate callback can never manufacture a false
+ * failure or a second conflicting session. Entries are never evicted — codes are
+ * one-time and few per session, so the map stays tiny and a late duplicate still
+ * resolves to the original outcome.
+ */
+const inFlightExchanges = new Map<string, Promise<AuthRedirectResult>>();
+
+/** Turn a classified callback into the redirect shape `completeAuthRedirect` exchanges. */
+function callbackToRedirect(cb: AuthCallbackResult): AuthRedirect {
+  if (cb.type === 'oauth_error') {
+    return {
+      kind: 'error',
+      code: null,
+      accessToken: null,
+      refreshToken: null,
+      errorCode: cb.error,
+      errorDescription: cb.description,
+    };
+  }
+  if (cb.type === 'code') {
+    return { kind: 'unknown', code: cb.code, accessToken: null, refreshToken: null, errorCode: null, errorDescription: null };
+  }
+  if (cb.type === 'tokens') {
+    return {
+      kind: 'unknown',
+      code: null,
+      accessToken: cb.accessToken,
+      refreshToken: cb.refreshToken,
+      errorCode: null,
+      errorDescription: null,
+    };
+  }
+  return { kind: 'unknown', code: null, accessToken: null, refreshToken: null, errorCode: null, errorDescription: null };
+}
+
+/**
+ * Exchange a classified auth callback for a Supabase session, EXACTLY ONCE per
+ * credential. This is the single canonical exchanger shared by both callers (the
+ * in-browser `startGoogleOAuth` round-trip and the `/auth-callback` deep-link
+ * route), so duplicate delivery of one callback never double-spends the single-use
+ * PKCE code. Delegates the actual `setSession` / `exchangeCodeForSession` to
+ * `completeAuthRedirect`; only adds the keyed in-flight dedup around it. On
+ * success the client's `onAuthStateChange` fires and AuthProvider re-evaluates.
+ */
+export function exchangeAuthCallback(
+  client: SupabaseClient,
+  cb: AuthCallbackResult,
+): Promise<AuthRedirectResult> {
+  const key =
+    cb.type === 'code' ? `code:${cb.code}` : cb.type === 'tokens' ? `token:${cb.accessToken}` : null;
+  const redirect = callbackToRedirect(cb);
+  // No reusable credential (empty / error) → nothing to dedup; exchange directly.
+  if (key == null) return completeAuthRedirect(client, redirect);
+  const existing = inFlightExchanges.get(key);
+  if (existing != null) return existing;
+  const pending = completeAuthRedirect(client, redirect);
+  inFlightExchanges.set(key, pending);
+  return pending;
 }
 
 /**
@@ -143,7 +217,7 @@ function warnOAuth(reason: string): void {
  * `skipBrowserRedirect`, so WE own the browser), open it in an `expo-web-browser`
  * auth session that returns to our `lullaby://auth-callback` redirect, then reuse
  * the SAME redirect plumbing as the email reset/confirmation links
- * (`parseAuthRedirect` → `completeAuthRedirect`) to exchange the returned PKCE
+ * (`parseAuthCallbackUrl` → `exchangeAuthCallback`) to exchange the returned PKCE
  * code or implicit tokens for a session. On success the client's
  * `onAuthStateChange` fires and AuthProvider re-evaluates — no React state is set
  * here. A dismissed browser is a calm `canceled` (not an error); all errors are
@@ -196,16 +270,21 @@ export async function startGoogleOAuth(client: SupabaseClient): Promise<OAuthOut
   // browser session as a deep link, so a "cancel" here is never a dead end.
   if (result.type !== 'success') return { status: 'canceled' };
 
-  const redirect = parseAuthRedirect(result.url);
-  if (redirect == null) {
+  const cb = parseAuthCallbackUrl(result.url);
+  if (cb.type === 'empty') {
+    // The browser returned to our redirect but with no code/tokens/error. The
+    // /auth-callback deep-link route is the fallback that completes the session if
+    // it arrives there instead, so this is a calm no-credentials outcome, not a
+    // crash (and AuthProvider treats it as a recoverable error, never fatal).
     warnOAuth('browser returned no auth credentials');
     return { status: 'error', error: 'no_redirect_credentials' };
   }
 
-  // Step 3 (non-interactive): exchange the code/tokens for a session, timed out so
-  // a stalled exchange can't hang the flow.
+  // Step 3 (non-interactive): exchange the code/tokens for a session — through the
+  // shared, idempotent exchanger so a duplicate /auth-callback delivery of the SAME
+  // code can't double-spend it. Timed out so a stalled exchange can't hang the flow.
   const outcome = await Promise.race([
-    completeAuthRedirect(client, redirect),
+    exchangeAuthCallback(client, cb),
     afterTimeout(OAUTH_STEP_TIMEOUT_MS),
   ]);
   if (outcome === OAUTH_TIMED_OUT) {

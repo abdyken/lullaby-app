@@ -104,7 +104,7 @@ import {
 // password-reset / email-confirmation handler. authLinking.ts imports
 // expo-linking + the Supabase client and can't load here, so the parsing logic
 // lives in this dependency-free leaf and is covered directly.
-import { AUTH_CALLBACK_PATH, parseAuthRedirect } from '../src/lib/authRedirect';
+import { AUTH_CALLBACK_PATH, parseAuthCallbackUrl, parseAuthRedirect } from '../src/lib/authRedirect';
 // Account-entry visibility (this task) — the pure "no Supabase session → which
 // surface?" decision behind the AuthProvider bootstrap.
 import { resolveNoSessionStatus } from '../src/state/authStatusResolver';
@@ -1354,6 +1354,64 @@ check('AR7. params are read from both query and fragment together', () => {
   assert.equal(r.refreshToken, 't2');
 });
 
+// AC. parseAuthCallbackUrl — the canonical, NON-throwing classifier the OAuth
+// callback handler runs on. Unlike parseAuthRedirect (null for "not an auth
+// link"), this returns an explicit 4-case union so an empty / intermediate
+// callback is DATA ('empty'), never an exception or a "Missing code" failure.
+// These pin the exact behavior the false-error bug needed: ?code= is success,
+// #access_token= is handled, a bare callback is 'empty' (wait), ?error= is fatal.
+check('AC1. a ?code= callback classifies as "code" with the code (PKCE success path)', () => {
+  const r = parseAuthCallbackUrl('lullaby://auth-callback?code=abc123');
+  assert.equal(r.type, 'code');
+  assert.equal(r.type === 'code' && r.code, 'abc123');
+});
+
+check('AC2. a #access_token= callback classifies as "tokens" (implicit compatibility)', () => {
+  const r = parseAuthCallbackUrl('lullaby://auth-callback#access_token=AAA&refresh_token=BBB');
+  assert.equal(r.type, 'tokens');
+  assert.equal(r.type === 'tokens' && r.accessToken, 'AAA');
+  assert.equal(r.type === 'tokens' && r.refreshToken, 'BBB');
+});
+
+check('AC3. a ?error= callback classifies as "oauth_error" (the only fatal case)', () => {
+  const r = parseAuthCallbackUrl(
+    'lullaby://auth-callback?error=access_denied&error_code=otp_expired&error_description=denied',
+  );
+  assert.equal(r.type, 'oauth_error');
+  assert.equal(r.type === 'oauth_error' && r.error, 'otp_expired');
+  assert.equal(r.type === 'oauth_error' && r.description, 'denied');
+});
+
+check('AC4. a bare / credential-less callback is "empty" — NOT fatal, NOT a code', () => {
+  // The crux of the false "Missing code in callback" bug: a stale/duplicate bare
+  // callback must be a calm wait state, never an error.
+  assert.equal(parseAuthCallbackUrl('lullaby://auth-callback').type, 'empty');
+  assert.equal(parseAuthCallbackUrl('lullaby://auth-callback?foo=bar').type, 'empty');
+  assert.equal(parseAuthCallbackUrl('exp://10.0.0.2:8081/--/auth-callback').type, 'empty');
+});
+
+check('AC5. null / undefined / empty input is a calm "empty" (total, never throws)', () => {
+  assert.equal(parseAuthCallbackUrl(null).type, 'empty');
+  assert.equal(parseAuthCallbackUrl(undefined).type, 'empty');
+  assert.equal(parseAuthCallbackUrl('').type, 'empty');
+});
+
+check('AC6. classification is deterministic — the SAME url parses identically twice (idempotent)', () => {
+  const url = 'lullaby://auth-callback?code=dup-code-xyz';
+  assert.deepEqual(parseAuthCallbackUrl(url), parseAuthCallbackUrl(url));
+});
+
+check('AC7. precedence: a real error wins over a code, and a code wins over tokens', () => {
+  // A callback carrying both an error and a code is still fatal (the error wins).
+  const errAndCode = parseAuthCallbackUrl('lullaby://auth-callback?error=server_error&code=abc');
+  assert.equal(errAndCode.type, 'oauth_error');
+  // PKCE is the configured primary, so a code wins over stray fragment tokens.
+  const codeAndTokens = parseAuthCallbackUrl(
+    'lullaby://auth-callback?code=abc#access_token=AAA&refresh_token=BBB',
+  );
+  assert.equal(codeAndTokens.type, 'code');
+});
+
 // GP. Guest / local-first data preservation (auth Step 08). The guest baby +
 // local logs must survive every auth transition a guest can reach — opening the
 // account-entry surface, sign-in, sign-up, sign-out, and an app restart — with no
@@ -1605,9 +1663,12 @@ check('OC1. an Expo Router screen exists at the auth-callback path (no more Unma
 });
 
 check('OC2. the callback route completes the Supabase exchange via the shared helpers', () => {
-  assert.ok(AUTH_CALLBACK_SRC.includes('parseAuthRedirect'), 'route parses the incoming deep link');
-  assert.ok(AUTH_CALLBACK_SRC.includes('completeAuthRedirect'), 'route runs the shared session exchange');
-  assert.ok(AUTH_CALLBACK_SRC.includes('AuthLoading'), 'route shows a calm loading state while processing');
+  assert.ok(AUTH_CALLBACK_SRC.includes('parseAuthCallbackUrl'), 'route classifies the incoming deep link');
+  assert.ok(AUTH_CALLBACK_SRC.includes('exchangeAuthCallback'), 'route runs the shared, idempotent exchange');
+  assert.ok(
+    AUTH_CALLBACK_SRC.includes('Finishing sign-in'),
+    'route shows a calm "Finishing sign-in…" state while processing',
+  );
   assert.ok(/router\.replace\(/.test(AUTH_CALLBACK_SRC), 'route navigates into the app on completion');
 });
 
@@ -1655,7 +1716,13 @@ check('OC6. the callback route cannot hang forever (hard timeout → recoverable
   assert.ok(/clearTimeout\(/.test(AUTH_CALLBACK_SRC), 'route must clear the timeout on unmount');
   // A timeout/failed exchange must land on the calm error surface, not the spinner.
   assert.ok(AUTH_CALLBACK_SRC.includes("setPhase('error')"), 'route must reach a recoverable error state');
-  assert.ok(/Back to sign in/.test(AUTH_CALLBACK_SRC), 'the error surface must offer a way back');
+  // The error surface must offer a recoverable retry AND a no-account escape hatch
+  // (both route back to the account-entry surface — never a dead end).
+  assert.ok(/Try again/.test(AUTH_CALLBACK_SRC), 'the error surface must offer a retry');
+  assert.ok(
+    /Continue without an account/.test(AUTH_CALLBACK_SRC),
+    'the error surface must keep a local-first escape hatch',
+  );
 });
 
 check('OC7. the OAuth round-trip times out its non-interactive steps (no stuck spinner)', () => {
@@ -1673,15 +1740,15 @@ check('OC7. the OAuth round-trip times out its non-interactive steps (no stuck s
 });
 
 check('OC8. an error redirect is handled (calm error), never an infinite wait', () => {
-  // Supabase can bounce back with ?error=…; the parser classifies it and the
-  // route surfaces a recoverable error rather than spinning.
-  const errored = parseAuthRedirect(
+  // Supabase can bounce back with ?error=…; the classifier flags it 'oauth_error'
+  // and the route short-circuits to a recoverable error rather than spinning.
+  const errored = parseAuthCallbackUrl(
     `lullaby://${AUTH_CALLBACK_PATH}?error=access_denied&error_description=denied`,
   );
-  assert.ok(errored != null && errored.kind === 'error');
+  assert.equal(errored.type, 'oauth_error');
   assert.ok(
-    AUTH_CALLBACK_SRC.includes("redirect.kind === 'error'"),
-    'the route must short-circuit an error redirect to the calm error state',
+    AUTH_CALLBACK_SRC.includes("cb.type === 'oauth_error'"),
+    'the route must short-circuit an oauth_error callback to the calm error state',
   );
 });
 
@@ -1701,12 +1768,24 @@ check('OC9. AuthProvider does not also exchange the deep link (single exchanger 
   );
 });
 
-check('OC10. the callback surfaces a dev-only reason + a calm no-credentials error (never infinite)', () => {
+check('OC10. an EMPTY / credential-less callback is non-fatal — it waits, never "Missing code"', () => {
   assert.ok(AUTH_CALLBACK_SRC.includes('devReason'), 'route must track a dev-only failure reason');
   assert.ok(/__DEV__/.test(AUTH_CALLBACK_SRC), 'the reason must be gated to __DEV__ (calm copy in production)');
+  // The regression: the old code called finish(false, 'Missing code in callback')
+  // the instant a bare/stale callback arrived, flashing the fatal error during a
+  // SUCCESSFUL sign-in. That fatal string — and any fail()/finish() on the empty
+  // branch — must be gone.
   assert.ok(
-    AUTH_CALLBACK_SRC.includes('Missing code in callback'),
-    'a credential-less callback must resolve to a recoverable error, not a spinner',
+    !AUTH_CALLBACK_SRC.includes('Missing code in callback'),
+    'a credential-less callback must NOT be treated as a fatal "Missing code" error',
+  );
+  // The 'empty' branch must exist and must NOT fail — it returns to keep waiting.
+  assert.ok(AUTH_CALLBACK_SRC.includes("cb.type === 'empty'"), 'route must branch on an empty callback');
+  const emptyIdx = AUTH_CALLBACK_SRC.indexOf("cb.type === 'empty'");
+  const emptyBranch = AUTH_CALLBACK_SRC.slice(emptyIdx, emptyIdx + 320);
+  assert.ok(
+    !/\bfail\(/.test(emptyBranch),
+    'the empty-callback branch must not call fail() — a later session must still win',
   );
 });
 
@@ -1762,6 +1841,79 @@ check('OC15. the callback waits for the session (onAuthStateChange + poll) befor
   );
   assert.ok(/for \(let i = 0;/.test(AUTH_CALLBACK_SRC), 'route must poll for the session within the grace window');
   assert.ok(AUTH_CALLBACK_SRC.includes('unsubscribe'), 'route must clean up the auth subscription on unmount');
+});
+
+check('OC18. the PKCE code is exchanged exactly once — a duplicate callback is idempotent', () => {
+  // Both the in-browser startGoogleOAuth path AND the /auth-callback route can fire
+  // for ONE Android sign-in. They must share a single, keyed, in-flight-deduped
+  // exchanger so the single-use code is never double-spent into a false error.
+  assert.ok(
+    AUTH_LINKING_SRC.includes('exchangeAuthCallback'),
+    'authLinking must expose the shared exchanger',
+  );
+  assert.ok(
+    /inFlightExchanges\s*=\s*new Map/.test(AUTH_LINKING_SRC),
+    'exchanges must be deduped by an in-flight map keyed on the single-use credential',
+  );
+  assert.ok(
+    AUTH_CALLBACK_SRC.includes('exchangeAuthCallback'),
+    'the callback route must exchange through the shared deduped helper',
+  );
+  assert.ok(
+    AUTH_LINKING_SRC.includes('exchangeAuthCallback(client, cb)'),
+    'startGoogleOAuth must exchange through the same shared deduped helper',
+  );
+});
+
+check('OC19. a resolved session clears any transient auth error (no stale error behind the app)', () => {
+  // evaluate() runs on every auth change; when a session is present it must wipe a
+  // leftover errorMessage so a retried/failed earlier attempt cannot linger after
+  // sign-in actually lands.
+  const start = AUTH_PROVIDER_SRC.indexOf('const evaluate = useCallback');
+  const end = AUTH_PROVIDER_SRC.indexOf('const hydrateLocalIdentity', start);
+  assert.ok(start !== -1 && end !== -1 && end > start, 'could not locate the evaluate callback');
+  const body = AUTH_PROVIDER_SRC.slice(start, end);
+  // The clear must sit AFTER the no-session early return, i.e. only on the
+  // session-present path (clearing on sign-OUT would erase a real sign-in error).
+  const guardIdx = body.indexOf("setStatus('signed-out')");
+  const clearIdx = body.indexOf('setErrorMessage(null)');
+  assert.ok(clearIdx !== -1, 'evaluate must clear errorMessage on a resolved session');
+  assert.ok(clearIdx > guardIdx, 'the error clear must be on the session-present path, not sign-out');
+});
+
+check('OC20. a cancelled/dismissed Google sign-in is a calm no-op (no error, no data loss)', () => {
+  // startGoogleOAuth returns 'canceled' for any non-success browser result …
+  assert.ok(
+    /result\.type !== 'success'\) return \{ status: 'canceled' \}/.test(AUTH_LINKING_SRC),
+    'a dismissed browser must resolve to a calm canceled outcome',
+  );
+  // … and signInWithGoogle only surfaces an error for the 'error' outcome — never
+  // for 'canceled' — so backing out returns to the auth choice with no scary note.
+  const start = AUTH_PROVIDER_SRC.indexOf('const signInWithGoogle = useCallback');
+  const end = AUTH_PROVIDER_SRC.indexOf('const resetPassword = useCallback', start);
+  const body = AUTH_PROVIDER_SRC.slice(start, end);
+  assert.ok(
+    body.includes("outcome.status === 'error'"),
+    'signInWithGoogle must only show an error for the error outcome (canceled stays silent)',
+  );
+  // There must be NO canceled-outcome conditional at all — a dismissed browser
+  // simply falls through (no error set, no routing), so local data is untouched.
+  assert.ok(
+    !/outcome\.status === 'canceled'/.test(body),
+    'a canceled outcome must have no error branch (it is a silent fall-through)',
+  );
+});
+
+check('OC21. a blank baby name is saved as a calm default — never the demo "Mia"', () => {
+  // Requirement: signing in / onboarding without typing a name must NOT persist a
+  // placeholder or the seed demo baby. createLocalBaby maps blank → 'Your baby'.
+  const blank = createLocalBaby({}, NOW);
+  assert.equal(blank.baby.name, 'Your baby');
+  assert.notEqual(blank.baby.name, 'Mia');
+  const blankName = createLocalBaby({ babyName: '   ' }, NOW);
+  assert.equal(blankName.baby.name, 'Your baby', 'a whitespace-only name still falls back to the default');
+  // A real typed name is preserved verbatim (the placeholder logic never overrides it).
+  assert.equal(createLocalBaby({ babyName: 'Noah' }, NOW).baby.name, 'Noah');
 });
 
 check('OC16. a WebCrypto polyfill backs PKCE so GoTrue uses sha256, not plain (no warning)', () => {
