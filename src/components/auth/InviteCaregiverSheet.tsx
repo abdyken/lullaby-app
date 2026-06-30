@@ -14,6 +14,7 @@ import { Modal, Pressable, Share, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { BabyInvite, CaregiverRole } from '@/data/models';
+import { useAnalytics } from '@/lib/analytics';
 import { hapticSuccess } from '@/lib/haptics';
 import { useAuth } from '@/state/AuthProvider';
 import { createInvite, formatInviteCode, getActiveInvites } from '@/sync';
@@ -30,6 +31,7 @@ const ROLES: { role: CaregiverRole; label: string; color: string }[] = [
 export function InviteCaregiverSheet({ onClose }: { onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const { baby } = useAuth();
+  const track = useAnalytics();
   const [role, setRole] = useState<CaregiverRole>('dad');
   const [invite, setInvite] = useState<BabyInvite | null>(null);
   const [busy, setBusy] = useState(false);
@@ -59,6 +61,9 @@ export function InviteCaregiverSheet({ onClose }: { onClose: () => void }) {
       if (created) {
         hapticSuccess();
         setInvite(created);
+        // No props: role (mom/dad/other) is intentionally not sent — analytics
+        // carry only coarse counts and UI source/surface, never family detail.
+        track('caregiver_invited');
       }
     } catch (e) {
       setError(

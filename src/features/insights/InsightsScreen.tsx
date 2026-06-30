@@ -1,16 +1,26 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Text, useWindowDimensions, View } from 'react-native';
 
 import { Screen } from '@/components/Screen';
 import { InsightCard } from '@/features/insights/components/InsightCard';
 import { InsightStatCard } from '@/features/insights/components/InsightStatCard';
 import { InsightsSectionCard } from '@/features/insights/components/InsightsSectionCard';
+import { ProPreviewCard } from '@/features/insights/components/ProPreviewCard';
+import { WeeklyRecapCard } from '@/features/insights/components/WeeklyRecapCard';
 import { WeeklySleepBars } from '@/features/insights/components/WeeklySleepBars';
 import { getInsightsViewModel } from '@/features/insights/getInsightsViewModel';
 import { buildInsightsViewModel } from '@/features/insights/insightSelectors';
+import { loadLegacyInsightsHistory } from '@/features/insights/loadLegacyInsightsHistory';
 import type { InsightStatViewModel, InsightsViewModel } from '@/features/insights/types';
+import { isLoggingV2Enabled } from '@/features/logging';
+import type { CareEvent } from '@/features/logging/domain/types';
 import { useLogging } from '@/features/logging/state/LoggingProvider';
+import { useAnalytics } from '@/lib/analytics';
+import { fireMilestoneOnce, reached4DataDaysMilestoneKey } from '@/lib/analyticsMilestones';
+import { isProPreviewEnabled } from '@/lib/proPreview';
+import { useAuth } from '@/state/AuthProvider';
+import { useLocalEvents } from '@/state/LocalEventProvider';
 import { useTheme } from '@/state/ThemeProvider';
 import { colors, fonts, radii, shadows, surfaces, tabbar, type SurfaceMode } from '@/theme';
 
@@ -89,28 +99,64 @@ function statForDataState(
 export function InsightsScreen() {
   const { mode, isTransitioning } = useTheme();
   const { loadInsightsHistory } = useLogging();
+  const { events: legacyEvents } = useLocalEvents();
+  const { session, baby } = useAuth();
+  const track = useAnalytics();
   const { width, height } = useWindowDimensions();
   const isShortDesktop = width >= 700 && height <= 760;
   const contentMaxWidth = isShortDesktop ? SHORT_DESKTOP_CONTENT_MAX_WIDTH : CONTENT_MAX_WIDTH;
   const statsGap = isShortDesktop ? 18 : 22;
   const initialViewModel = useMemo(() => buildInsightsViewModel({ events: [], now: resolveInsightsNow() }), []);
   const [loadedViewModel, setLoadedViewModel] = useState<InsightsViewModel | null>(null);
-  // Reload on tab focus so backdated logs inside the 7-day window are picked up from persisted history.
+
+  // Keep the latest legacy events in a ref so `loadHistory` stays stable: the
+  // focus effect should fire once per visit, not re-run on every new log. Fresh
+  // events are still read whenever Insights regains focus.
+  const legacyEventsRef = useRef(legacyEvents);
+  useEffect(() => {
+    legacyEventsRef.current = legacyEvents;
+  }, [legacyEvents]);
+
+  // In a default production build the V2 logging flag is off and
+  // `loadInsightsHistory` returns [], so read the live Supabase-synced legacy
+  // events and map them into the CareEvent shape the selectors expect (the 7-day
+  // windowing happens downstream in buildInsightsViewModel). With the V2 flag on
+  // (dev), use the V2 history unchanged.
+  const loadHistory = useCallback(
+    (nowMs: number): Promise<CareEvent[]> =>
+      isLoggingV2Enabled()
+        ? loadInsightsHistory(nowMs)
+        : Promise.resolve(loadLegacyInsightsHistory(legacyEventsRef.current)),
+    [loadInsightsHistory],
+  );
+
+  // Reload on tab focus so backdated logs inside the 7-day window are picked up.
+  // Analytics fire here: insights_opened every visit; the weekly-recap preview and
+  // the once-ever 4-data-days milestone once the parent has enough data.
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
+      track('insights_opened');
 
       void getInsightsViewModel({
-        loadHistory: loadInsightsHistory,
+        loadHistory,
         nowMs: resolveInsightsNow(),
       }).then((next) => {
-        if (!cancelled) setLoadedViewModel(next);
+        if (cancelled) return;
+        setLoadedViewModel(next);
+        if (next.dataDays >= 4) {
+          track('insights_recap_available', { dataDays: next.dataDays });
+          void fireMilestoneOnce(
+            reached4DataDaysMilestoneKey(session?.user.id ?? null, baby?.id ?? null),
+            () => track('reached_4_data_days', { dataDays: next.dataDays }),
+          );
+        }
       });
 
       return () => {
         cancelled = true;
       };
-    }, [loadInsightsHistory]),
+    }, [loadHistory, track, session?.user.id, baby?.id]),
   );
 
   const viewModel = loadedViewModel ?? initialViewModel;
@@ -222,6 +268,21 @@ export function InsightsScreen() {
           <InsightStatCard {...sleepPerDay} />
           <InsightStatCard {...diapersPerDay} />
         </View>
+
+        {/* Free, descriptive weekly recap — appears once there is enough data. */}
+        {viewModel.dataDays >= 4 ? (
+          <View style={{ marginTop: 13 }}>
+            <WeeklyRecapCard viewModel={viewModel} />
+          </View>
+        ) : null}
+
+        {/* Non-paid Lullaby Pro preview — behind EXPO_PUBLIC_PRO_PREVIEW_ENABLED
+            (off by default), additive, never blocks logging. */}
+        {isProPreviewEnabled() && viewModel.dataDays >= 4 ? (
+          <View style={{ marginTop: 13 }}>
+            <ProPreviewCard />
+          </View>
+        ) : null}
 
         <View style={{ height: INSIGHTS_BOTTOM_CLEARANCE }} />
       </View>
