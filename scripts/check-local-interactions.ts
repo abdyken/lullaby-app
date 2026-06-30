@@ -105,6 +105,9 @@ import {
 // expo-linking + the Supabase client and can't load here, so the parsing logic
 // lives in this dependency-free leaf and is covered directly.
 import { parseAuthRedirect } from '../src/lib/authRedirect';
+// Account-entry visibility (this task) — the pure "no Supabase session → which
+// surface?" decision behind the AuthProvider bootstrap.
+import { resolveNoSessionStatus } from '../src/state/authStatusResolver';
 // Logging v2 foundation (plan Phase 1.1) — new model lives beside the legacy one.
 import { createManualClock, systemClock } from '../src/features/logging/timer/clock';
 import { newClientEventId, newUuid } from '../src/features/logging/domain/ids';
@@ -1467,6 +1470,93 @@ check('GP6. LocalEventProvider clears the local night only via the local-only de
     guardWindow.includes("=== 'supabase'") && guardWindow.includes('return;'),
     'the local repository.clear() must stay behind the supabase-mode early return',
   );
+});
+
+// AE. Account-entry visibility after onboarding. The account-entry surface must
+// be reachable after onboarding in BOTH a configured build (no session) and an
+// unconfigured local build — previously the unconfigured build sat permanently in
+// 'local-only' and the entry never appeared, and the Tonight baby-header account
+// tap was gated behind isSupabaseConfigured (inert in a local build). The
+// decision is the pure resolveNoSessionStatus; the RN screens/providers can't
+// load here, so the wiring is covered by GP-style source scans.
+const ACCOUNT_ENTRY_SRC = readFileSync(
+  new URL('../src/components/auth/AccountEntryScreen.tsx', import.meta.url),
+  'utf8',
+);
+const ACCOUNT_SHEET_SRC = readFileSync(
+  new URL('../src/components/auth/AccountSheet.tsx', import.meta.url),
+  'utf8',
+);
+const TONIGHT_SRC = readFileSync(
+  new URL('../src/app/(tabs)/index.tsx', import.meta.url),
+  'utf8',
+);
+
+check('AE1. onboarding done + no account decision → the account entry is shown (signed-out)', () => {
+  assert.equal(resolveNoSessionStatus(false), 'signed-out');
+});
+
+check('AE2. a returning "Continue locally" guest is never re-walled (local-only)', () => {
+  assert.equal(resolveNoSessionStatus(true), 'local-only');
+});
+
+check('AE3. AuthProvider resolves the no-session/unconfigured launch via the shared resolver', () => {
+  assert.ok(
+    AUTH_PROVIDER_SRC.includes('resolveNoSessionStatus'),
+    'the bootstrap must use resolveNoSessionStatus so the account entry appears after onboarding',
+  );
+  // The unconfigured build must no longer pin itself to a permanent 'local-only'
+  // initial status — that was the bug that hid the entry.
+  assert.ok(
+    /useState<AuthStatus>\('loading'\)/.test(AUTH_PROVIDER_SRC),
+    'initial status should be loading until the prefers-local preference resolves',
+  );
+  assert.ok(
+    !/useState<AuthStatus>\(configured \? 'loading' : 'local-only'\)/.test(AUTH_PROVIDER_SRC),
+    'the unconfigured build must not start in a permanent local-only state',
+  );
+});
+
+check('AE4. the account entry keeps "Continue locally" and a calm state when Supabase is unconfigured', () => {
+  assert.ok(
+    ACCOUNT_ENTRY_SRC.includes('continueLocally'),
+    'Continue locally must remain the escape hatch (never force account creation)',
+  );
+  assert.ok(
+    ACCOUNT_ENTRY_SRC.includes('isSupabaseConfigured'),
+    'the entry must adapt to an unconfigured build, not hide silently',
+  );
+});
+
+check('AE5. the account surface is reopenable from Tonight in any build (not gated on Supabase config)', () => {
+  assert.ok(TONIGHT_SRC.includes('setAccountOpen(true)'), 'Tonight must open the account surface');
+  // The old gate (`isSupabaseConfigured ? () => setAccountOpen(true) : undefined`)
+  // left the header inert in a local build, so the baby head was the only entry.
+  assert.ok(
+    !/isSupabaseConfigured\s*\?\s*\(\)\s*=>\s*setAccountOpen/.test(TONIGHT_SRC),
+    'the account surface must not be gated behind isSupabaseConfigured',
+  );
+  // The in-app surface still shows a guest a calm local-only state.
+  assert.ok(ACCOUNT_SHEET_SRC.includes('isSupabaseConfigured'));
+});
+
+check('AE6. reaching the account entry never clears guest baby/log data (only the prefers-local flag moves)', () => {
+  const start = AUTH_PROVIDER_SRC.indexOf('const continueLocally = useCallback');
+  const end = AUTH_PROVIDER_SRC.indexOf('const goToAccountEntry', start);
+  assert.ok(start !== -1 && end !== -1 && end > start, 'could not locate the continueLocally callback');
+  const body = AUTH_PROVIDER_SRC.slice(start, end);
+  assert.ok(
+    body.includes('PREFERS_LOCAL_STORAGE_KEY'),
+    'continueLocally persists the sticky local-first choice',
+  );
+  for (const forbidden of [
+    'clearLocalEventStorage',
+    'multiRemove',
+    'LOCAL_BABY_STORAGE_KEY',
+    'LOCAL_EVENTS_STORAGE_KEY',
+  ]) {
+    assert.ok(!body.includes(forbidden), `continueLocally must not touch ${forbidden} (would lose guest data)`);
+  }
 });
 
 // V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are

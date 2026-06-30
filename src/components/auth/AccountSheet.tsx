@@ -14,6 +14,7 @@ import { useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/state/AuthProvider';
 import { colors, fonts, radii, shadows } from '@/theme';
 
@@ -24,6 +25,10 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
   const { session, caregiver, signOut, goToAccountEntry, busy } = useAuth();
   const email = session?.user.email ?? null;
   const signedIn = session != null;
+  // Whether this build can actually reach the auth backend. A guest in a
+  // configured build gets the upgrade affordance; an unconfigured local build
+  // gets a calm setup-required note instead of a button that goes nowhere.
+  const configured = isSupabaseConfigured;
   const [inviteOpen, setInviteOpen] = useState(false);
 
   return (
@@ -146,29 +151,46 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
                 {'’'}d like a backup and sync — there{'’'}s no rush.
               </Text>
 
-              {/* Quiet upgrade affordance — routes to the existing account-entry
-                  surface (Create account / Continue locally / Sign in). Navigation
-                  only; it migrates no local data and never forces an account. */}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Create account or sign in"
-                onPress={() => {
-                  onClose();
-                  void goToAccountEntry();
-                }}
-                style={({ pressed }) => ({
-                  marginTop: 18,
-                  minHeight: 48,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderRadius: radii.medium,
-                  backgroundColor: colors.sleepTint,
-                  opacity: pressed ? 0.7 : 1,
-                })}>
-                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.sleep }}>
-                  Create account or sign in
+              {configured ? (
+                /* Quiet upgrade affordance — routes to the existing account-entry
+                   surface (Create account / Continue locally / Sign in). Navigation
+                   only; it migrates no local data and never forces an account. */
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Create account or sign in"
+                  onPress={() => {
+                    onClose();
+                    void goToAccountEntry();
+                  }}
+                  style={({ pressed }) => ({
+                    marginTop: 18,
+                    minHeight: 48,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: radii.medium,
+                    backgroundColor: colors.sleepTint,
+                    opacity: pressed ? 0.7 : 1,
+                  })}>
+                  <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.sleep }}>
+                    Create account or sign in
+                  </Text>
+                </Pressable>
+              ) : (
+                /* Unconfigured local build: no backend to reach, so show a calm
+                   setup-required note instead of a dead button. (No apostrophes —
+                   react/no-unescaped-entities.) */
+                <Text
+                  style={{
+                    fontFamily: fonts.body,
+                    fontSize: 12,
+                    lineHeight: 18,
+                    color: colors.inkFaint,
+                    marginTop: 16,
+                  }}>
+                  Account backup and sync turn on once this build is connected to its account
+                  service.
                 </Text>
-              </Pressable>
+              )}
             </>
           )}
         </View>
