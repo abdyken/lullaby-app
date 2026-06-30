@@ -1590,6 +1590,8 @@ try {
 } catch {
   AUTH_CALLBACK_SRC = '';
 }
+const SUPABASE_SRC = readFileSync(new URL('../src/lib/supabase.ts', import.meta.url), 'utf8');
+const AUTH_LINKING_SRC = readFileSync(new URL('../src/lib/authLinking.ts', import.meta.url), 'utf8');
 
 check('OC1. an Expo Router screen exists at the auth-callback path (no more Unmatched Route)', () => {
   // The file name maps lullaby://auth-callback → app/auth-callback.tsx, so the
@@ -1631,6 +1633,53 @@ check('OC4. the callback route never erases local baby/log data', () => {
   ]) {
     assert.ok(!AUTH_CALLBACK_SRC.includes(forbidden), `auth-callback must not reference ${forbidden}`);
   }
+});
+
+check('OC5. the Supabase client uses the PKCE flow (?code= redirect survives Android deep links)', () => {
+  // Implicit flow returns tokens in the URL fragment, which Android strips from a
+  // custom-scheme deep link → callback arrives credential-less → endless loading.
+  assert.ok(/flowType:\s*'pkce'/.test(SUPABASE_SRC), "supabase client must set auth.flowType: 'pkce'");
+  // The exchange path the PKCE code needs must still be present in the helpers.
+  assert.ok(
+    AUTH_LINKING_SRC.includes('exchangeCodeForSession'),
+    'completeAuthRedirect must exchange a PKCE code for a session',
+  );
+});
+
+check('OC6. the callback route cannot hang forever (hard timeout → recoverable error)', () => {
+  assert.ok(/CALLBACK_TIMEOUT_MS/.test(AUTH_CALLBACK_SRC), 'route must define a callback timeout');
+  assert.ok(/setTimeout\(/.test(AUTH_CALLBACK_SRC), 'route must arm the timeout');
+  assert.ok(/clearTimeout\(/.test(AUTH_CALLBACK_SRC), 'route must clear the timeout on unmount');
+  // A timeout/failed exchange must land on the calm error surface, not the spinner.
+  assert.ok(AUTH_CALLBACK_SRC.includes("setPhase('error')"), 'route must reach a recoverable error state');
+  assert.ok(/Back to sign in/.test(AUTH_CALLBACK_SRC), 'the error surface must offer a way back');
+});
+
+check('OC7. the OAuth round-trip times out its non-interactive steps (no stuck spinner)', () => {
+  // The init (authorize URL) + exchange steps are raced against a timeout; the
+  // interactive browser wait is intentionally NOT timed out.
+  assert.ok(/OAUTH_STEP_TIMEOUT_MS/.test(AUTH_LINKING_SRC), 'startGoogleOAuth must define a step timeout');
+  assert.ok(
+    (AUTH_LINKING_SRC.match(/Promise\.race\(/g) ?? []).length >= 2,
+    'both the init and exchange steps must be raced against the timeout',
+  );
+  assert.ok(
+    /oauth_init_timeout/.test(AUTH_LINKING_SRC) && /oauth_exchange_timeout/.test(AUTH_LINKING_SRC),
+    'a timed-out init/exchange must resolve to a calm error outcome',
+  );
+});
+
+check('OC8. an error redirect is handled (calm error), never an infinite wait', () => {
+  // Supabase can bounce back with ?error=…; the parser classifies it and the
+  // route surfaces a recoverable error rather than spinning.
+  const errored = parseAuthRedirect(
+    `lullaby://${AUTH_CALLBACK_PATH}?error=access_denied&error_description=denied`,
+  );
+  assert.ok(errored != null && errored.kind === 'error');
+  assert.ok(
+    AUTH_CALLBACK_SRC.includes("redirect.kind === 'error'"),
+    'the route must short-circuit an error redirect to the calm error state',
+  );
 });
 
 // V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are
