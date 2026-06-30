@@ -1762,6 +1762,17 @@ check('OC15. the callback waits for the session (onAuthStateChange + poll) befor
   assert.ok(AUTH_CALLBACK_SRC.includes('unsubscribe'), 'route must clean up the auth subscription on unmount');
 });
 
+check('OC16. a WebCrypto polyfill backs PKCE so GoTrue uses sha256, not plain (no warning)', () => {
+  const polyfill = readFileSync(new URL('../src/lib/cryptoPolyfill.ts', import.meta.url), 'utf8');
+  // The client must load the polyfill before createClient wires up PKCE auth.
+  assert.ok(SUPABASE_SRC.includes('./cryptoPolyfill'), 'supabase.ts must import the crypto polyfill');
+  assert.ok(/import '\.\/cryptoPolyfill'/.test(SUPABASE_SRC), 'the polyfill must be a side-effect import');
+  // The polyfill must provide BOTH pieces GoTrue PKCE needs.
+  assert.ok(/subtle/.test(polyfill) && /digest/.test(polyfill), 'polyfill must provide crypto.subtle.digest');
+  assert.ok(polyfill.includes('getRandomValues'), 'polyfill must provide crypto.getRandomValues for the verifier');
+  assert.ok(polyfill.includes('SHA256') || polyfill.includes('SHA-256'), 'digest must be SHA-256');
+});
+
 // V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are
 // async (the repository contract returns Promises), so they run after the sync
 // checks above and print the final summary on completion.
