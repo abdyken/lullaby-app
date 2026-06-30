@@ -63,6 +63,8 @@ export default function AuthCallbackScreen() {
       if (!active || settled.current) return;
       settled.current = true;
       if (ok) {
+        // Success: hand off to AuthGate, which routes by status — straight to baby
+        // setup (signed-in, no baby) or Tonight (signed-in + baby), never the intro.
         router.replace('/');
       } else {
         if (reason) {
@@ -73,6 +75,19 @@ export default function AuthCallbackScreen() {
       }
     };
 
+    const client = supabase;
+
+    // Treat a session landing from ANY exchanger as success. The single-use OAuth
+    // code can be consumed by THIS route OR by the in-browser startGoogleOAuth path
+    // (when the redirect both returns to the browser session and fires a deep link).
+    // Watching onAuthStateChange means whichever one wins, we route into the app —
+    // so a benign "code already used" on the loser never shows a false error.
+    const authSub = client
+      ? client.auth.onAuthStateChange((_event, session) => {
+          if (session != null) finish(true);
+        }).data.subscription
+      : null;
+
     // Safety net: nothing may keep the user on the spinner past the deadline.
     const timer = setTimeout(() => finish(false, 'timed out completing sign-in'), CALLBACK_TIMEOUT_MS);
 
@@ -81,7 +96,6 @@ export default function AuthCallbackScreen() {
       const incoming = url ?? (await Linking.getInitialURL().catch(() => null));
       if (!active || settled.current) return;
 
-      const client = supabase;
       // Unconfigured build (no Supabase): there is nothing to exchange — just
       // leave the interstitial and let AuthGate render the local app.
       if (!client) {
@@ -89,9 +103,7 @@ export default function AuthCallbackScreen() {
         return;
       }
 
-      // A racing handler — the WebBrowser auth session in startGoogleOAuth, or
-      // AuthProvider's link listener — may already have established the session.
-      // That is success: go straight into the app.
+      // Already signed in (session present at mount) → straight in.
       const existing = await client.auth.getSession().catch(() => null);
       if (!active || settled.current) return;
       if (existing?.data.session != null) {
@@ -118,30 +130,35 @@ export default function AuthCallbackScreen() {
         return;
       }
 
+      // Drive the exchange, but do NOT decide on its return value alone: the
+      // onAuthStateChange watcher above and the poll below catch a session that
+      // lands slightly later (or via a racing exchanger), so success is detected
+      // by the SESSION appearing, not by this single call's result.
       const result = await completeAuthRedirect(client, redirect);
       if (!active || settled.current) return;
 
-      // The PKCE code is single-use: if a racer exchanged it first, our call
-      // returns an error even though sign-in actually succeeded — so trust a
-      // now-present session over the exchange result, with a brief grace for an
-      // in-flight racer to land the session before we declare failure.
-      let after = await client.auth.getSession().catch(() => null);
-      if (!result.ok && after?.data.session == null) {
-        await new Promise((resolve) => setTimeout(resolve, 400));
+      // Poll for the session within the grace window before declaring failure.
+      for (let i = 0; i < 10 && active && !settled.current; i += 1) {
+        const after = await client.auth.getSession().catch(() => null);
         if (!active || settled.current) return;
-        after = await client.auth.getSession().catch(() => null);
+        if (after?.data.session != null) {
+          finish(true);
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 300));
       }
-      if (!active || settled.current) return;
-      if (result.ok || after?.data.session != null) {
-        finish(true);
-      } else {
-        finish(false, `Supabase exchange failed: ${result.error ?? 'unknown'}`);
-      }
+
+      // No session after the grace window → a genuine failure (dev reason only).
+      finish(
+        false,
+        result.ok ? 'no session after exchange' : `Supabase exchange failed: ${result.error ?? 'unknown'}`,
+      );
     })();
 
     return () => {
       active = false;
       clearTimeout(timer);
+      authSub?.unsubscribe();
     };
   }, [url]);
 
