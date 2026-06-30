@@ -195,6 +195,7 @@ import {
 import { buildV2HistoryTimeline } from '../src/features/logging/state/historyTimeline';
 import { buildInsightsViewModel } from '../src/features/insights/insightSelectors';
 import { getInsightsViewModel } from '../src/features/insights/getInsightsViewModel';
+import { loadLegacyInsightsHistory } from '../src/features/insights/loadLegacyInsightsHistory';
 import { loggingError } from '../src/features/logging/domain/errors';
 // Logging v2 Feed use-cases (plan Phase 3 & 5, task 05) — pure async functions
 // over an in-memory repository + a fake clock.
@@ -2089,6 +2090,46 @@ async function runAsyncChecks(): Promise<void> {
       assert.equal(vm.stats.feedsPerDay.label, 'Feeds / day');
       assert.equal(vm.stats.sleepPerDay.unit, 'h');
       assert.equal(vm.stats.diapersPerDay.label, 'Diapers / day');
+    },
+  );
+
+  await checkAsync(
+    'IG3. loadLegacyInsightsHistory maps production legacy events so Insights populate (4+ data days)',
+    async () => {
+      const now = localTime(0, 12);
+      const legacyEvent = (
+        over: Partial<LogEvent> & Pick<LogEvent, 'id' | 'type' | 'startAt'>,
+      ): LogEvent => ({
+        babyId: 'baby-mia',
+        caregiverId: 'cg-mom',
+        endAt: null,
+        meta: {},
+        createdAt: over.startAt,
+        ...over,
+      });
+      const legacy: LogEvent[] = [
+        // 3 feeds today → a feed rhythm is derivable
+        legacyEvent({ id: 'lg-f1', type: 'feed', startAt: iso(localTime(0, 6)), meta: { side: 'L' } }),
+        legacyEvent({ id: 'lg-f2', type: 'feed', startAt: iso(localTime(0, 9)), meta: { side: 'R' } }),
+        legacyEvent({ id: 'lg-f3', type: 'feed', startAt: iso(localTime(0, 12)), meta: { side: 'L' } }),
+        // completed sleeps on two earlier days → sleep minutes + distinct data days
+        legacyEvent({ id: 'lg-s1', type: 'sleep', startAt: iso(localTime(1, 22)), endAt: iso(localTime(1, 23, 30)) }),
+        legacyEvent({ id: 'lg-s2', type: 'sleep', startAt: iso(localTime(2, 1)), endAt: iso(localTime(2, 3)) }),
+        // a diaper on a 4th distinct day
+        legacyEvent({ id: 'lg-d1', type: 'diaper', startAt: iso(localTime(3, 9)), meta: { kind: 'both' } }),
+        // a note must be dropped by the mapper and never break the view model
+        legacyEvent({ id: 'lg-n1', type: 'note', startAt: iso(localTime(0, 7)), meta: { label: 'Fussy' } }),
+      ];
+
+      const careEvents = loadLegacyInsightsHistory(legacy);
+      assert.equal(careEvents.length, 6); // 7 legacy events minus the dropped note
+
+      const vm = buildInsightsViewModel({ events: careEvents, now });
+      assert.ok(vm.dataDays >= 4); // feeds(day0), sleeps(day1,2), diaper(day3) = 4 distinct days
+      assert.equal(vm.hasEnoughData, true);
+      assert.ok(vm.weeklySleep.some((day) => day.minutes > 0)); // sleeps mapped through
+      assert.equal(vm.cards[0].id, 'feed-rhythm');
+      assert.ok(vm.cards[0].text.includes('rhythm')); // real rhythm card from 3 feeds
     },
   );
 
