@@ -17,6 +17,7 @@
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 
+import { authWarn } from './authLogger';
 import {
   AUTH_CALLBACK_PATH,
   parseAuthCallbackUrl,
@@ -203,9 +204,14 @@ function afterTimeout(ms: number): Promise<typeof OAUTH_TIMED_OUT> {
   return new Promise((resolve) => setTimeout(() => resolve(OAUTH_TIMED_OUT), ms));
 }
 
-/** Dev-only diagnostic for OAuth failures. Never logs the URL, code, or tokens. */
+/**
+ * Suspicious-but-recoverable OAuth diagnostic (init/exchange timeout, an odd-but-
+ * handled browser result). Dev-only via authWarn; never logs the URL, code, or
+ * tokens — only a short, structural reason. A dismissed browser is NOT routed here
+ * (it's a calm `canceled`), so this never fires for the normal cancel path.
+ */
 function warnOAuth(reason: string): void {
-  if (__DEV__) console.warn(`[auth] Google OAuth: ${reason}`);
+  authWarn(`Google OAuth: ${reason}`);
 }
 
 /**
