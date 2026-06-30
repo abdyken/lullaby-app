@@ -1592,6 +1592,7 @@ try {
 }
 const SUPABASE_SRC = readFileSync(new URL('../src/lib/supabase.ts', import.meta.url), 'utf8');
 const AUTH_LINKING_SRC = readFileSync(new URL('../src/lib/authLinking.ts', import.meta.url), 'utf8');
+const AUTH_GATE_SRC = readFileSync(new URL('../src/components/auth/AuthGate.tsx', import.meta.url), 'utf8');
 
 check('OC1. an Expo Router screen exists at the auth-callback path (no more Unmatched Route)', () => {
   // The file name maps lullaby://auth-callback → app/auth-callback.tsx, so the
@@ -1713,6 +1714,52 @@ check('OC11. Google sign-in clears its loading state on failure (no stuck spinne
   assert.ok(start !== -1 && end !== -1 && end > start, 'could not locate the signInWithGoogle callback');
   const body = AUTH_PROVIDER_SRC.slice(start, end);
   assert.ok(/finally\s*{[\s\S]*setBusy\(false\)/.test(body), 'signInWithGoogle must clear busy in finally');
+});
+
+check('OC12. an authenticated user with no baby routes straight to baby setup (no onboarding intro)', () => {
+  const start = AUTH_GATE_SRC.indexOf("case 'needs-setup':");
+  const end = AUTH_GATE_SRC.indexOf("case 'ready':", start);
+  assert.ok(start !== -1 && end !== -1 && end > start, 'AuthGate must handle needs-setup before ready');
+  const seg = AUTH_GATE_SRC.slice(start, end);
+  assert.ok(seg.includes('BabySetupScreen'), 'needs-setup must render the baby setup form directly');
+  assert.ok(!seg.includes('OnboardingGate'), 'needs-setup must NOT replay the onboarding intro');
+});
+
+check('OC13. an authenticated user with a baby goes straight to the app (no onboarding intro)', () => {
+  const start = AUTH_GATE_SRC.indexOf("case 'ready':");
+  const end = AUTH_GATE_SRC.indexOf("case 'loading':", start);
+  assert.ok(start !== -1 && end !== -1 && end > start, 'AuthGate must handle ready before loading');
+  const seg = AUTH_GATE_SRC.slice(start, end);
+  assert.ok(seg.includes('{children}'), 'ready must render the app');
+  assert.ok(!seg.includes('OnboardingGate'), 'ready must NOT replay the onboarding intro');
+});
+
+check('OC14. no-session states still run onboarding first (intro→account entry; local-first preserved)', () => {
+  const so = AUTH_GATE_SRC.slice(
+    AUTH_GATE_SRC.indexOf("case 'signed-out':"),
+    AUTH_GATE_SRC.indexOf("case 'needs-setup':"),
+  );
+  assert.ok(
+    so.includes('OnboardingGate') && so.includes('AccountEntryScreen'),
+    'signed-out must show onboarding then the account-entry surface',
+  );
+  const lo = AUTH_GATE_SRC.slice(
+    AUTH_GATE_SRC.indexOf("case 'local-only':"),
+    AUTH_GATE_SRC.indexOf("case 'signed-out':"),
+  );
+  assert.ok(lo.includes('OnboardingGate'), 'local-only must run onboarding (creates the local baby) before the app');
+});
+
+check('OC15. the callback waits for the session (onAuthStateChange + poll) before declaring failure', () => {
+  // The fix for the false "Could not finish signing in" after a successful auth:
+  // detect success by the SESSION appearing (from this route or startGoogleOAuth),
+  // not by a single exchange call's result.
+  assert.ok(
+    AUTH_CALLBACK_SRC.includes('onAuthStateChange'),
+    'route must watch for a session landing from any exchanger',
+  );
+  assert.ok(/for \(let i = 0;/.test(AUTH_CALLBACK_SRC), 'route must poll for the session within the grace window');
+  assert.ok(AUTH_CALLBACK_SRC.includes('unsubscribe'), 'route must clean up the auth subscription on unmount');
 });
 
 // V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are
