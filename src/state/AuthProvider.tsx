@@ -39,12 +39,7 @@ import { clearLocalEventStorage } from '@/data/localStorage';
 import { baby as seedBaby, caregivers as seedCaregivers } from '@/data/mock';
 import type { Baby, Caregiver, CaregiverRole } from '@/data/models';
 import { calmAuthErrorMessage } from '@/lib/authErrors';
-import {
-  completeAuthRedirect,
-  getAuthRedirectUrl,
-  startGoogleOAuth,
-  subscribeToAuthRedirects,
-} from '@/lib/authLinking';
+import { getAuthRedirectUrl, startGoogleOAuth } from '@/lib/authLinking';
 import { isGoogleSignInConfigured } from '@/lib/googleAuth';
 import { hapticSuccess } from '@/lib/haptics';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
@@ -370,20 +365,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [configured]);
 
-  // Deep-link foundation: receive the redirect Supabase sends back after a
-  // password-reset / email-confirmation email (lullaby://auth-callback) and
-  // exchange its credentials for a session. The resulting auth change flows
-  // through onSupabaseAuthChange → applySession, so this effect sets no React
-  // state itself (React-Compiler-safe). Configured builds only — the local demo
-  // never wires a listener — and inert unless a real auth redirect arrives, so
-  // ordinary launches and router deep links are untouched.
-  useEffect(() => {
-    if (!configured || !supabase) return;
-    const client = supabase;
-    return subscribeToAuthRedirects((redirect) => {
-      void completeAuthRedirect(client, redirect);
-    });
-  }, [configured]);
+  // Auth deep links (lullaby://auth-callback — Google OAuth, password reset, email
+  // confirmation) are completed by the dedicated `src/app/auth-callback.tsx` route,
+  // which is the SINGLE owner of the session exchange. We deliberately do NOT also
+  // exchange here: the PKCE code + verifier are single-use, so a second exchanger
+  // racing the route would consume the code first and make the route's exchange
+  // fail — surfacing the "Could not finish signing in" screen even on a successful
+  // sign-in. The route's exchange still flows through onSupabaseAuthChange →
+  // applySession, so this provider reacts to the resulting SIGNED_IN exactly as
+  // before. (An earlier redirect listener lived here and caused that race; it was
+  // removed in favor of the route.)
 
   // Unconfigured (local demo) cold-launch bootstrap. With no Supabase env there is
   // never a session, so the only question is which surface to show after

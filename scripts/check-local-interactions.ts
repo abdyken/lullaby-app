@@ -1682,6 +1682,39 @@ check('OC8. an error redirect is handled (calm error), never an infinite wait', 
   );
 });
 
+check('OC9. AuthProvider does not also exchange the deep link (single exchanger — no PKCE race)', () => {
+  // The /auth-callback route is the SOLE owner of the session exchange. A second
+  // exchanger here would consume the single-use PKCE code first and make the route
+  // fail — the "Could not finish signing in" race. Guard so it can't creep back.
+  // Scan for the CALL forms (name + `(`) so an accurate prose mention in a doc
+  // comment (e.g. describing what startGoogleOAuth does internally) is not flagged.
+  assert.ok(
+    !/subscribeToAuthRedirects\s*\(/.test(AUTH_PROVIDER_SRC),
+    'AuthProvider must not re-subscribe to auth redirects (route is the single handler)',
+  );
+  assert.ok(
+    !/completeAuthRedirect\s*\(/.test(AUTH_PROVIDER_SRC),
+    'AuthProvider must not run a second code exchange',
+  );
+});
+
+check('OC10. the callback surfaces a dev-only reason + a calm no-credentials error (never infinite)', () => {
+  assert.ok(AUTH_CALLBACK_SRC.includes('devReason'), 'route must track a dev-only failure reason');
+  assert.ok(/__DEV__/.test(AUTH_CALLBACK_SRC), 'the reason must be gated to __DEV__ (calm copy in production)');
+  assert.ok(
+    AUTH_CALLBACK_SRC.includes('Missing code in callback'),
+    'a credential-less callback must resolve to a recoverable error, not a spinner',
+  );
+});
+
+check('OC11. Google sign-in clears its loading state on failure (no stuck spinner)', () => {
+  const start = AUTH_PROVIDER_SRC.indexOf('const signInWithGoogle = useCallback');
+  const end = AUTH_PROVIDER_SRC.indexOf('const resetPassword = useCallback', start);
+  assert.ok(start !== -1 && end !== -1 && end > start, 'could not locate the signInWithGoogle callback');
+  const body = AUTH_PROVIDER_SRC.slice(start, end);
+  assert.ok(/finally\s*{[\s\S]*setBusy\(false\)/.test(body), 'signInWithGoogle must clear busy in finally');
+});
+
 // V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are
 // async (the repository contract returns Promises), so they run after the sync
 // checks above and print the final summary on completion.
