@@ -10,7 +10,8 @@
     "ios": {
       "icon": "./assets/images/icon.png",
       "bundleIdentifier": "com.lullaby.app",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "usesAppleSignIn": true
     },
     "android": {
       "icon": "./assets/images/icon.png",
@@ -28,6 +29,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-apple-authentication",
       [
         "expo-splash-screen",
         {

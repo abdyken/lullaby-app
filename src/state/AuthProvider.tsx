@@ -14,6 +14,7 @@
  * live in the sync layer (session + provisioning); this is the React seam.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import {
   createContext,
   useCallback,
@@ -24,6 +25,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { AppState, Platform } from 'react-native';
 
 import {
   LOCAL_BABY_STORAGE_KEY,
@@ -36,8 +38,12 @@ import {
 import { clearLocalEventStorage } from '@/data/localStorage';
 import { baby as seedBaby, caregivers as seedCaregivers } from '@/data/mock';
 import type { Baby, Caregiver, CaregiverRole } from '@/data/models';
+import { calmAuthErrorMessage } from '@/lib/authErrors';
+import { getAuthRedirectUrl, startGoogleOAuth } from '@/lib/authLinking';
+import { isGoogleSignInConfigured } from '@/lib/googleAuth';
 import { hapticSuccess } from '@/lib/haptics';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { resolveNoSessionStatus } from '@/state/authStatusResolver';
 import {
   acceptInvite,
   ensureCaregiverSetup,
@@ -86,6 +92,41 @@ type AuthContextValue = {
   errorMessage: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
+  /**
+   * Native "Sign in with Apple" (iOS only). Runs the system Apple sheet via
+   * `expo-apple-authentication`, then exchanges the returned identity token for a
+   * Supabase session with `signInWithIdToken({ provider: 'apple' })`. On success
+   * the session lands through `onAuthStateChange` → `applySession` (no state set
+   * here, mirroring `signIn`); failures surface through `errorMessage`. A
+   * user-cancelled sheet is a calm no-op, not an error. No-op without a configured
+   * Supabase client or off iOS — the affordance is already gated to iOS in the UI,
+   * so this guard is defense in depth. Required Apple Developer + Supabase provider
+   * setup is documented in `supabase/README.md` (no native credentials in repo).
+   */
+  signInWithApple: () => Promise<void>;
+  /**
+   * Google sign-in via the system browser (iOS + Android). Asks Supabase for the
+   * Google authorization URL and runs it through an `expo-web-browser` auth
+   * session that returns to `lullaby://auth-callback`; the shared redirect plumbing
+   * (Step 04) then exchanges the result for a session — so success lands through
+   * `onAuthStateChange` → `applySession`, exactly like email + Apple sign-in (no
+   * state set here). A dismissed browser is a calm no-op; failures surface through
+   * `errorMessage`. Gated on a configured Supabase client AND a Google OAuth client
+   * ID in the env (`isGoogleSignInConfigured`), and excluded on web — the affordance
+   * is already hidden when those are absent, so this guard is defense in depth.
+   * Deliberately the OAuth/browser flow (no native module), so the Android build
+   * path is unaffected. Required Google Cloud + Supabase provider setup is
+   * documented in `supabase/README.md` (no client IDs or dashboard config in repo).
+   */
+  signInWithGoogle: () => Promise<void>;
+  /**
+   * Email a password-reset link (Supabase `resetPasswordForEmail`). Returns true
+   * when the request was accepted so the caller can show a calm "check your
+   * inbox" view; failures surface through `errorMessage`. No-op without a
+   * configured Supabase client. To avoid account enumeration, success does not
+   * confirm whether an account exists for the address.
+   */
+  resetPassword: (email: string) => Promise<boolean>;
   completeSetup: (fields: SetupFields) => Promise<void>;
   /**
    * Create + persist the active local baby/caregiver (local-only onboarding),
@@ -93,6 +134,23 @@ type AuthContextValue = {
    * marking onboarding complete + revealing stays the gate's job (Phase 1A).
    */
   createLocalBaby: (input: CreateLocalBabyInput) => Promise<LocalBabyRecord>;
+  /**
+   * Keep using Lullaby locally without an account, from the account-entry surface
+   * shown in a configured build with no session. Persists the choice and drops
+   * into 'local-only' so the app renders on the local repository — the complement
+   * to signIn/signUp that keeps the "never force account creation" guardrail.
+   */
+  continueLocally: () => Promise<void>;
+  /**
+   * Inverse of continueLocally(): from the in-app account surface a "continue
+   * locally" guest chooses to set up an account. Clears the sticky local-first
+   * preference and drops to 'signed-out' (where AuthGate renders the account-entry
+   * surface). The persisted local baby + night are left untouched, so tapping
+   * "Continue locally" again returns the guest exactly where they were — the
+   * "never force account creation" guardrail still holds. No-op when Supabase
+   * isn't configured. (Local→account data migration is a separate, later step.)
+   */
+  goToAccountEntry: () => Promise<void>;
   /** Join an existing baby with an invite code (alternative to completeSetup). */
   joinWithInvite: (fields: JoinFields) => Promise<void>;
   signOut: () => Promise<void>;
@@ -110,10 +168,38 @@ function messageFrom(error: unknown, fallback: string): string {
   return fallback;
 }
 
+/**
+ * True when an Apple sign-in rejection is just the parent dismissing the system
+ * sheet (`ERR_REQUEST_CANCELED`). A cancel is not a failure, so the caller stays
+ * calm and surfaces no error.
+ */
+function isAppleCancel(error: unknown): boolean {
+  return (
+    error != null &&
+    typeof error === 'object' &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ERR_REQUEST_CANCELED'
+  );
+}
+
+/**
+ * Persisted "this guest chose to keep using Lullaby locally" flag. Set when
+ * "Continue locally" is tapped on the account-entry surface so a *configured*
+ * build doesn't re-show that surface on the next cold launch (local-first is
+ * sticky, not a per-launch nag). Namespaced + versioned like the other local
+ * stores; it only matters while there is no session — evaluate() owns the
+ * signed-in path and ignores it.
+ */
+const PREFERS_LOCAL_STORAGE_KEY = 'lullaby/auth/prefers-local/v1';
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const configured = isSupabaseConfigured && supabase != null;
 
-  const [status, setStatus] = useState<AuthStatus>(configured ? 'loading' : 'local-only');
+  // Start in 'loading' for BOTH configured and unconfigured builds: the
+  // unconfigured build now reads the sticky "Continue locally" preference on cold
+  // launch (below) to decide between the account-entry surface and the local app,
+  // so it can no longer pin itself to a permanent 'local-only' that hid the entry.
+  const [status, setStatus] = useState<AuthStatus>('loading');
   const [session, setSession] = useState<Session | null>(null);
   // Local-only builds own an *active local baby/caregiver* here, above the gate,
   // so every read-site can resolve identity through `useAuth()` instead of
@@ -137,6 +223,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       mounted.current = false;
     };
   }, []);
+
+  // Cached "the guest chose to continue locally" preference, hydrated from
+  // storage on bootstrap and set by continueLocally(). A ref (not state) because
+  // it gates how a *no-session* resolution lands — local-only vs the
+  // account-entry surface — and must be readable synchronously inside the
+  // auth-change callback without re-subscribing.
+  const prefersLocalRef = useRef(false);
 
   // Map a session to a provisioning status. Safe to call repeatedly.
   const evaluate = useCallback(async (next: Session | null) => {
@@ -171,49 +264,151 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus('ready');
   }, []);
 
+  // Fill the active baby/caregiver from the onboarding-persisted local baby (or
+  // the demo seed as a fallback) so a "continue locally" guest in a *configured*
+  // build has a real identity. The local-only rehydrate effect below is skipped
+  // when configured, so this is the configured path's equivalent. setState only
+  // runs inside this async callback (never synchronously in an effect body), so
+  // the React Compiler's no-setState-in-effect rule holds.
+  const hydrateLocalIdentity = useCallback(async () => {
+    let record: LocalBabyRecord | null = null;
+    try {
+      record = parseLocalBaby(await AsyncStorage.getItem(LOCAL_BABY_STORAGE_KEY));
+    } catch {
+      record = null;
+    }
+    if (!mounted.current) return;
+    if (record) {
+      setCaregiver(record.caregiver);
+      setBaby(record.baby);
+      setCaregivers([record.caregiver]);
+    } else {
+      setCaregiver(seedCaregivers[0] ?? null);
+      setBaby(seedBaby);
+      setCaregivers(seedCaregivers);
+    }
+  }, []);
+
+  // Apply a resolved session to the status machine, honoring a standing "continue
+  // locally" preference: a configured build with NO session and the flag set
+  // renders the app local-first (local-only) rather than the account-entry
+  // surface — so a returning guest is never re-walled. With a session, evaluate()
+  // owns the path and the flag is irrelevant. Centralizing this keeps the
+  // bootstrap and the auth-change listener from diverging on the null case.
+  const applySession = useCallback(
+    async (next: Session | null) => {
+      if (!next && prefersLocalRef.current) {
+        if (mounted.current) setSession(null);
+        await hydrateLocalIdentity();
+        if (mounted.current) setStatus('local-only');
+        return;
+      }
+      await evaluate(next);
+    },
+    [evaluate, hydrateLocalIdentity],
+  );
+
   useEffect(() => {
     if (!configured) return;
     let active = true;
+    let unsub = () => {};
     (async () => {
-      const current = await getSupabaseSession();
-      if (active) await evaluate(current);
+      // Read the session AND the local-first preference before wiring the auth
+      // listener, so the initial INITIAL_SESSION(null) emit can't transiently
+      // flash the account-entry surface for a returning "continue locally" guest.
+      const [current, storedPref] = await Promise.all([
+        getSupabaseSession(),
+        AsyncStorage.getItem(PREFERS_LOCAL_STORAGE_KEY).catch(() => null),
+      ]);
+      if (!active) return;
+      prefersLocalRef.current = storedPref === 'true';
+      await applySession(current);
+      if (!active) return;
+      // Re-evaluate on any later auth change. Defer out of the callback (Supabase
+      // warns against awaiting client calls directly inside onAuthStateChange).
+      unsub = onSupabaseAuthChange((next) => {
+        setTimeout(() => {
+          void applySession(next);
+        }, 0);
+      });
     })();
-    // Re-evaluate on any auth change. Defer out of the callback (Supabase warns
-    // against awaiting client calls directly inside onAuthStateChange).
-    const unsub = onSupabaseAuthChange((next) => {
-      setTimeout(() => {
-        void evaluate(next);
-      }, 0);
-    });
     return () => {
       active = false;
       unsub();
     };
-  }, [configured, evaluate]);
+  }, [configured, applySession]);
 
-  // Local-only builds rehydrate a previously-created local baby on cold launch so
-  // a returning parent sees their baby, not the seed. Absent → the seed fallback
-  // set in initial state stays. Configured builds resolve identity via `evaluate`,
-  // so this is skipped there.
+  // Keep the access token fresh while the app is actually in use. Supabase only
+  // runs its refresh ticker between startAutoRefresh()/stopAutoRefresh(); the
+  // documented React Native pattern is to drive those off AppState so the token
+  // refreshes in the foreground and the timer is released in the background
+  // (RN background timers are throttled/unreliable). Configured builds only —
+  // the local-only demo has no Supabase session to refresh. No setState here, so
+  // the React Compiler's no-setState-in-effect rule is satisfied.
+  useEffect(() => {
+    if (!configured || !supabase) return;
+    const client = supabase;
+    // AppState only emits on *transitions*, so prime the ticker when we mount
+    // already foregrounded (a cold launch straight into the active app).
+    if (AppState.currentState === 'active') void client.auth.startAutoRefresh();
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next === 'active') {
+        void client.auth.startAutoRefresh();
+      } else {
+        void client.auth.stopAutoRefresh();
+      }
+    });
+    return () => {
+      subscription.remove();
+      // Release the ticker when the provider unmounts so it can't outlive auth.
+      void client.auth.stopAutoRefresh();
+    };
+  }, [configured]);
+
+  // Auth deep links (lullaby://auth-callback — Google OAuth, password reset, email
+  // confirmation) are completed by the dedicated `src/app/auth-callback.tsx` route,
+  // which is the SINGLE owner of the session exchange. We deliberately do NOT also
+  // exchange here: the PKCE code + verifier are single-use, so a second exchanger
+  // racing the route would consume the code first and make the route's exchange
+  // fail — surfacing the "Could not finish signing in" screen even on a successful
+  // sign-in. The route's exchange still flows through onSupabaseAuthChange →
+  // applySession, so this provider reacts to the resulting SIGNED_IN exactly as
+  // before. (An earlier redirect listener lived here and caused that race; it was
+  // removed in favor of the route.)
+
+  // Unconfigured (local demo) cold-launch bootstrap. With no Supabase env there is
+  // never a session, so the only question is which surface to show after
+  // onboarding: the account-entry surface once (a guest who has NOT made an
+  // account decision yet) or the local app directly (a returning guest who already
+  // tapped "Continue locally"). This is what makes the account entry VISIBLE after
+  // onboarding even when Supabase is not configured — previously this build sat
+  // permanently in 'local-only' and the entry never appeared. Either way the local
+  // identity is hydrated from the onboarding-persisted baby (or the seed fallback),
+  // so the entry's "Continue locally" lands the parent on their real baby. The
+  // decision is the shared, pure resolveNoSessionStatus (same rule the configured
+  // no-session path uses). Configured builds resolve identity + session via the
+  // bootstrap above, so this is skipped there. setState only runs inside the async
+  // callback, so the React Compiler's no-setState-in-effect rule holds.
   useEffect(() => {
     if (configured) return;
     let active = true;
     (async () => {
+      let storedPref: string | null = null;
       try {
-        const record = parseLocalBaby(await AsyncStorage.getItem(LOCAL_BABY_STORAGE_KEY));
-        if (active && record) {
-          setCaregiver(record.caregiver);
-          setBaby(record.baby);
-          setCaregivers([record.caregiver]);
-        }
+        storedPref = await AsyncStorage.getItem(PREFERS_LOCAL_STORAGE_KEY);
       } catch {
-        // keep the seed fallback
+        storedPref = null;
       }
+      if (!active || !mounted.current) return;
+      prefersLocalRef.current = storedPref === 'true';
+      await hydrateLocalIdentity();
+      if (!active || !mounted.current) return;
+      setStatus(resolveNoSessionStatus(prefersLocalRef.current));
     })();
     return () => {
       active = false;
     };
-  }, [configured]);
+  }, [configured, hydrateLocalIdentity]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     if (!supabase) return;
@@ -226,9 +421,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
       });
       // Success → onAuthStateChange drives evaluate(); only surface failures here.
-      if (error && mounted.current) setErrorMessage(error.message);
+      // Raw GoTrue messages are terse/technical, so map them to calm copy.
+      if (error && mounted.current) {
+        setErrorMessage(calmAuthErrorMessage(error, 'Could not sign in just now. Please try again.'));
+      }
     } catch (e) {
-      if (mounted.current) setErrorMessage(messageFrom(e, 'Could not sign in. Please try again.'));
+      if (mounted.current) {
+        setErrorMessage(calmAuthErrorMessage(e, 'Could not sign in just now. Please try again.'));
+      }
     } finally {
       if (mounted.current) setBusy(false);
     }
@@ -242,17 +442,147 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
       if (error) {
-        if (mounted.current) setErrorMessage(error.message);
+        if (mounted.current) {
+          setErrorMessage(
+            calmAuthErrorMessage(error, 'Could not create your account just now. Please try again.'),
+          );
+        }
         return;
       }
       // No session means the project requires email confirmation first.
       if (!data.session && mounted.current) {
-        setPendingMessage('Account created. Confirm via the email we sent, then sign in.');
+        setPendingMessage('Account created. Tap the link in the email we just sent, then sign in.');
       }
     } catch (e) {
       if (mounted.current) {
-        setErrorMessage(messageFrom(e, 'Could not create the account. Please try again.'));
+        setErrorMessage(
+          calmAuthErrorMessage(e, 'Could not create your account just now. Please try again.'),
+        );
       }
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  }, []);
+
+  // Native Apple sign-in (iOS). The system sheet returns a short-lived identity
+  // token (a signed JWT); Supabase verifies it and mints a session via
+  // signInWithIdToken — the same onAuthStateChange → applySession path email
+  // sign-in uses, so we only surface failures here, never set the session
+  // ourselves. A cancelled sheet is a calm no-op. Gated to iOS + a configured
+  // client (expo-apple-authentication has no Android/web implementation); the UI
+  // already hides the affordance elsewhere, so this is defense in depth. The
+  // native flow needs no nonce (the documented Supabase/Expo path); errors route
+  // through the shared calm-copy mapper. setState only runs inside this async
+  // callback, never synchronously in an effect, so the React Compiler rule holds.
+  const signInWithApple = useCallback(async () => {
+    if (!supabase || Platform.OS !== 'ios') return;
+    setBusy(true);
+    setErrorMessage(null);
+    setPendingMessage(null);
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      const idToken = credential.identityToken;
+      if (!idToken) {
+        // Apple authenticated but returned no token — rare; treat as a soft retry.
+        if (mounted.current) {
+          setErrorMessage('Could not sign in with Apple just now. Please try again.');
+        }
+        return;
+      }
+      const { error } = await supabase.auth.signInWithIdToken({
+        provider: 'apple',
+        token: idToken,
+      });
+      if (error && mounted.current) {
+        setErrorMessage(
+          calmAuthErrorMessage(error, 'Could not sign in with Apple just now. Please try again.'),
+        );
+      }
+    } catch (e) {
+      // The parent dismissed the system sheet — not a failure, stay quiet.
+      if (isAppleCancel(e)) return;
+      if (mounted.current) {
+        setErrorMessage(
+          calmAuthErrorMessage(e, 'Could not sign in with Apple just now. Please try again.'),
+        );
+      }
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  }, []);
+
+  // Google sign-in (iOS + Android) via the system browser. We deliberately use the
+  // OAuth/browser flow rather than a native sign-in module: it needs no extra
+  // native config and keeps the Android build path untouched. `startGoogleOAuth`
+  // owns the Supabase `signInWithOAuth` → browser round-trip → `completeAuthRedirect`
+  // exchange; on success the session lands via onAuthStateChange → applySession (we
+  // set no session here, mirroring signIn / signInWithApple). A dismissed browser
+  // is a calm no-op. Gated to a configured client + a Google OAuth client ID in env
+  // + non-web; the UI already hides the button elsewhere, so this is defense in
+  // depth. A non-cancel failure shows one calm line (the underlying reasons are
+  // technical — init/exchange — not parent-actionable). setState only runs inside
+  // this async callback, so the React Compiler's no-setState-in-effect rule holds.
+  const signInWithGoogle = useCallback(async () => {
+    if (!supabase || !isGoogleSignInConfigured || Platform.OS === 'web') return;
+    setBusy(true);
+    setErrorMessage(null);
+    setPendingMessage(null);
+    try {
+      // startGoogleOAuth always resolves now (its non-interactive steps are
+      // timed out), so the `finally` below always clears `busy` — no more stuck
+      // spinner. 'success' lands via onAuthStateChange → applySession; 'canceled'
+      // is a calm no-op; 'error'/timeout surface one calm, recoverable line.
+      const outcome = await startGoogleOAuth(supabase);
+      if (outcome.status === 'error' && mounted.current) {
+        if (__DEV__) console.warn(`[auth] signInWithGoogle: ${outcome.error}`);
+        setErrorMessage('Could not sign in with Google just now. Please try again.');
+      }
+    } catch (e) {
+      if (mounted.current) {
+        setErrorMessage(
+          calmAuthErrorMessage(e, 'Could not sign in with Google just now. Please try again.'),
+        );
+      }
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  }, []);
+
+  // Send a password-reset email. Supabase intentionally returns success even for
+  // an unknown address (anti-enumeration), so the calling screen shows the same
+  // calm "check your inbox" copy regardless — only a real transport/rate-limit
+  // failure surfaces, mapped to calm copy. `redirectTo` is our gated deep link
+  // (lullaby://auth-callback); it's harmless until the project allowlists it.
+  const resetPassword = useCallback(async (email: string): Promise<boolean> => {
+    if (!supabase) return false;
+    setBusy(true);
+    setErrorMessage(null);
+    setPendingMessage(null);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: getAuthRedirectUrl(),
+      });
+      if (error) {
+        if (mounted.current) {
+          setErrorMessage(
+            calmAuthErrorMessage(error, 'Could not start a password reset just now. Please try again.'),
+          );
+        }
+        return false;
+      }
+      return true;
+    } catch (e) {
+      if (mounted.current) {
+        setErrorMessage(
+          calmAuthErrorMessage(e, 'Could not start a password reset just now. Please try again.'),
+        );
+      }
+      return false;
     } finally {
       if (mounted.current) setBusy(false);
     }
@@ -334,13 +664,70 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // "Continue locally" — the guest chooses to keep using Lullaby without an
+  // account from the account-entry surface. Persist the choice (so the surface
+  // doesn't reappear next launch), hydrate the local identity, then drop into
+  // 'local-only' — the same state an unconfigured build runs in, so the app
+  // renders on the local repository with no forced sign-up. This is an event
+  // handler, not an effect, so setState here is fine under the React Compiler.
+  const continueLocally = useCallback(async () => {
+    // Set the ref first so any in-flight auth-change null emit also resolves to
+    // local-only (not the wall) before the persisted write even lands.
+    prefersLocalRef.current = true;
+    try {
+      await AsyncStorage.setItem(PREFERS_LOCAL_STORAGE_KEY, 'true');
+    } catch {
+      // best-effort — a failed write only means the surface may reappear later
+    }
+    await hydrateLocalIdentity();
+    if (mounted.current) {
+      setErrorMessage(null);
+      setStatus('local-only');
+    }
+  }, [hydrateLocalIdentity]);
+
+  // "Create account or sign in" from the in-app account surface — the inverse of
+  // continueLocally(). Clear the sticky local-first preference (ref first, then
+  // the persisted flag) so a no-session resolution can no longer bounce back to
+  // local-only, then drop to 'signed-out' where AuthGate shows AccountEntryScreen.
+  // No local data is touched: the persisted baby/night survive, so "Continue
+  // locally" round-trips the guest back unchanged. Configured builds only; it's an
+  // event handler, not an effect, so setState here is fine under the React Compiler.
+  const goToAccountEntry = useCallback(async () => {
+    if (!configured) return;
+    prefersLocalRef.current = false;
+    try {
+      await AsyncStorage.removeItem(PREFERS_LOCAL_STORAGE_KEY);
+    } catch {
+      // best-effort — a failed clear only risks a re-bounce to local on relaunch
+    }
+    if (mounted.current) {
+      setErrorMessage(null);
+      setStatus('signed-out');
+    }
+  }, [configured]);
+
+  // Sign out — drop the Supabase session and return to 'signed-out'. Hygiene:
+  //  - Auth session/storage IS cleared: supabase.auth.signOut() calls the
+  //    SecureStore adapter's removeItem, which deletes the session manifest AND
+  //    every chunk (no token fragment is left in the keystore); then
+  //    onAuthStateChange → evaluate(null) drops the in-memory caregiver/baby and
+  //    AuthGate unmounts the signed-in app surface.
+  //  - Local-first data is deliberately PRESERVED: we do NOT clear the local
+  //    night (lullaby/local-events/v1), local baby (lullaby/local-baby/v1) or
+  //    Logging-v2 store (lullaby/logging-v2/v1). In a configured build the
+  //    signed-in night persists to Supabase, never those stores (LocalEvent
+  //    Provider writes AsyncStorage only in local-only mode), so there is no
+  //    signed-in cached night to leak — those keys only ever hold local-first /
+  //    guest data, which must survive a sign-out. The handoff cursor is already
+  //    per-<caregiver:baby> scoped, so it can't bleed between accounts either.
+  //    Clearing any of them would destroy guest data for no hygiene benefit.
   const signOut = useCallback(async () => {
     if (!supabase) return;
     setBusy(true);
     setErrorMessage(null);
     try {
       await supabase.auth.signOut();
-      // onAuthStateChange → evaluate() → 'signed-out'.
     } catch (e) {
       if (mounted.current) setErrorMessage(messageFrom(e, 'Could not sign out.'));
     } finally {
@@ -362,8 +749,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       errorMessage,
       signIn,
       signUp,
+      signInWithApple,
+      signInWithGoogle,
+      resetPassword,
       completeSetup,
       createLocalBaby,
+      continueLocally,
+      goToAccountEntry,
       joinWithInvite,
       signOut,
       clearError,
@@ -379,8 +771,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       errorMessage,
       signIn,
       signUp,
+      signInWithApple,
+      signInWithGoogle,
+      resetPassword,
       completeSetup,
       createLocalBaby,
+      continueLocally,
+      goToAccountEntry,
       joinWithInvite,
       signOut,
       clearError,

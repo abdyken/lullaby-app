@@ -9,6 +9,7 @@
  * and the 4-item timeline cap.
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   addDiaper,
@@ -57,6 +58,15 @@ import {
 import type { Caregiver, LogEvent, LogEventType } from '../src/data/models';
 import { resolveSurfaceMode } from '../src/theme';
 import { parsePersistedState, serializeState } from '../src/data/persistedState';
+// Guest / local-first data preservation contract (auth Step 08) — the keys that
+// must survive every auth transition + the "no silent data loss" predicate.
+import {
+  GUEST_OWNED_STORAGE_KEYS,
+  LOCAL_BABY_STORAGE_KEY,
+  LOCAL_EVENTS_STORAGE_KEY,
+  LOGGING_STORAGE_KEY,
+  isGuestDataPreserved,
+} from '../src/data/guestData';
 import {
   ONBOARDING_COMPLETE_KEY,
   isForceOnboardingEnabled,
@@ -80,6 +90,26 @@ import {
   hasOnboardingNightShiftChoice,
   type OnboardingNightShiftChoice,
 } from '../src/components/onboarding/onboardingNightShift';
+// Auth Phase 1 — secure session storage: the pure chunking core behind the
+// SecureStore adapter. The adapter itself (secureSessionStore.ts) imports
+// react-native / expo-secure-store and can't load here, so the chunk logic lives
+// in this dependency-free leaf and is covered directly.
+import {
+  CHUNK_SIZE,
+  createChunkedStorage,
+  splitIntoChunks,
+  type ChunkBackend,
+} from '../src/lib/chunkedSessionStorage';
+// Auth deep-link foundation (Step 04) — the pure redirect parser behind the
+// password-reset / email-confirmation handler. authLinking.ts imports
+// expo-linking + the Supabase client and can't load here, so the parsing logic
+// lives in this dependency-free leaf and is covered directly.
+import { AUTH_CALLBACK_PATH, parseAuthRedirect } from '../src/lib/authRedirect';
+// Account-entry visibility (this task) — the pure "no Supabase session → which
+// surface?" decision behind the AuthProvider bootstrap.
+import { resolveNoSessionStatus } from '../src/state/authStatusResolver';
+// Pure-JS SHA-256 behind the WebCrypto polyfill (PKCE S256 code challenge).
+import { sha256Bytes } from '../src/lib/sha256';
 // Logging v2 foundation (plan Phase 1.1) — new model lives beside the legacy one.
 import { createManualClock, systemClock } from '../src/features/logging/timer/clock';
 import { newClientEventId, newUuid } from '../src/features/logging/domain/ids';
@@ -1262,6 +1292,512 @@ check('Z6. a returning parent with a timeline never sees the coach (started non-
   assert.equal(
     resolveFirstLogCoachPhase({ hydrated: true, dismissed: false, hasRealEvents: true, startedEmpty: false }),
     'hidden',
+  );
+});
+
+// AR. Auth deep-link redirect parsing (Step 04) — the pure classifier behind the
+// password-reset / email-confirmation deep-link foundation. Covers the implicit
+// (fragment tokens) + PKCE (query code) + error shapes Supabase redirects with,
+// and the "not an auth link → ignore" guard that keeps ordinary deep links safe.
+check('AR1. an implicit recovery redirect yields kind "recovery" with both tokens', () => {
+  const r = parseAuthRedirect('lullaby://auth-callback#access_token=aaa&refresh_token=bbb&type=recovery');
+  assert.ok(r);
+  assert.equal(r.kind, 'recovery');
+  assert.equal(r.accessToken, 'aaa');
+  assert.equal(r.refreshToken, 'bbb');
+  assert.equal(r.code, null);
+});
+
+check('AR2. an email-confirmation (signup) redirect is classified "signup"', () => {
+  const r = parseAuthRedirect('lullaby://auth-callback#access_token=x&refresh_token=y&type=signup');
+  assert.ok(r);
+  assert.equal(r.kind, 'signup');
+  assert.equal(r.accessToken, 'x');
+});
+
+check('AR3. a PKCE code redirect (query ?code=) carries the code', () => {
+  const r = parseAuthRedirect('lullaby://auth-callback?code=abc123');
+  assert.ok(r);
+  assert.equal(r.code, 'abc123');
+  assert.equal(r.accessToken, null);
+  assert.equal(r.kind, 'unknown'); // no `type` hint with a bare PKCE code
+});
+
+check('AR4. an error redirect is "error" with a decoded description', () => {
+  const r = parseAuthRedirect(
+    'lullaby://auth-callback#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired',
+  );
+  assert.ok(r);
+  assert.equal(r.kind, 'error');
+  assert.equal(r.errorCode, 'otp_expired');
+  assert.equal(r.errorDescription, 'Email link is invalid or has expired');
+});
+
+check('AR5. a non-auth URL (no credentials/error) returns null', () => {
+  assert.equal(parseAuthRedirect('lullaby://auth-callback'), null);
+  assert.equal(parseAuthRedirect('lullaby://tonight?ref=home'), null);
+  assert.equal(parseAuthRedirect('https://example.com/page?foo=bar'), null);
+});
+
+check('AR6. null / empty / non-string input is a calm null (no throw)', () => {
+  assert.equal(parseAuthRedirect(null), null);
+  assert.equal(parseAuthRedirect(undefined), null);
+  assert.equal(parseAuthRedirect(''), null);
+});
+
+check('AR7. params are read from both query and fragment together', () => {
+  // Supabase can place `type` in the query and tokens in the fragment.
+  const r = parseAuthRedirect('lullaby://auth-callback?type=recovery#access_token=t1&refresh_token=t2');
+  assert.ok(r);
+  assert.equal(r.kind, 'recovery');
+  assert.equal(r.accessToken, 't1');
+  assert.equal(r.refreshToken, 't2');
+});
+
+// GP. Guest / local-first data preservation (auth Step 08). The guest baby +
+// local logs must survive every auth transition a guest can reach — opening the
+// account-entry surface, sign-in, sign-up, sign-out, and an app restart — with no
+// destructive clear before an explicit, confirmed action. GP1–GP3 pin the
+// preservation contract (src/data/guestData.ts) against the REAL serializers;
+// GP4–GP6 read the auth state machine's source and guard its transitions so a
+// future edit can't silently re-introduce a guest-data wipe. The pure modules
+// can't import AuthProvider/LocalEventProvider (React Native), so the transition
+// guards scan source text — the only way to cover them here. See
+// docs/auth/guest-data-preservation.md.
+const AUTH_PROVIDER_SRC = readFileSync(
+  new URL('../src/state/AuthProvider.tsx', import.meta.url),
+  'utf8',
+);
+const LOCAL_EVENT_PROVIDER_SRC = readFileSync(
+  new URL('../src/state/LocalEventProvider.tsx', import.meta.url),
+  'utf8',
+);
+
+// A guest storage snapshot built with the production serializers, so the
+// round-trip below exercises real (de)serialization, not a stand-in.
+function seedGuestSnapshot(): Record<string, string> {
+  return {
+    [LOCAL_BABY_STORAGE_KEY]: serializeLocalBaby(
+      createLocalBaby({ babyName: 'Aria', caregiverName: 'Sam' }, NOW),
+    ),
+    [LOCAL_EVENTS_STORAGE_KEY]: serializeState(initTonightState(seedEvents)),
+    [LOGGING_STORAGE_KEY]: serializeLoggingSnapshot({ events: [], syncQueue: ['evt-1'] }),
+  };
+}
+
+check('GP1. the guest-owned key set is exactly the three local-first stores', () => {
+  assert.deepEqual(
+    [...GUEST_OWNED_STORAGE_KEYS],
+    ['lullaby/local-baby/v1', 'lullaby/local-events/v1', 'lullaby/logging-v2/v1'],
+  );
+  // The sticky "prefers local" flag and the Supabase session are auth-owned, not
+  // guest data — clearing them is allowed, so they must NOT be in the protected set.
+  const keys = GUEST_OWNED_STORAGE_KEYS as readonly string[];
+  assert.ok(!keys.includes('lullaby/auth/prefers-local/v1'));
+});
+
+check('GP2. guest data survives a transition that touches only auth/session keys', () => {
+  // Model "open account entry" (goToAccountEntry) + "sign out": both only remove
+  // auth-owned keys (the prefers-local flag here; sign-out also drops the chunked
+  // Supabase session, likewise not a guest key).
+  const before: Record<string, string> = {
+    ...seedGuestSnapshot(),
+    'lullaby/auth/prefers-local/v1': 'true',
+  };
+  const after: Record<string, string> = { ...before };
+  delete after['lullaby/auth/prefers-local/v1'];
+
+  assert.ok(isGuestDataPreserved(before, after));
+  // …and each store still re-parses to its original record (no silent corruption).
+  assert.equal(parseLocalBaby(after[LOCAL_BABY_STORAGE_KEY])?.baby.name, 'Aria');
+  const reEvents = parsePersistedState(after[LOCAL_EVENTS_STORAGE_KEY]);
+  assert.ok(reEvents !== null);
+  assert.equal(reEvents.events.length, initTonightState(seedEvents).events.length);
+  assert.deepEqual(parseLoggingSnapshot(after[LOGGING_STORAGE_KEY]), {
+    events: [],
+    syncQueue: ['evt-1'],
+  });
+});
+
+check('GP3. the preservation predicate catches a wipe (not vacuously true)', () => {
+  const before = seedGuestSnapshot();
+  const wiped: Record<string, string> = { ...before };
+  delete wiped[LOCAL_EVENTS_STORAGE_KEY]; // a sign-out that cleared the local night
+  assert.ok(!isGuestDataPreserved(before, wiped));
+  const corrupted: Record<string, string> = { ...before, [LOCAL_BABY_STORAGE_KEY]: '{}' };
+  assert.ok(!isGuestDataPreserved(before, corrupted));
+});
+
+check('GP4. AuthProvider never bulk-clears or removes a guest-owned store', () => {
+  // No nuclear clears anywhere in the auth state machine.
+  assert.ok(!/AsyncStorage\.clear\s*\(/.test(AUTH_PROVIDER_SRC), 'AuthProvider must not call AsyncStorage.clear()');
+  assert.ok(!/\.multiRemove\s*\(/.test(AUTH_PROVIDER_SRC), 'AuthProvider must not multiRemove keys');
+  // The only local-store clear is the onboarding baby mint (createLocalBaby drops
+  // the seed night). It must appear exactly once and never creep into a transition.
+  const clearCalls = AUTH_PROVIDER_SRC.match(/clearLocalEventStorage\s*\(/g) ?? [];
+  assert.equal(clearCalls.length, 1, 'clearLocalEventStorage must be called exactly once (createLocalBaby only)');
+  // The logging-v2 store is never even referenced here, so its clear() can't be wired to sign-out.
+  assert.ok(!AUTH_PROVIDER_SRC.includes('LOGGING_STORAGE_KEY'));
+  // Every removeItem in AuthProvider targets the auth-owned prefers-local flag —
+  // never the guest baby / night / logging stores.
+  const removeArgs = [...AUTH_PROVIDER_SRC.matchAll(/\.removeItem\(\s*([A-Za-z_][\w.]*)/g)].map((m) => m[1]);
+  assert.ok(removeArgs.length >= 1, 'expected at least one removeItem (the prefers-local clear)');
+  for (const arg of removeArgs) {
+    assert.equal(arg, 'PREFERS_LOCAL_STORAGE_KEY', `removeItem(${arg}) would drop a non-auth key`);
+  }
+});
+
+check('GP5. signOut clears only the Supabase session, never local-first data', () => {
+  // Isolate the signOut callback body (declaration → the next callback, clearError).
+  const start = AUTH_PROVIDER_SRC.indexOf('const signOut = useCallback');
+  const end = AUTH_PROVIDER_SRC.indexOf('const clearError', start);
+  assert.ok(start !== -1 && end !== -1 && end > start, 'could not locate the signOut callback');
+  const signOutBody = AUTH_PROVIDER_SRC.slice(start, end);
+  assert.ok(signOutBody.includes('supabase.auth.signOut()'), 'signOut must clear the Supabase session');
+  for (const forbidden of ['clearLocalEventStorage', 'removeItem', 'multiRemove', 'AsyncStorage']) {
+    assert.ok(!signOutBody.includes(forbidden), `signOut must not reference ${forbidden} (would touch guest data)`);
+  }
+});
+
+check('GP6. LocalEventProvider clears the local night only via the local-only debug reset', () => {
+  // The single repository.clear() lives in resetLocalEvents, which early-returns
+  // in Supabase mode and reseeds the demo locally — never reachable from an auth
+  // transition. Guard the count + the supabase-mode early return so no new clear
+  // path can slip in unnoticed.
+  const clears = LOCAL_EVENT_PROVIDER_SRC.match(/repositoryRef\.current\.clear\(\)/g) ?? [];
+  assert.equal(clears.length, 1, 'only resetLocalEvents may clear the local repository');
+  const clearIdx = LOCAL_EVENT_PROVIDER_SRC.indexOf('repositoryRef.current.clear()');
+  const guardWindow = LOCAL_EVENT_PROVIDER_SRC.slice(Math.max(0, clearIdx - 250), clearIdx);
+  assert.ok(
+    guardWindow.includes("=== 'supabase'") && guardWindow.includes('return;'),
+    'the local repository.clear() must stay behind the supabase-mode early return',
+  );
+});
+
+// AE. Account-entry visibility after onboarding. The account-entry surface must
+// be reachable after onboarding in BOTH a configured build (no session) and an
+// unconfigured local build — previously the unconfigured build sat permanently in
+// 'local-only' and the entry never appeared, and the Tonight baby-header account
+// tap was gated behind isSupabaseConfigured (inert in a local build). The
+// decision is the pure resolveNoSessionStatus; the RN screens/providers can't
+// load here, so the wiring is covered by GP-style source scans.
+const ACCOUNT_ENTRY_SRC = readFileSync(
+  new URL('../src/components/auth/AccountEntryScreen.tsx', import.meta.url),
+  'utf8',
+);
+const ACCOUNT_SHEET_SRC = readFileSync(
+  new URL('../src/components/auth/AccountSheet.tsx', import.meta.url),
+  'utf8',
+);
+const TONIGHT_SRC = readFileSync(
+  new URL('../src/app/(tabs)/index.tsx', import.meta.url),
+  'utf8',
+);
+const BABY_HEADER_SRC = readFileSync(
+  new URL('../src/components/BabyHeader.tsx', import.meta.url),
+  'utf8',
+);
+
+check('AE1. onboarding done + no account decision → the account entry is shown (signed-out)', () => {
+  assert.equal(resolveNoSessionStatus(false), 'signed-out');
+});
+
+check('AE2. a returning "Continue locally" guest is never re-walled (local-only)', () => {
+  assert.equal(resolveNoSessionStatus(true), 'local-only');
+});
+
+check('AE3. AuthProvider resolves the no-session/unconfigured launch via the shared resolver', () => {
+  assert.ok(
+    AUTH_PROVIDER_SRC.includes('resolveNoSessionStatus'),
+    'the bootstrap must use resolveNoSessionStatus so the account entry appears after onboarding',
+  );
+  // The unconfigured build must no longer pin itself to a permanent 'local-only'
+  // initial status — that was the bug that hid the entry.
+  assert.ok(
+    /useState<AuthStatus>\('loading'\)/.test(AUTH_PROVIDER_SRC),
+    'initial status should be loading until the prefers-local preference resolves',
+  );
+  assert.ok(
+    !/useState<AuthStatus>\(configured \? 'loading' : 'local-only'\)/.test(AUTH_PROVIDER_SRC),
+    'the unconfigured build must not start in a permanent local-only state',
+  );
+});
+
+check('AE4. the account entry keeps "Continue locally" and a calm state when Supabase is unconfigured', () => {
+  assert.ok(
+    ACCOUNT_ENTRY_SRC.includes('continueLocally'),
+    'Continue locally must remain the escape hatch (never force account creation)',
+  );
+  assert.ok(
+    ACCOUNT_ENTRY_SRC.includes('isSupabaseConfigured'),
+    'the entry must adapt to an unconfigured build, not hide silently',
+  );
+});
+
+check('AE5. the account surface is reopenable from Tonight in any build (not gated on Supabase config)', () => {
+  assert.ok(TONIGHT_SRC.includes('setAccountOpen(true)'), 'Tonight must open the account surface');
+  // The old gate (`isSupabaseConfigured ? () => setAccountOpen(true) : undefined`)
+  // left the header inert in a local build, so the baby head was the only entry.
+  assert.ok(
+    !/isSupabaseConfigured\s*\?\s*\(\)\s*=>\s*setAccountOpen/.test(TONIGHT_SRC),
+    'the account surface must not be gated behind isSupabaseConfigured',
+  );
+  // The in-app surface still shows a guest a calm local-only state.
+  assert.ok(ACCOUNT_SHEET_SRC.includes('isSupabaseConfigured'));
+});
+
+check('AE6. reaching the account entry never clears guest baby/log data (only the prefers-local flag moves)', () => {
+  const start = AUTH_PROVIDER_SRC.indexOf('const continueLocally = useCallback');
+  const end = AUTH_PROVIDER_SRC.indexOf('const goToAccountEntry', start);
+  assert.ok(start !== -1 && end !== -1 && end > start, 'could not locate the continueLocally callback');
+  const body = AUTH_PROVIDER_SRC.slice(start, end);
+  assert.ok(
+    body.includes('PREFERS_LOCAL_STORAGE_KEY'),
+    'continueLocally persists the sticky local-first choice',
+  );
+  for (const forbidden of [
+    'clearLocalEventStorage',
+    'multiRemove',
+    'LOCAL_BABY_STORAGE_KEY',
+    'LOCAL_EVENTS_STORAGE_KEY',
+  ]) {
+    assert.ok(!body.includes(forbidden), `continueLocally must not touch ${forbidden} (would lose guest data)`);
+  }
+});
+
+check('AE7. the main app has an explicit, labeled account entry (not only the baby-head tap)', () => {
+  // BabyHeader exposes a dedicated, labeled account affordance separate from the
+  // baby-profile press, so the account entry is discoverable.
+  assert.ok(BABY_HEADER_SRC.includes('onAccount'), 'BabyHeader must expose a dedicated account affordance');
+  assert.ok(
+    /accessibilityLabel="Account/.test(BABY_HEADER_SRC),
+    'the account button must be labeled for discoverability + a11y',
+  );
+  // …and Tonight actually wires it.
+  assert.ok(TONIGHT_SRC.includes('onAccount='), 'Tonight must wire the dedicated account entry');
+});
+
+// OC. OAuth / auth deep-link callback route. Supabase redirects Google sign-in
+// (and email links) back to lullaby://auth-callback; without a matching route
+// Expo Router showed "Unmatched Route". The fix is a real screen at
+// src/app/{AUTH_CALLBACK_PATH}.tsx that completes the session exchange via the
+// shared helpers. The route is an RN screen the pure runner can't import, so its
+// wiring + data-safety are covered by source scans (GP/AE-style).
+let AUTH_CALLBACK_SRC = '';
+try {
+  AUTH_CALLBACK_SRC = readFileSync(
+    new URL(`../src/app/${AUTH_CALLBACK_PATH}.tsx`, import.meta.url),
+    'utf8',
+  );
+} catch {
+  AUTH_CALLBACK_SRC = '';
+}
+const SUPABASE_SRC = readFileSync(new URL('../src/lib/supabase.ts', import.meta.url), 'utf8');
+const AUTH_LINKING_SRC = readFileSync(new URL('../src/lib/authLinking.ts', import.meta.url), 'utf8');
+const AUTH_GATE_SRC = readFileSync(new URL('../src/components/auth/AuthGate.tsx', import.meta.url), 'utf8');
+
+check('OC1. an Expo Router screen exists at the auth-callback path (no more Unmatched Route)', () => {
+  // The file name maps lullaby://auth-callback → app/auth-callback.tsx, so the
+  // redirect resolves to a real route instead of the built-in Unmatched Route.
+  assert.equal(AUTH_CALLBACK_PATH, 'auth-callback');
+  assert.ok(AUTH_CALLBACK_SRC.length > 0, `src/app/${AUTH_CALLBACK_PATH}.tsx must exist`);
+  assert.ok(/export default/.test(AUTH_CALLBACK_SRC), 'the route must default-export a screen component');
+});
+
+check('OC2. the callback route completes the Supabase exchange via the shared helpers', () => {
+  assert.ok(AUTH_CALLBACK_SRC.includes('parseAuthRedirect'), 'route parses the incoming deep link');
+  assert.ok(AUTH_CALLBACK_SRC.includes('completeAuthRedirect'), 'route runs the shared session exchange');
+  assert.ok(AUTH_CALLBACK_SRC.includes('AuthLoading'), 'route shows a calm loading state while processing');
+  assert.ok(/router\.replace\(/.test(AUTH_CALLBACK_SRC), 'route navigates into the app on completion');
+});
+
+check('OC3. a Google-style callback URL carries credentials the route can exchange', () => {
+  // PKCE: code in the query.
+  const byCode = parseAuthRedirect(`lullaby://${AUTH_CALLBACK_PATH}?code=abc123`);
+  assert.ok(byCode != null && byCode.code === 'abc123');
+  // Implicit: tokens in the fragment (the parser reads both query + fragment).
+  const byToken = parseAuthRedirect(
+    `lullaby://${AUTH_CALLBACK_PATH}#access_token=AAA&refresh_token=BBB`,
+  );
+  assert.ok(byToken != null && byToken.accessToken === 'AAA' && byToken.refreshToken === 'BBB');
+  // A bare callback with no credentials is not an auth redirect → route waits/errors.
+  assert.equal(parseAuthRedirect(`lullaby://${AUTH_CALLBACK_PATH}`), null);
+});
+
+check('OC4. the callback route never erases local baby/log data', () => {
+  for (const forbidden of [
+    'AsyncStorage',
+    'multiRemove',
+    'clearLocalEventStorage',
+    '.clear(',
+    'LOCAL_BABY_STORAGE_KEY',
+    'LOCAL_EVENTS_STORAGE_KEY',
+    'LOGGING_STORAGE_KEY',
+  ]) {
+    assert.ok(!AUTH_CALLBACK_SRC.includes(forbidden), `auth-callback must not reference ${forbidden}`);
+  }
+});
+
+check('OC5. the Supabase client uses the PKCE flow (?code= redirect survives Android deep links)', () => {
+  // Implicit flow returns tokens in the URL fragment, which Android strips from a
+  // custom-scheme deep link → callback arrives credential-less → endless loading.
+  assert.ok(/flowType:\s*'pkce'/.test(SUPABASE_SRC), "supabase client must set auth.flowType: 'pkce'");
+  // The exchange path the PKCE code needs must still be present in the helpers.
+  assert.ok(
+    AUTH_LINKING_SRC.includes('exchangeCodeForSession'),
+    'completeAuthRedirect must exchange a PKCE code for a session',
+  );
+});
+
+check('OC6. the callback route cannot hang forever (hard timeout → recoverable error)', () => {
+  assert.ok(/CALLBACK_TIMEOUT_MS/.test(AUTH_CALLBACK_SRC), 'route must define a callback timeout');
+  assert.ok(/setTimeout\(/.test(AUTH_CALLBACK_SRC), 'route must arm the timeout');
+  assert.ok(/clearTimeout\(/.test(AUTH_CALLBACK_SRC), 'route must clear the timeout on unmount');
+  // A timeout/failed exchange must land on the calm error surface, not the spinner.
+  assert.ok(AUTH_CALLBACK_SRC.includes("setPhase('error')"), 'route must reach a recoverable error state');
+  assert.ok(/Back to sign in/.test(AUTH_CALLBACK_SRC), 'the error surface must offer a way back');
+});
+
+check('OC7. the OAuth round-trip times out its non-interactive steps (no stuck spinner)', () => {
+  // The init (authorize URL) + exchange steps are raced against a timeout; the
+  // interactive browser wait is intentionally NOT timed out.
+  assert.ok(/OAUTH_STEP_TIMEOUT_MS/.test(AUTH_LINKING_SRC), 'startGoogleOAuth must define a step timeout');
+  assert.ok(
+    (AUTH_LINKING_SRC.match(/Promise\.race\(/g) ?? []).length >= 2,
+    'both the init and exchange steps must be raced against the timeout',
+  );
+  assert.ok(
+    /oauth_init_timeout/.test(AUTH_LINKING_SRC) && /oauth_exchange_timeout/.test(AUTH_LINKING_SRC),
+    'a timed-out init/exchange must resolve to a calm error outcome',
+  );
+});
+
+check('OC8. an error redirect is handled (calm error), never an infinite wait', () => {
+  // Supabase can bounce back with ?error=…; the parser classifies it and the
+  // route surfaces a recoverable error rather than spinning.
+  const errored = parseAuthRedirect(
+    `lullaby://${AUTH_CALLBACK_PATH}?error=access_denied&error_description=denied`,
+  );
+  assert.ok(errored != null && errored.kind === 'error');
+  assert.ok(
+    AUTH_CALLBACK_SRC.includes("redirect.kind === 'error'"),
+    'the route must short-circuit an error redirect to the calm error state',
+  );
+});
+
+check('OC9. AuthProvider does not also exchange the deep link (single exchanger — no PKCE race)', () => {
+  // The /auth-callback route is the SOLE owner of the session exchange. A second
+  // exchanger here would consume the single-use PKCE code first and make the route
+  // fail — the "Could not finish signing in" race. Guard so it can't creep back.
+  // Scan for the CALL forms (name + `(`) so an accurate prose mention in a doc
+  // comment (e.g. describing what startGoogleOAuth does internally) is not flagged.
+  assert.ok(
+    !/subscribeToAuthRedirects\s*\(/.test(AUTH_PROVIDER_SRC),
+    'AuthProvider must not re-subscribe to auth redirects (route is the single handler)',
+  );
+  assert.ok(
+    !/completeAuthRedirect\s*\(/.test(AUTH_PROVIDER_SRC),
+    'AuthProvider must not run a second code exchange',
+  );
+});
+
+check('OC10. the callback surfaces a dev-only reason + a calm no-credentials error (never infinite)', () => {
+  assert.ok(AUTH_CALLBACK_SRC.includes('devReason'), 'route must track a dev-only failure reason');
+  assert.ok(/__DEV__/.test(AUTH_CALLBACK_SRC), 'the reason must be gated to __DEV__ (calm copy in production)');
+  assert.ok(
+    AUTH_CALLBACK_SRC.includes('Missing code in callback'),
+    'a credential-less callback must resolve to a recoverable error, not a spinner',
+  );
+});
+
+check('OC11. Google sign-in clears its loading state on failure (no stuck spinner)', () => {
+  const start = AUTH_PROVIDER_SRC.indexOf('const signInWithGoogle = useCallback');
+  const end = AUTH_PROVIDER_SRC.indexOf('const resetPassword = useCallback', start);
+  assert.ok(start !== -1 && end !== -1 && end > start, 'could not locate the signInWithGoogle callback');
+  const body = AUTH_PROVIDER_SRC.slice(start, end);
+  assert.ok(/finally\s*{[\s\S]*setBusy\(false\)/.test(body), 'signInWithGoogle must clear busy in finally');
+});
+
+check('OC12. an authenticated user with no baby routes straight to baby setup (no onboarding intro)', () => {
+  const start = AUTH_GATE_SRC.indexOf("case 'needs-setup':");
+  const end = AUTH_GATE_SRC.indexOf("case 'ready':", start);
+  assert.ok(start !== -1 && end !== -1 && end > start, 'AuthGate must handle needs-setup before ready');
+  const seg = AUTH_GATE_SRC.slice(start, end);
+  assert.ok(seg.includes('BabySetupScreen'), 'needs-setup must render the baby setup form directly');
+  assert.ok(!seg.includes('OnboardingGate'), 'needs-setup must NOT replay the onboarding intro');
+});
+
+check('OC13. an authenticated user with a baby goes straight to the app (no onboarding intro)', () => {
+  const start = AUTH_GATE_SRC.indexOf("case 'ready':");
+  const end = AUTH_GATE_SRC.indexOf("case 'loading':", start);
+  assert.ok(start !== -1 && end !== -1 && end > start, 'AuthGate must handle ready before loading');
+  const seg = AUTH_GATE_SRC.slice(start, end);
+  assert.ok(seg.includes('{children}'), 'ready must render the app');
+  assert.ok(!seg.includes('OnboardingGate'), 'ready must NOT replay the onboarding intro');
+});
+
+check('OC14. no-session states still run onboarding first (intro→account entry; local-first preserved)', () => {
+  const so = AUTH_GATE_SRC.slice(
+    AUTH_GATE_SRC.indexOf("case 'signed-out':"),
+    AUTH_GATE_SRC.indexOf("case 'needs-setup':"),
+  );
+  assert.ok(
+    so.includes('OnboardingGate') && so.includes('AccountEntryScreen'),
+    'signed-out must show onboarding then the account-entry surface',
+  );
+  const lo = AUTH_GATE_SRC.slice(
+    AUTH_GATE_SRC.indexOf("case 'local-only':"),
+    AUTH_GATE_SRC.indexOf("case 'signed-out':"),
+  );
+  assert.ok(lo.includes('OnboardingGate'), 'local-only must run onboarding (creates the local baby) before the app');
+});
+
+check('OC15. the callback waits for the session (onAuthStateChange + poll) before declaring failure', () => {
+  // The fix for the false "Could not finish signing in" after a successful auth:
+  // detect success by the SESSION appearing (from this route or startGoogleOAuth),
+  // not by a single exchange call's result.
+  assert.ok(
+    AUTH_CALLBACK_SRC.includes('onAuthStateChange'),
+    'route must watch for a session landing from any exchanger',
+  );
+  assert.ok(/for \(let i = 0;/.test(AUTH_CALLBACK_SRC), 'route must poll for the session within the grace window');
+  assert.ok(AUTH_CALLBACK_SRC.includes('unsubscribe'), 'route must clean up the auth subscription on unmount');
+});
+
+check('OC16. a WebCrypto polyfill backs PKCE so GoTrue uses sha256, not plain (no warning)', () => {
+  const polyfill = readFileSync(new URL('../src/lib/cryptoPolyfill.ts', import.meta.url), 'utf8');
+  // The client must load the polyfill before createClient wires up PKCE auth.
+  assert.ok(SUPABASE_SRC.includes('./cryptoPolyfill'), 'supabase.ts must import the crypto polyfill');
+  assert.ok(/import '\.\/cryptoPolyfill'/.test(SUPABASE_SRC), 'the polyfill must be a side-effect import');
+  // The polyfill must provide BOTH pieces GoTrue PKCE needs.
+  assert.ok(/subtle/.test(polyfill) && /digest/.test(polyfill), 'polyfill must provide crypto.subtle.digest');
+  assert.ok(polyfill.includes('getRandomValues'), 'polyfill must provide crypto.getRandomValues for the verifier');
+  assert.ok(polyfill.includes('SHA256') || polyfill.includes('SHA-256'), 'digest must be SHA-256');
+  // PURE-JS only: a native module (expo-crypto / react-native-get-random-values)
+  // would crash an already-built dev client ("Cannot find native module …").
+  assert.ok(!/from ['"]expo-crypto['"]/.test(polyfill), 'polyfill must not import a native crypto module');
+  assert.ok(
+    !/from ['"]react-native-get-random-values['"]/.test(polyfill),
+    'polyfill must stay pure-JS (no native RNG module)',
+  );
+});
+
+check('OC17. the pure-JS SHA-256 matches the NIST test vectors (correct PKCE S256 challenge)', () => {
+  const enc = (s: string) => new Uint8Array(Buffer.from(s, 'utf8'));
+  const hex = (bytes: Uint8Array) =>
+    Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  assert.equal(hex(sha256Bytes(enc(''))), 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+  assert.equal(hex(sha256Bytes(enc('abc'))), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  assert.equal(
+    hex(sha256Bytes(enc('The quick brown fox jumps over the lazy dog'))),
+    'd7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592',
+  );
+  // A multi-block message (> 64 bytes) exercises the padding path used by long verifiers.
+  assert.equal(
+    hex(sha256Bytes(enc('a'.repeat(100)))),
+    '2816597888e4a0d3a36b82b83316ab32680eb8f00f8cd3b904d681246d285a0e',
   );
 });
 
@@ -3174,6 +3710,101 @@ async function runAsyncChecks(): Promise<void> {
     assert.ok((await startSleep(deps2, {})).ok); // a "second device" Start
     const activeSleeps = (await repo2.getActiveSessions(feedScope)).filter(isSleepEvent);
     assert.equal(activeSleeps.length, 1); // exactly one active sleep per child — never two
+  });
+
+  // SS. Secure session storage (auth Phase 1) — exercise the REAL chunked-storage
+  // logic that persists the Supabase auth session, against an in-memory backend.
+  // The adapter module (secureSessionStore.ts) imports react-native / expo-secure-
+  // store and can't load here, so the pure core was split into chunkedSessionStorage.ts;
+  // this covers chunk split, reassembly, the manifest, fault tolerance, leftover-
+  // chunk cleanup on shrink, and full removal on sign-out.
+  const createMemorySecureBackend = (): { store: Map<string, string>; backend: ChunkBackend } => {
+    const store = new Map<string, string>();
+    return {
+      store,
+      backend: {
+        // A real keystore returns null for an absent key; a stored value (even '')
+        // comes back verbatim — Map.get's undefined ?? null models exactly that.
+        getItemAsync: async (key) => store.get(key) ?? null,
+        setItemAsync: async (key, value) => {
+          store.set(key, value);
+        },
+        deleteItemAsync: async (key) => {
+          store.delete(key);
+        },
+      },
+    };
+  };
+  const SECURE_SESSION_KEY = 'sb-lullaby-auth-token';
+
+  await checkAsync('SS1. a small value round-trips as one chunk + a "1" manifest; an absent key is null', async () => {
+    const { store, backend } = createMemorySecureBackend();
+    const storage = createChunkedStorage(backend);
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), null); // nothing stored yet
+    await storage.setItem(SECURE_SESSION_KEY, 'session-token');
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), 'session-token');
+    assert.equal(store.get(SECURE_SESSION_KEY), '1'); // base key holds the chunk count
+    assert.equal(store.get(`${SECURE_SESSION_KEY}.chunk.0`), 'session-token');
+  });
+
+  await checkAsync('SS2. a value larger than CHUNK_SIZE splits into chunks and reassembles exactly', async () => {
+    const { store, backend } = createMemorySecureBackend();
+    const storage = createChunkedStorage(backend);
+    const big = 'A'.repeat(CHUNK_SIZE * 2 + 123); // spans 3 chunks
+    await storage.setItem(SECURE_SESSION_KEY, big);
+    assert.equal(store.get(SECURE_SESSION_KEY), '3'); // manifest reflects 3 chunks
+    assert.equal(store.get(`${SECURE_SESSION_KEY}.chunk.2`)?.length, 123); // last chunk is the remainder
+    assert.equal(store.get(`${SECURE_SESSION_KEY}.chunk.3`), undefined); // no extra chunk
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), big); // round-trips character-for-character
+  });
+
+  await checkAsync('SS3. splitIntoChunks handles empty, exact-boundary, and over-boundary lengths', async () => {
+    assert.deepEqual(splitIntoChunks(''), ['']); // empty → one (empty) chunk
+    assert.equal(splitIntoChunks('z'.repeat(CHUNK_SIZE)).length, 1); // exactly one chunk
+    const two = splitIntoChunks('z'.repeat(CHUNK_SIZE + 1));
+    assert.equal(two.length, 2);
+    assert.equal(two[0].length, CHUNK_SIZE);
+    assert.equal(two[1].length, 1);
+  });
+
+  await checkAsync('SS4. a missing interior chunk fails safe to null (never a half-decoded session)', async () => {
+    const { store, backend } = createMemorySecureBackend();
+    const storage = createChunkedStorage(backend);
+    await storage.setItem(SECURE_SESSION_KEY, 'B'.repeat(CHUNK_SIZE * 2 + 5)); // 3 chunks
+    store.delete(`${SECURE_SESSION_KEY}.chunk.1`); // simulate a torn/partial write
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), null);
+  });
+
+  await checkAsync('SS5. a corrupt or empty manifest reads as null', async () => {
+    const { store, backend } = createMemorySecureBackend();
+    const storage = createChunkedStorage(backend);
+    store.set(SECURE_SESSION_KEY, 'not-a-number');
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), null);
+    store.set(SECURE_SESSION_KEY, '0'); // a count < 1 is not a real session
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), null);
+    store.set(SECURE_SESSION_KEY, ''); // empty manifest
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), null);
+  });
+
+  await checkAsync('SS6. overwriting with a smaller value drops the leftover chunks (no stale bleed)', async () => {
+    const { store, backend } = createMemorySecureBackend();
+    const storage = createChunkedStorage(backend);
+    await storage.setItem(SECURE_SESSION_KEY, 'C'.repeat(CHUNK_SIZE * 3)); // 3 chunks
+    await storage.setItem(SECURE_SESSION_KEY, 'small'); // now 1 chunk
+    assert.equal(store.get(SECURE_SESSION_KEY), '1');
+    assert.equal(store.get(`${SECURE_SESSION_KEY}.chunk.1`), undefined); // stale chunks removed
+    assert.equal(store.get(`${SECURE_SESSION_KEY}.chunk.2`), undefined);
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), 'small');
+  });
+
+  await checkAsync('SS7. removeItem clears the manifest and every chunk (sign-out leaves nothing)', async () => {
+    const { store, backend } = createMemorySecureBackend();
+    const storage = createChunkedStorage(backend);
+    await storage.setItem(SECURE_SESSION_KEY, 'D'.repeat(CHUNK_SIZE + 10)); // 2 chunks
+    await storage.removeItem(SECURE_SESSION_KEY);
+    assert.equal(store.size, 0); // base key + both chunks gone
+    assert.equal(await storage.getItem(SECURE_SESSION_KEY), null);
+    await storage.removeItem(SECURE_SESSION_KEY); // idempotent — no throw on an empty store
   });
 }
 

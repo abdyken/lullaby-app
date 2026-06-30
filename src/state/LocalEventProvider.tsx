@@ -203,13 +203,22 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
         // orb is this device's interaction context (a "Feed logged" confirmation
         // shouldn't snap to calm when our own write echoes back, or when a
         // partner logs something). Cleaned up on unmount / sign-out below.
-        unsubscribe = repository.subscribe?.((remoteState) => {
+        const teardown = repository.subscribe?.((remoteState) => {
           if (cancelled) return;
           applyingRemoteRef.current = true;
           syncedEventsRef.current = remoteState.events;
           setState((prev) => ({ events: remoteState.events, orbView: prev.orbView }));
           setSyncStatus({ kind: 'synced', lastSyncedAt: new Date().toISOString() });
         });
+        // If this mount was torn down (StrictMode double-invoke / fast remount)
+        // while the async work above was in flight, the cleanup already ran with
+        // no unsubscribe to call — so close the just-opened channel right here
+        // instead of leaking it (which would collide with the next subscription).
+        if (cancelled) {
+          teardown?.();
+        } else {
+          unsubscribe = teardown;
+        }
       }
       setIsHydrated(true);
     })();
