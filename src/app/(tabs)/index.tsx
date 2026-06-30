@@ -279,6 +279,7 @@ export default function TonightScreen() {
         caregivers={caregivers}
         surfaceMode={bodyMode}
         onPress={() => setAccountOpen(true)}
+        onAccount={() => setAccountOpen(true)}
         onThemeToggle={handleThemeToggle}
         themeToggleDisabled={isTransitioning}
       />

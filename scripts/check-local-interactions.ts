@@ -1491,6 +1491,10 @@ const TONIGHT_SRC = readFileSync(
   new URL('../src/app/(tabs)/index.tsx', import.meta.url),
   'utf8',
 );
+const BABY_HEADER_SRC = readFileSync(
+  new URL('../src/components/BabyHeader.tsx', import.meta.url),
+  'utf8',
+);
 
 check('AE1. onboarding done + no account decision → the account entry is shown (signed-out)', () => {
   assert.equal(resolveNoSessionStatus(false), 'signed-out');
@@ -1557,6 +1561,18 @@ check('AE6. reaching the account entry never clears guest baby/log data (only th
   ]) {
     assert.ok(!body.includes(forbidden), `continueLocally must not touch ${forbidden} (would lose guest data)`);
   }
+});
+
+check('AE7. the main app has an explicit, labeled account entry (not only the baby-head tap)', () => {
+  // BabyHeader exposes a dedicated, labeled account affordance separate from the
+  // baby-profile press, so the account entry is discoverable.
+  assert.ok(BABY_HEADER_SRC.includes('onAccount'), 'BabyHeader must expose a dedicated account affordance');
+  assert.ok(
+    /accessibilityLabel="Account/.test(BABY_HEADER_SRC),
+    'the account button must be labeled for discoverability + a11y',
+  );
+  // …and Tonight actually wires it.
+  assert.ok(TONIGHT_SRC.includes('onAccount='), 'Tonight must wire the dedicated account entry');
 });
 
 // V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are
