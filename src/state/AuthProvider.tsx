@@ -48,6 +48,7 @@ import {
 import { isGoogleSignInConfigured } from '@/lib/googleAuth';
 import { hapticSuccess } from '@/lib/haptics';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { resolveNoSessionStatus } from '@/state/authStatusResolver';
 import {
   acceptInvite,
   ensureCaregiverSetup,
@@ -199,7 +200,11 @@ const PREFERS_LOCAL_STORAGE_KEY = 'lullaby/auth/prefers-local/v1';
 export function AuthProvider({ children }: { children: ReactNode }) {
   const configured = isSupabaseConfigured && supabase != null;
 
-  const [status, setStatus] = useState<AuthStatus>(configured ? 'loading' : 'local-only');
+  // Start in 'loading' for BOTH configured and unconfigured builds: the
+  // unconfigured build now reads the sticky "Continue locally" preference on cold
+  // launch (below) to decide between the account-entry surface and the local app,
+  // so it can no longer pin itself to a permanent 'local-only' that hid the entry.
+  const [status, setStatus] = useState<AuthStatus>('loading');
   const [session, setSession] = useState<Session | null>(null);
   // Local-only builds own an *active local baby/caregiver* here, above the gate,
   // so every read-site can resolve identity through `useAuth()` instead of
@@ -380,29 +385,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, [configured]);
 
-  // Local-only builds rehydrate a previously-created local baby on cold launch so
-  // a returning parent sees their baby, not the seed. Absent → the seed fallback
-  // set in initial state stays. Configured builds resolve identity via `evaluate`,
-  // so this is skipped there.
+  // Unconfigured (local demo) cold-launch bootstrap. With no Supabase env there is
+  // never a session, so the only question is which surface to show after
+  // onboarding: the account-entry surface once (a guest who has NOT made an
+  // account decision yet) or the local app directly (a returning guest who already
+  // tapped "Continue locally"). This is what makes the account entry VISIBLE after
+  // onboarding even when Supabase is not configured — previously this build sat
+  // permanently in 'local-only' and the entry never appeared. Either way the local
+  // identity is hydrated from the onboarding-persisted baby (or the seed fallback),
+  // so the entry's "Continue locally" lands the parent on their real baby. The
+  // decision is the shared, pure resolveNoSessionStatus (same rule the configured
+  // no-session path uses). Configured builds resolve identity + session via the
+  // bootstrap above, so this is skipped there. setState only runs inside the async
+  // callback, so the React Compiler's no-setState-in-effect rule holds.
   useEffect(() => {
     if (configured) return;
     let active = true;
     (async () => {
+      let storedPref: string | null = null;
       try {
-        const record = parseLocalBaby(await AsyncStorage.getItem(LOCAL_BABY_STORAGE_KEY));
-        if (active && record) {
-          setCaregiver(record.caregiver);
-          setBaby(record.baby);
-          setCaregivers([record.caregiver]);
-        }
+        storedPref = await AsyncStorage.getItem(PREFERS_LOCAL_STORAGE_KEY);
       } catch {
-        // keep the seed fallback
+        storedPref = null;
       }
+      if (!active || !mounted.current) return;
+      prefersLocalRef.current = storedPref === 'true';
+      await hydrateLocalIdentity();
+      if (!active || !mounted.current) return;
+      setStatus(resolveNoSessionStatus(prefersLocalRef.current));
     })();
     return () => {
       active = false;
     };
-  }, [configured]);
+  }, [configured, hydrateLocalIdentity]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     if (!supabase) return;
