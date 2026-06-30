@@ -104,7 +104,7 @@ import {
 // password-reset / email-confirmation handler. authLinking.ts imports
 // expo-linking + the Supabase client and can't load here, so the parsing logic
 // lives in this dependency-free leaf and is covered directly.
-import { parseAuthRedirect } from '../src/lib/authRedirect';
+import { AUTH_CALLBACK_PATH, parseAuthRedirect } from '../src/lib/authRedirect';
 // Account-entry visibility (this task) — the pure "no Supabase session → which
 // surface?" decision behind the AuthProvider bootstrap.
 import { resolveNoSessionStatus } from '../src/state/authStatusResolver';
@@ -1573,6 +1573,64 @@ check('AE7. the main app has an explicit, labeled account entry (not only the ba
   );
   // …and Tonight actually wires it.
   assert.ok(TONIGHT_SRC.includes('onAccount='), 'Tonight must wire the dedicated account entry');
+});
+
+// OC. OAuth / auth deep-link callback route. Supabase redirects Google sign-in
+// (and email links) back to lullaby://auth-callback; without a matching route
+// Expo Router showed "Unmatched Route". The fix is a real screen at
+// src/app/{AUTH_CALLBACK_PATH}.tsx that completes the session exchange via the
+// shared helpers. The route is an RN screen the pure runner can't import, so its
+// wiring + data-safety are covered by source scans (GP/AE-style).
+let AUTH_CALLBACK_SRC = '';
+try {
+  AUTH_CALLBACK_SRC = readFileSync(
+    new URL(`../src/app/${AUTH_CALLBACK_PATH}.tsx`, import.meta.url),
+    'utf8',
+  );
+} catch {
+  AUTH_CALLBACK_SRC = '';
+}
+
+check('OC1. an Expo Router screen exists at the auth-callback path (no more Unmatched Route)', () => {
+  // The file name maps lullaby://auth-callback → app/auth-callback.tsx, so the
+  // redirect resolves to a real route instead of the built-in Unmatched Route.
+  assert.equal(AUTH_CALLBACK_PATH, 'auth-callback');
+  assert.ok(AUTH_CALLBACK_SRC.length > 0, `src/app/${AUTH_CALLBACK_PATH}.tsx must exist`);
+  assert.ok(/export default/.test(AUTH_CALLBACK_SRC), 'the route must default-export a screen component');
+});
+
+check('OC2. the callback route completes the Supabase exchange via the shared helpers', () => {
+  assert.ok(AUTH_CALLBACK_SRC.includes('parseAuthRedirect'), 'route parses the incoming deep link');
+  assert.ok(AUTH_CALLBACK_SRC.includes('completeAuthRedirect'), 'route runs the shared session exchange');
+  assert.ok(AUTH_CALLBACK_SRC.includes('AuthLoading'), 'route shows a calm loading state while processing');
+  assert.ok(/router\.replace\(/.test(AUTH_CALLBACK_SRC), 'route navigates into the app on completion');
+});
+
+check('OC3. a Google-style callback URL carries credentials the route can exchange', () => {
+  // PKCE: code in the query.
+  const byCode = parseAuthRedirect(`lullaby://${AUTH_CALLBACK_PATH}?code=abc123`);
+  assert.ok(byCode != null && byCode.code === 'abc123');
+  // Implicit: tokens in the fragment (the parser reads both query + fragment).
+  const byToken = parseAuthRedirect(
+    `lullaby://${AUTH_CALLBACK_PATH}#access_token=AAA&refresh_token=BBB`,
+  );
+  assert.ok(byToken != null && byToken.accessToken === 'AAA' && byToken.refreshToken === 'BBB');
+  // A bare callback with no credentials is not an auth redirect → route waits/errors.
+  assert.equal(parseAuthRedirect(`lullaby://${AUTH_CALLBACK_PATH}`), null);
+});
+
+check('OC4. the callback route never erases local baby/log data', () => {
+  for (const forbidden of [
+    'AsyncStorage',
+    'multiRemove',
+    'clearLocalEventStorage',
+    '.clear(',
+    'LOCAL_BABY_STORAGE_KEY',
+    'LOCAL_EVENTS_STORAGE_KEY',
+    'LOGGING_STORAGE_KEY',
+  ]) {
+    assert.ok(!AUTH_CALLBACK_SRC.includes(forbidden), `auth-callback must not reference ${forbidden}`);
+  }
 });
 
 // V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are
