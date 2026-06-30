@@ -30,29 +30,55 @@ import { completeAuthRedirect, parseAuthRedirect } from '@/lib/authLinking';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts } from '@/theme';
 
+/**
+ * Hard ceiling on the whole callback. If the deep link never delivers usable
+ * credentials, or the Supabase token exchange stalls (offline, slow network),
+ * the screen flips to a recoverable error instead of spinning forever — the
+ * core fix for the "endless loading after choosing a Google account" report.
+ */
+const CALLBACK_TIMEOUT_MS = 15_000;
+
+/** Dev-only diagnostic. Never logs the URL/code/tokens — only a short reason. */
+function warnCallback(reason: string): void {
+  if (__DEV__) console.warn(`[auth] auth-callback: ${reason}`);
+}
+
 export default function AuthCallbackScreen() {
   // The full deep link that opened/resumed the app — includes the fragment, which
-  // expo-router strips for routing but the implicit-flow tokens live in.
+  // expo-router strips for routing but any implicit-flow tokens live in.
   const url = Linking.useURL();
   const [phase, setPhase] = useState<'working' | 'error'>('working');
-  // One-shot guard: a single-use PKCE code must never be exchanged twice across
-  // effect re-runs (useURL settling from null → the real URL).
-  const handled = useRef(false);
+  // One-shot outcome guard: whichever path (success / error / timeout) lands
+  // first wins, so a racing exchange or a late URL can't double-resolve.
+  const settled = useRef(false);
 
   useEffect(() => {
-    if (handled.current) return;
     let active = true;
+
+    const finish = (ok: boolean, reason?: string) => {
+      if (!active || settled.current) return;
+      settled.current = true;
+      if (ok) {
+        router.replace('/');
+      } else {
+        if (reason) warnCallback(reason);
+        setPhase('error');
+      }
+    };
+
+    // Safety net: nothing may keep the user on the spinner past the deadline.
+    const timer = setTimeout(() => finish(false, 'timed out completing sign-in'), CALLBACK_TIMEOUT_MS);
+
     void (async () => {
       // Prefer the live link; fall back to the cold-start launch URL.
       const incoming = url ?? (await Linking.getInitialURL().catch(() => null));
-      if (!active) return;
+      if (!active || settled.current) return;
 
       const client = supabase;
       // Unconfigured build (no Supabase): there is nothing to exchange — just
       // leave the interstitial and let AuthGate render the local app.
       if (!client) {
-        handled.current = true;
-        router.replace('/');
+        finish(true);
         return;
       }
 
@@ -60,40 +86,44 @@ export default function AuthCallbackScreen() {
       // AuthProvider's link listener — may already have established the session.
       // That is success: go straight into the app.
       const existing = await client.auth.getSession().catch(() => null);
-      if (!active) return;
+      if (!active || settled.current) return;
       if (existing?.data.session != null) {
-        handled.current = true;
-        router.replace('/');
+        finish(true);
         return;
       }
 
       const redirect = parseAuthRedirect(incoming);
       if (redirect == null) {
         // The URL hasn't been delivered yet → wait for useURL to provide it (the
-        // effect re-runs when `url` changes). A present-but-credential-less URL
-        // can't be completed here, so surface the calm error.
+        // effect re-runs when `url` changes; the timeout backstops the worst case).
+        // A present-but-credential-less URL can't be completed → calm error.
         if (incoming == null) return;
-        if (active) setPhase('error');
+        finish(false, 'redirect carried no auth credentials');
+        return;
+      }
+      if (redirect.kind === 'error') {
+        finish(false, `provider returned ${redirect.errorCode ?? 'an error'}`);
         return;
       }
 
-      handled.current = true;
       const result = await completeAuthRedirect(client, redirect);
-      if (!active) return;
+      if (!active || settled.current) return;
 
       // The PKCE code is single-use: if a racer exchanged it first, our call
       // returns an error even though sign-in actually succeeded — so trust a
       // now-present session over the exchange result.
       const after = await client.auth.getSession().catch(() => null);
-      if (!active) return;
+      if (!active || settled.current) return;
       if (result.ok || after?.data.session != null) {
-        router.replace('/');
+        finish(true);
       } else {
-        setPhase('error');
+        finish(false, result.error ?? 'session exchange failed');
       }
     })();
+
     return () => {
       active = false;
+      clearTimeout(timer);
     };
   }, [url]);
 

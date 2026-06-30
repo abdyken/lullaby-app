@@ -113,6 +113,28 @@ export type OAuthOutcome =
   | { status: 'error'; error: string };
 
 /**
+ * Timeout ceiling for the NON-interactive network steps of the OAuth round-trip:
+ * asking Supabase for the authorize URL, and exchanging the returned code/tokens
+ * for a session. These never wait on the human (that is `openAuthSessionAsync`,
+ * which is deliberately NOT timed out), so a stall here means the network is
+ * wedged — fail with a calm error instead of leaving the button spinning forever.
+ */
+const OAUTH_STEP_TIMEOUT_MS = 20_000;
+
+/** Sentinel resolved by the timeout leg of a Promise.race (distinct from any real value). */
+const OAUTH_TIMED_OUT = Symbol('oauth_timed_out');
+
+/** Resolve to OAUTH_TIMED_OUT after `ms`, so a hung step can't stall the flow. */
+function afterTimeout(ms: number): Promise<typeof OAUTH_TIMED_OUT> {
+  return new Promise((resolve) => setTimeout(() => resolve(OAUTH_TIMED_OUT), ms));
+}
+
+/** Dev-only diagnostic for OAuth failures. Never logs the URL, code, or tokens. */
+function warnOAuth(reason: string): void {
+  if (__DEV__) console.warn(`[auth] Google OAuth: ${reason}`);
+}
+
+/**
  * Run interactive Google sign-in via the system browser and land a Supabase
  * session — WITHOUT a native sign-in module (so the Android build path is
  * untouched and no extra native config is needed).
@@ -136,31 +158,61 @@ export async function startGoogleOAuth(client: SupabaseClient): Promise<OAuthOut
 
   let authorizeUrl: string | null;
   try {
-    const { data, error } = await client.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo,
-        // We open the browser ourselves (below) instead of a top-level redirect.
-        skipBrowserRedirect: true,
-        // Always show the account chooser rather than silently reusing one login.
-        queryParams: { prompt: 'select_account' },
-      },
-    });
-    if (error) return { status: 'error', error: error.message };
-    authorizeUrl = data?.url ?? null;
+    // Step 1 (non-interactive): ask Supabase for the authorize URL. Timed out so a
+    // wedged network can't leave the caller's busy spinner stuck before the browser
+    // even opens.
+    const init = await Promise.race([
+      client.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo,
+          // We open the browser ourselves (below) instead of a top-level redirect.
+          skipBrowserRedirect: true,
+          // Always show the account chooser rather than silently reusing one login.
+          queryParams: { prompt: 'select_account' },
+        },
+      }),
+      afterTimeout(OAUTH_STEP_TIMEOUT_MS),
+    ]);
+    if (init === OAUTH_TIMED_OUT) {
+      warnOAuth('timed out requesting the authorize URL');
+      return { status: 'error', error: 'oauth_init_timeout' };
+    }
+    if (init.error) {
+      warnOAuth(`init failed: ${init.error.message}`);
+      return { status: 'error', error: init.error.message };
+    }
+    authorizeUrl = init.data?.url ?? null;
   } catch (e) {
+    warnOAuth('init threw');
     return { status: 'error', error: e instanceof Error ? e.message : 'oauth_init_failed' };
   }
   if (authorizeUrl == null) return { status: 'error', error: 'no_oauth_url' };
 
+  // Step 2 (INTERACTIVE — never timed out): the parent picks an account/consents.
   const result = await WebBrowser.openAuthSessionAsync(authorizeUrl, redirectTo);
-  // Anything but a returned redirect URL is a dismissal/cancel — stay calm.
+  // Anything but a returned redirect URL is a dismissal/cancel — stay calm. The
+  // app-side /auth-callback route is the fallback if the redirect escaped the
+  // browser session as a deep link, so a "cancel" here is never a dead end.
   if (result.type !== 'success') return { status: 'canceled' };
 
   const redirect = parseAuthRedirect(result.url);
-  if (redirect == null) return { status: 'error', error: 'no_redirect_credentials' };
+  if (redirect == null) {
+    warnOAuth('browser returned no auth credentials');
+    return { status: 'error', error: 'no_redirect_credentials' };
+  }
 
-  const outcome = await completeAuthRedirect(client, redirect);
+  // Step 3 (non-interactive): exchange the code/tokens for a session, timed out so
+  // a stalled exchange can't hang the flow.
+  const outcome = await Promise.race([
+    completeAuthRedirect(client, redirect),
+    afterTimeout(OAUTH_STEP_TIMEOUT_MS),
+  ]);
+  if (outcome === OAUTH_TIMED_OUT) {
+    warnOAuth('timed out exchanging the code for a session');
+    return { status: 'error', error: 'oauth_exchange_timeout' };
+  }
+  if (!outcome.ok) warnOAuth(`exchange failed: ${outcome.error ?? 'unknown'}`);
   return outcome.ok
     ? { status: 'success' }
     : { status: 'error', error: outcome.error ?? 'exchange_failed' };

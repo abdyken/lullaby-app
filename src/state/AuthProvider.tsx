@@ -542,11 +542,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setErrorMessage(null);
     setPendingMessage(null);
     try {
+      // startGoogleOAuth always resolves now (its non-interactive steps are
+      // timed out), so the `finally` below always clears `busy` — no more stuck
+      // spinner. 'success' lands via onAuthStateChange → applySession; 'canceled'
+      // is a calm no-op; 'error'/timeout surface one calm, recoverable line.
       const outcome = await startGoogleOAuth(supabase);
       if (outcome.status === 'error' && mounted.current) {
+        if (__DEV__) console.warn(`[auth] signInWithGoogle: ${outcome.error}`);
         setErrorMessage('Could not sign in with Google just now. Please try again.');
       }
-      // 'canceled' → calm no-op; 'success' → onAuthStateChange → applySession.
     } catch (e) {
       if (mounted.current) {
         setErrorMessage(

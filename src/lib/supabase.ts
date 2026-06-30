@@ -45,6 +45,14 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
         autoRefreshToken: true,
         persistSession: true,
         detectSessionInUrl: false,
+        // PKCE flow: OAuth + email links return to lullaby://auth-callback with a
+        // `?code=` in the QUERY (exchanged via exchangeCodeForSession), rather than
+        // implicit `#access_token=…` tokens in the FRAGMENT. This matters on native:
+        // Android routinely drops the URL fragment when delivering a custom-scheme
+        // deep link, so an implicit redirect arrives with no credentials and the
+        // callback can never complete (the endless-loading bug). A query code
+        // survives intent delivery. App-side only — no credential/dashboard change.
+        flowType: 'pkce',
       },
     })
   : null;
