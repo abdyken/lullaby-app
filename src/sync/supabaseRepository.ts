@@ -43,6 +43,17 @@ const EVENTS_TABLE = 'events';
 /** Coalesce a burst of realtime changes into one re-read. */
 const REALTIME_DEBOUNCE_MS = 200;
 
+/**
+ * Monotonic suffix so every subscribe() opens a UNIQUE realtime topic
+ * (`events:<babyId>:<n>`). Supabase throws "cannot add postgres_changes callbacks
+ * … after subscribe()" if a `.on()` binds a channel whose topic is already
+ * subscribed — which happens when a re-subscribe (React effect re-run / StrictMode
+ * double-invoke) reuses the bare `events:<babyId>` topic before the previous
+ * channel has finished tearing down. A unique topic per call sidesteps the race;
+ * the postgres_changes `filter` (not the topic name) is what scopes the rows.
+ */
+let channelSeq = 0;
+
 export function createSupabaseRepository(
   client: SupabaseClient,
   context: SupabaseRepositoryContext,
@@ -131,8 +142,9 @@ export function createSupabaseRepository(
         }, REALTIME_DEBOUNCE_MS);
       };
 
+      channelSeq += 1;
       const channel: RealtimeChannel = client
-        .channel(`events:${context.babyId}`)
+        .channel(`events:${context.babyId}:${channelSeq}`)
         .on(
           'postgres_changes',
           {
