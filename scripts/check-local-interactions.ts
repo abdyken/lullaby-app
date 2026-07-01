@@ -1807,32 +1807,34 @@ check('OC11. Google sign-in clears its loading state on failure (no stuck spinne
   assert.ok(/finally\s*{[\s\S]*setBusy\(false\)/.test(body), 'signInWithGoogle must clear busy in finally');
 });
 
-check('OC12. an authenticated user with no baby routes to baby setup; the onboarding intro replays only under the dev force flag', () => {
+check('OC12. an authenticated user with no baby routes DIRECTLY to baby setup — the onboarding intro never replays after sign-in', () => {
   const start = AUTH_GATE_SRC.indexOf("case 'needs-setup':");
   const end = AUTH_GATE_SRC.indexOf("case 'ready':", start);
   assert.ok(start !== -1 && end !== -1 && end > start, 'AuthGate must handle needs-setup before ready');
   const seg = AUTH_GATE_SRC.slice(start, end);
   assert.ok(seg.includes('BabySetupScreen'), 'needs-setup must render the baby setup form');
-  // The intro is gated on the dev/QA override, never replayed unconditionally.
-  assert.ok(seg.includes('forceOnboarding'), 'needs-setup must gate the onboarding intro on the force flag');
-  // With the flag OFF (the ternary else branch), baby setup renders directly — no intro.
-  const elseBranch = seg.slice(seg.indexOf(') : ('));
-  assert.ok(elseBranch.includes('BabySetupScreen'), 'force-off needs-setup must render baby setup directly');
-  assert.ok(!elseBranch.includes('OnboardingGate'), 'force-off needs-setup must NOT replay the onboarding intro');
+  // Product-correct invariant (this was the "returns to onboarding" bug): a signed-in
+  // user must NEVER be routed back into the onboarding intro — not even under the dev
+  // force flag. The intro is a pre-account surface only (see OC14 / FO2).
+  assert.ok(!seg.includes('OnboardingGate'), 'needs-setup must NOT wrap the onboarding intro (no OnboardingGate)');
+  assert.ok(
+    !seg.includes('forceOnboarding'),
+    'needs-setup must not consult the force flag (authenticated states never replay onboarding)',
+  );
 });
 
-check('OC13. an authenticated user with a baby goes straight to the app; the onboarding intro replays only under the dev force flag', () => {
+check('OC13. an authenticated user with a baby goes straight to the app — the onboarding intro never replays after sign-in', () => {
   const start = AUTH_GATE_SRC.indexOf("case 'ready':");
   const end = AUTH_GATE_SRC.indexOf("case 'loading':", start);
   assert.ok(start !== -1 && end !== -1 && end > start, 'AuthGate must handle ready before loading');
   const seg = AUTH_GATE_SRC.slice(start, end);
   assert.ok(seg.includes('{children}'), 'ready must render the app');
-  // The intro is gated on the dev/QA override, never replayed unconditionally.
-  assert.ok(seg.includes('forceOnboarding'), 'ready must gate the onboarding intro on the force flag');
-  // With the flag OFF (the ternary else branch), the app renders directly — no intro.
-  const elseBranch = seg.slice(seg.indexOf(' : '));
-  assert.ok(elseBranch.includes('{children}'), 'force-off ready must render the app directly');
-  assert.ok(!elseBranch.includes('OnboardingGate'), 'force-off ready must NOT replay the onboarding intro');
+  // ready always renders the main app — never the onboarding intro, under any flag.
+  assert.ok(!seg.includes('OnboardingGate'), 'ready must NOT wrap the onboarding intro (no OnboardingGate)');
+  assert.ok(
+    !seg.includes('forceOnboarding'),
+    'ready must not consult the force flag (authenticated states never replay onboarding)',
+  );
 });
 
 // AC. Analytics ↔ AuthProvider require cycle broken (this task). `analytics.ts` is
@@ -1884,11 +1886,13 @@ check('AN4. analytics stays privacy-safe: fire-and-forget insert, never a client
   assert.ok(/void\s+supabase/.test(ANALYTICS_SRC), 'the insert must stay fire-and-forget (void, not awaited)');
 });
 
-// FO. EXPO_PUBLIC_FORCE_ONBOARDING as an ABSOLUTE dev/QA override (this task). The
-// pure force resolver is covered by G4-G6; these guard the AuthGate WIRING (an
-// authenticated user who already has a baby still reaches onboarding under the
-// flag) and the non-destructive contract (the override never clears/removes data
-// or signs out — it only re-renders the intro on top).
+// FO. EXPO_PUBLIC_FORCE_ONBOARDING is a dev/QA override for the PRE-ACCOUNT intro
+// ONLY. The pure force resolver is covered by G4-G6; these guard that the flag can
+// replay onboarding solely in the no-session flows (via OnboardingGate) and can
+// NEVER wrap an authenticated state — so a Google sign-in can't loop back into the
+// intro (the real-device "returns to onboarding again" bug) — plus the
+// non-destructive contract (AuthGate clears/removes nothing, never signs out) and
+// the data-safety of OnboardingScreen while a session exists.
 check('FO1. FORCE_ONBOARDING=true forces onboarding regardless of completion; off/unset preserves the prior decision (pure)', () => {
   // true → always 'needed', even when onboarding was already completed.
   assert.equal(resolveOnboardingGateState(true, { rawFlag: 'true', isDev: true }), 'needed');
@@ -1899,11 +1903,11 @@ check('FO1. FORCE_ONBOARDING=true forces onboarding regardless of completion; of
   assert.equal(isForceOnboardingEnabled({ rawFlag: 'true', isDev: false }), false);
 });
 
-check('FO2. AuthGate consults the force flag and gates BOTH authenticated states on it (baby present still reaches onboarding)', () => {
-  assert.ok(
-    AUTH_GATE_SRC.includes('isForceOnboardingEnabled'),
-    'AuthGate must consult isForceOnboardingEnabled for the QA override',
-  );
+check('FO2. the force flag NEVER wraps an authenticated state in OnboardingGate (the intro is pre-account only)', () => {
+  // The onboarding intro (which honors the force flag via resolveOnboardingGateState)
+  // is reachable ONLY from the no-session gates (signed-out / local-only, see OC14).
+  // Every authenticated state — authenticating, postAuthSync, needs-setup, ready —
+  // must stay OUT of OnboardingGate, so a signed-in user can never replay the intro.
   const needsSetup = AUTH_GATE_SRC.slice(
     AUTH_GATE_SRC.indexOf("case 'needs-setup':"),
     AUTH_GATE_SRC.indexOf("case 'ready':"),
@@ -1912,15 +1916,21 @@ check('FO2. AuthGate consults the force flag and gates BOTH authenticated states
     AUTH_GATE_SRC.indexOf("case 'ready':"),
     AUTH_GATE_SRC.indexOf("case 'loading':"),
   );
-  // Under the flag each authenticated surface is wrapped in OnboardingGate, so the
-  // intro replays even for a 'ready' user who already has a linked baby.
+  assert.ok(!needsSetup.includes('OnboardingGate'), 'needs-setup must not wrap the onboarding intro');
+  assert.ok(!ready.includes('OnboardingGate'), 'ready must not wrap the onboarding intro');
+  // Stronger: OnboardingGate may appear ONLY in the no-session cases. The whole
+  // authenticated region (needs-setup onward: authenticating, postAuthSync, loading
+  // included) must be free of it, so no future edit can re-introduce the replay loop.
+  const firstNoSession = AUTH_GATE_SRC.indexOf("case 'local-only':");
+  const authenticatedRegionStart = AUTH_GATE_SRC.indexOf("case 'needs-setup':");
   assert.ok(
-    needsSetup.includes('forceOnboarding') && needsSetup.includes('OnboardingGate'),
-    'needs-setup must replay onboarding when force-onboarding is on',
+    firstNoSession !== -1 && authenticatedRegionStart > firstNoSession,
+    'the no-session cases must precede the authenticated cases',
   );
+  const authenticatedRegion = AUTH_GATE_SRC.slice(authenticatedRegionStart);
   assert.ok(
-    ready.includes('forceOnboarding') && ready.includes('OnboardingGate'),
-    'ready (authenticated + baby) must replay onboarding when force-onboarding is on',
+    !authenticatedRegion.includes('OnboardingGate'),
+    'no authenticated case (needs-setup/ready/authenticating/postAuthSync/loading) may reference OnboardingGate',
   );
 });
 
@@ -1941,6 +1951,29 @@ check('FO3. the force override is non-destructive — AuthGate never clears data
       `AuthGate must not reference ${forbidden} (the QA override must not delete data or sign out)`,
     );
   }
+});
+
+const ONBOARDING_SCREEN_SRC = readFileSync(
+  new URL('../src/components/onboarding/OnboardingScreen.tsx', import.meta.url),
+  'utf8',
+);
+
+check('FO4. OnboardingScreen never mints a local baby while authenticated, and warns if it mounts with a session', () => {
+  // The creating step must not overwrite the account identity / clear local events
+  // when a Supabase session exists — createLocalBaby is gated behind `if (!session)`.
+  const createIdx = ONBOARDING_SCREEN_SRC.indexOf('createLocalBaby(pendingInputRef.current)');
+  assert.ok(createIdx !== -1, 'OnboardingScreen must still create the local baby in the no-session flow');
+  const guardIdx = ONBOARDING_SCREEN_SRC.lastIndexOf('if (!session)', createIdx);
+  assert.ok(
+    guardIdx !== -1 && guardIdx < createIdx,
+    'createLocalBaby must sit inside the `if (!session)` guard (no account overwrite while authenticated)',
+  );
+  // Defensive tripwire: a dev-only warning fires if OnboardingScreen ever mounts
+  // while a session exists (it must only ever mount in a pre-account, no-session flow).
+  assert.ok(
+    /authWarn\(/.test(ONBOARDING_SCREEN_SRC),
+    'OnboardingScreen must authWarn when it mounts with an active session',
+  );
 });
 
 check('OC14. no-session states still run onboarding first (intro→account entry; local-first preserved)', () => {

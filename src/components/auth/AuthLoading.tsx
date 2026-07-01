@@ -1,23 +1,15 @@
 /**
- * A calm full-screen placeholder while auth/provisioning resolves. Cream
- * background (never white/dark), a quiet spinner — no spinner-of-doom copy.
+ * A calm full-screen placeholder while auth/provisioning resolves. Delegates to
+ * the shared branded AuthTransition so every "resolving" surface — this, AuthGate's
+ * loading/authenticating/post-auth-sync states, and the /auth-callback interstitial
+ * — looks identical (the Lullaby logo mark + a quiet spinner on cream) instead of a
+ * bare spinner that reads as a blank flash. Kept as a named component so existing
+ * call sites (e.g. OnboardingGate) are untouched.
  */
-import { ActivityIndicator, View } from 'react-native';
-
-import { colors } from '@/theme';
+import { AuthTransition } from './AuthTransition';
 
 export function AuthLoading() {
-  return (
-    <View
-      style={{
-        flex: 1,
-        backgroundColor: colors.cream,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}>
-      <ActivityIndicator color={colors.sleep} />
-    </View>
-  );
+  return <AuthTransition />;
 }
 
 export default AuthLoading;

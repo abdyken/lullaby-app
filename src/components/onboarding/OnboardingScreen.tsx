@@ -36,6 +36,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { OrbSky } from '@/components/Orb';
 import { AuthButton } from '@/components/auth/AuthShell';
 import { birthDateFromWeeks, type CreateLocalBabyInput } from '@/data/localBaby';
+import { authWarn } from '@/lib/authLogger';
 import { useAuth } from '@/state/AuthProvider';
 import {
   colors,
@@ -61,6 +62,7 @@ import {
   hasOnboardingNightShiftChoice,
   type OnboardingNightShiftChoice,
 } from './onboardingNightShift';
+import { saveOnboardingDraft } from './onboardingStorage';
 import { useOnboardingFlow } from './useOnboardingFlow';
 
 type Props = {
@@ -686,7 +688,7 @@ function LinkButton({ label, color, onPress }: { label: string; color: string; o
 
 export function OnboardingScreen({ onComplete }: Props) {
   const flow = useOnboardingFlow();
-  const { createLocalBaby } = useAuth();
+  const { createLocalBaby, session } = useAuth();
   const reduceMotion = useReduceMotion();
   const insets = useSafeAreaInsets();
 
@@ -714,6 +716,17 @@ export function OnboardingScreen({ onComplete }: Props) {
   const [completionFailed, setCompletionFailed] = useState(false);
   const [handoffTextFade] = useState(() => new Animated.Value(1));
 
+  // Defensive tripwire (dev-only via authWarn): OnboardingScreen must ONLY ever
+  // mount in a no-session flow (signed-out / local-only). If a session exists we are
+  // in a bad route — a regression that would replay onboarding after sign-in — so
+  // warn. The createLocalBaby path below is independently gated on `!session`, so no
+  // account identity / local events are touched even if this ever fires.
+  useEffect(() => {
+    if (session != null) {
+      authWarn('OnboardingScreen mounted with an active session — onboarding must never replay after sign-in');
+    }
+  }, [session]);
+
   // Run the real completion exactly once on entering `creating`: write the local
   // baby + clear the seed night (createLocalBaby), then mark complete + reveal
   // Tonight (onComplete) — the §11 ordering. Local baby write stays best-effort;
@@ -725,12 +738,28 @@ export function OnboardingScreen({ onComplete }: Props) {
     let active = true;
     (async () => {
       if (!localBabyCreatedRef.current) {
+        // Persist the onboarding baby draft (non-sensitive: name + birth date) so a
+        // later Google/account sign-in can PREFILL baby setup instead of re-asking.
         try {
-          await createLocalBaby(pendingInputRef.current);
-          localBabyCreatedRef.current = true;
+          await saveOnboardingDraft({
+            babyName: pendingInputRef.current.babyName ?? null,
+            birthDate: pendingInputRef.current.birthDate ?? null,
+          });
         } catch {
-          // best-effort local write — losing it is not worth stranding the parent
+          // best-effort — a lost draft only means the setup form starts blank
         }
+        // Local-first ONLY: mint the local baby when there is NO Supabase session.
+        // With a session active (e.g. the dev force-onboarding replay), never
+        // overwrite the account identity or clear local events — the draft above
+        // carries the setup forward into account provisioning instead.
+        if (!session) {
+          try {
+            await createLocalBaby(pendingInputRef.current);
+          } catch {
+            // best-effort local write — losing it is not worth stranding the parent
+          }
+        }
+        localBabyCreatedRef.current = true;
       }
       try {
         await onComplete();
@@ -745,7 +774,7 @@ export function OnboardingScreen({ onComplete }: Props) {
     return () => {
       active = false;
     };
-  }, [flow, createLocalBaby, onComplete, completionAttempt, handoffTextFade]);
+  }, [flow, createLocalBaby, onComplete, completionAttempt, handoffTextFade, session]);
 
   useEffect(() => {
     if (flow.step !== 'creating') {

@@ -11,11 +11,12 @@
  * Copy stays honest and private — this is about your night log and your
  * caregiver, never a social/family-management surface.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
+import { loadOnboardingDraft } from '@/components/onboarding/onboardingStorage';
 import type { CaregiverRole } from '@/data/models';
-import { birthDateFromWeeks, parseWeeks } from '@/data/localBaby';
+import { birthDateFromWeeks, parseWeeks, weeksFromBirthDate } from '@/data/localBaby';
 import { useAuth } from '@/state/AuthProvider';
 import { colors, fonts, radii } from '@/theme';
 
@@ -83,6 +84,31 @@ export function BabySetupScreen() {
   const [weeks, setWeeks] = useState('');
   // join-only
   const [code, setCode] = useState('');
+
+  // Prefill the baby fields from the onboarding draft so a caregiver who just
+  // signed in never re-enters what onboarding already collected (name + age). Only
+  // fills still-empty fields (functional updater), so it never clobbers typing; the
+  // caregiver still confirms their own name + role, which onboarding never asked
+  // for. setState only runs inside the async callback, so the React Compiler's
+  // no-setState-in-effect rule holds.
+  useEffect(() => {
+    let active = true;
+    loadOnboardingDraft()
+      .then((draft) => {
+        if (!active || draft == null) return;
+        if (draft.babyName != null && draft.babyName.length > 0) {
+          setBabyName((cur) => (cur.length > 0 ? cur : draft.babyName ?? ''));
+        }
+        const draftWeeks = weeksFromBirthDate(draft.birthDate);
+        if (draftWeeks != null) {
+          setWeeks((cur) => (cur.length > 0 ? cur : String(draftWeeks)));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const weeksValue = parseWeeks(weeks);
   const nameOk = displayName.trim().length > 0;

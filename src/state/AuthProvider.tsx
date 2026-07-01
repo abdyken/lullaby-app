@@ -37,6 +37,7 @@ import {
 } from '@/data/localBaby';
 import { clearLocalEventStorage } from '@/data/localStorage';
 import { baby as seedBaby, caregivers as seedCaregivers } from '@/data/mock';
+import { clearOnboardingDraft } from '@/components/onboarding/onboardingStorage';
 import type { Baby, Caregiver, CaregiverRole } from '@/data/models';
 import { trackEvent } from '@/lib/analytics';
 import { calmAuthErrorMessage } from '@/lib/authErrors';
@@ -58,7 +59,19 @@ import {
 } from '@/sync';
 import type { Session } from '@supabase/supabase-js';
 
-export type AuthStatus = 'loading' | 'local-only' | 'signed-out' | 'needs-setup' | 'ready';
+export type AuthStatus =
+  | 'loading'
+  | 'local-only'
+  | 'signed-out'
+  // A Google/OAuth round-trip is in flight (browser open → session landing). Drives
+  // the branded transition so the account surface never flashes back mid-sign-in.
+  | 'authenticating'
+  // A session resolved and provisioning (linked baby + profile) is loading. Also
+  // drives the branded transition, so onboarding/account/stale screens never show
+  // while the post-auth status is still unknown.
+  | 'postAuthSync'
+  | 'needs-setup'
+  | 'ready';
 
 /** Fields the baby-setup step collects (color is derived from the role pick). */
 export type SetupFields = {
@@ -233,11 +246,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // auth-change callback without re-subscribing.
   const prefersLocalRef = useRef(false);
 
+  // Monotonic guard for overlapping evaluate() runs. The bootstrap read and the
+  // auth-change listener can both resolve a session, and a sign-out can race a
+  // just-resolved sign-in — so each run captures its id and bails the moment a
+  // newer run supersedes it, so a slower earlier run can never overwrite the
+  // status a newer one produced.
+  const evaluateSeqRef = useRef(0);
+
   // Map a session to a provisioning status. Safe to call repeatedly.
   const evaluate = useCallback(async (next: Session | null) => {
+    const seq = (evaluateSeqRef.current += 1);
+    const isCurrent = () => mounted.current && evaluateSeqRef.current === seq;
     if (mounted.current) setSession(next);
     if (!next) {
-      if (mounted.current) {
+      if (isCurrent()) {
         setCaregiver(null);
         setBaby(null);
         setCaregivers([]);
@@ -245,16 +267,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       return;
     }
-    // A session resolved — clear any transient auth error left over from a
-    // cancelled/failed earlier attempt (e.g. a Google round-trip that the user
-    // retried). Sign-in actually landing must never leave a stale error note
-    // hanging behind the app surface.
-    if (mounted.current) setErrorMessage(null);
+    // A session resolved — enter the branded post-auth sync IMMEDIATELY, before the
+    // provisioning reads, so AuthGate shows the transition (never onboarding, the
+    // account surface, or a stale signed-out screen) while the linked baby + profile
+    // load. Also clear any transient auth error left over from a cancelled/failed
+    // earlier attempt so a landing sign-in never leaves a stale note behind the app.
+    if (isCurrent()) {
+      setErrorMessage(null);
+      setStatus('postAuthSync');
+    }
     const [babyId, profile] = await Promise.all([
       getLinkedBabyId(next.user.id),
       getCaregiverProfile(next.user.id),
     ]);
-    if (!mounted.current) return;
+    if (!isCurrent()) return;
     setCaregiver(profile);
     if (!babyId) {
       setBaby(null);
@@ -265,7 +291,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Ready: load the real baby + linked caregivers for the UI. Soft — a missing
     // read just leaves a calm fallback; it never blocks entering the app.
     const [babyRow, linked] = await Promise.all([getBaby(babyId), getBabyCaregivers(babyId)]);
-    if (!mounted.current) return;
+    if (!isCurrent()) return;
     setBaby(babyRow);
     setCaregivers(linked);
     setStatus('ready');
@@ -539,6 +565,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setBusy(true);
     setErrorMessage(null);
     setPendingMessage(null);
+    // Show the branded transition for the whole browser round-trip so the account
+    // surface never flashes back between the browser closing and the session
+    // resolving. Success lands via onAuthStateChange → applySession (→ postAuthSync
+    // → ready/needs-setup); a non-success outcome is released back to the account
+    // surface below.
+    setStatus('authenticating');
     try {
       // startGoogleOAuth always resolves now (its non-interactive steps are
       // timed out), so the `finally` below always clears `busy` — no more stuck
@@ -551,11 +583,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         authWarn(`signInWithGoogle: ${outcome.error}`);
         setErrorMessage('Could not sign in with Google just now. Please try again.');
       }
+      // Any non-success (dismissed browser OR a recoverable error) releases the
+      // transition back to the account surface — the onAuthStateChange listener owns
+      // the ONLY success path, so this can never stomp a real sign-in. Deliberately
+      // keyed on "not success" (not a cancel branch), so a dismissal stays a silent
+      // no-op with no error set.
+      if (outcome.status !== 'success' && mounted.current) {
+        setStatus('signed-out');
+      }
     } catch (e) {
       if (mounted.current) {
         setErrorMessage(
           calmAuthErrorMessage(e, 'Could not sign in with Google just now. Please try again.'),
         );
+        setStatus('signed-out');
       }
     } finally {
       if (mounted.current) setBusy(false);
@@ -616,6 +657,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           { userId: session.user.id, babyId, caregiverId: session.user.id },
           { method: 'account' },
         );
+        // The onboarding baby draft has now been provisioned into the account — drop
+        // it so a future setup never re-prefills stale data. Best-effort (never
+        // blocks the transition into the app).
+        void clearOnboardingDraft();
         await evaluate(session); // → ready
       } catch (e) {
         if (mounted.current) {
@@ -647,6 +692,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           caregiverId: session.user.id,
         });
         hapticSuccess(); // affirm the join landed before the app swaps in
+        // Joined a shared baby — the local onboarding draft is now irrelevant; drop
+        // it so it can't prefill a future setup. Best-effort.
+        void clearOnboardingDraft();
         await evaluate(session); // → ready (now linked to the shared baby)
       } catch (e) {
         if (mounted.current) {

@@ -33,9 +33,10 @@
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import { AuthButton, AuthLink } from '@/components/auth/AuthShell';
+import { AuthTransition } from '@/components/auth/AuthTransition';
 import { exchangeAuthCallback, parseAuthCallbackUrl } from '@/lib/authLinking';
 import { authDebug, authError } from '@/lib/authLogger';
 import { supabase } from '@/lib/supabase';
@@ -248,21 +249,9 @@ export default function AuthCallbackScreen() {
     );
   }
 
-  // Working: a calm interstitial with an explicit "Finishing sign-in…" label so
-  // the OAuth round-trip reads as progress, never a stall.
-  return (
-    <View
-      style={{
-        flex: 1,
-        backgroundColor: colors.cream,
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 16,
-      }}>
-      <ActivityIndicator color={colors.sleep} />
-      <Text style={{ fontFamily: fonts.body, fontSize: 15, color: colors.inkSoft }}>
-        Finishing sign-in…
-      </Text>
-    </View>
-  );
+  // Working: the shared branded transition (logo + quiet spinner) with an explicit
+  // "Finishing sign-in…" label, so the OAuth round-trip reads as calm progress and
+  // is visually identical to AuthGate's post-auth transition — no jump between the
+  // callback screen and the app resolving the session.
+  return <AuthTransition message="Finishing sign-in…" />;
 }
