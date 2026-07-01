@@ -34,7 +34,25 @@ export type AnalyticsEvent =
   | 'reached_4_data_days'
   | 'insights_recap_available'
   | 'upgrade_card_tapped'
-  | 'export_tapped';
+  | 'export_tapped'
+  // Pro Phase 2 — paywall entry points (no purchase/restore events yet; those
+  // land with RevenueCat in a later phase). Props stay coarse: source / surface /
+  // gate / mode only — never names, notes, volumes, or store/RevenueCat ids.
+  | 'paywall_opened'
+  | 'pro_gate_seen'
+  // Pro Phase 3 — real weekly export/share flow (Pro-entitled users only). Same
+  // coarse props; the shared text itself is descriptive/non-medical aggregates.
+  | 'export_started'
+  | 'export_completed'
+  // Pro Phase 4 — RevenueCat purchase / restore flow. Props stay coarse:
+  // source / surface / packageType / entitlement / errorCode / cancelled — never
+  // names, notes, prices, store receipts, or RevenueCat customer ids.
+  | 'purchase_started'
+  | 'purchase_completed'
+  | 'purchase_failed'
+  | 'restore_started'
+  | 'restore_completed'
+  | 'restore_failed';
 
 /** Small, serializable property bag stored in the row's `props` jsonb column. */
 export type AnalyticsProps = Record<string, string | number | boolean | null>;

@@ -1,0 +1,45 @@
+/**
+ * Pro feature gates — pure predicates for the Pro v1 features.
+ *
+ * Each gate answers "does this caregiver's entitlement unlock this feature?" from
+ * a single `isPro` boolean, so the gating rule lives in ONE dependency-free leaf
+ * (no React, no env, no network) that both the UI and the smoke test can call.
+ * See docs/pro-implementation-plan.md §7.
+ *
+ * HARD RULE — core logging is NEVER gated. Feed / Sleep / Diaper / Pump, the
+ * Tonight loop, onboarding, and the first log stay free for everyone. These gates
+ * only ever hide DEPTH and EXPORT (history beyond the free window, weekly-recap
+ * export, the pediatrician summary) — never input. Core logging files must not
+ * import this module (enforced in scripts/check-local-interactions.ts).
+ */
+
+/** Export / share the weekly recap (PDF/CSV/share sheet). Pro-only. */
+export function canExportWeeklyRecap(isPro: boolean): boolean {
+  return isPro;
+}
+
+/** View history beyond the free 7-day window. Pro-only. */
+export function canViewFullHistory(isPro: boolean): boolean {
+  return isPro;
+}
+
+/** Generate / share the clean, descriptive pediatrician summary. Pro-only. */
+export function canSharePediatricianSummary(isPro: boolean): boolean {
+  return isPro;
+}
+
+/**
+ * Add EXTRA caregivers (the 3rd+, e.g. a read-only grandparent) — a FUTURE gate.
+ *
+ * Open for now (returns true regardless of `isPro`) so Phase 1 changes nothing
+ * about the caregiver flow. When this gate goes live it will restrict only the
+ * 3rd+ invite. The `isPro` argument is part of the stable signature for that day.
+ *
+ * The FIRST caregiver invite — the two-person night-shift pair the whole app is
+ * built around — MUST ALWAYS REMAIN FREE and is never routed through this gate.
+ * The invite flow deliberately does not import proGates (enforced by the smoke
+ * test), so the first invite can never accidentally become gated.
+ */
+export function canAddExtraCaregivers(isPro: boolean): boolean {
+  return true;
+}
