@@ -5318,6 +5318,27 @@ check('X15. clinician-review metadata is present, well-formed, and honest', () =
   }
 });
 
+check('X17. the edge-function content mirror has not drifted from the app modules', () => {
+  // The Supabase functions can't import across the tree (Deno needs .ts
+  // extensions and knows nothing about '@/'), so they carry a hand-mirrored
+  // copy of the triage list + KB. This deep-equal is the drift tripwire: it
+  // imports BOTH copies and compares VALUES, not text.
+  //
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const mirror = require('../supabase/functions/_shared/reassureContent') as {
+    REDFLAGS: readonly string[];
+    KB: unknown;
+    normalizeAsk: (text: string) => string;
+  };
+  assert.deepEqual([...mirror.REDFLAGS], [...REDFLAGS], 'REDFLAGS identical on both sides');
+  assert.deepEqual(mirror.KB, KB, 'KB identical on both sides');
+  assert.equal(
+    mirror.normalizeAsk("She WON’T wake"),
+    normalizeAsk("She WON’T wake"),
+    'normalization identical on both sides',
+  );
+});
+
 runAsyncChecks()
   .then(() => {
     console.log(`\nAll ${passed} checks passed ✅`);
