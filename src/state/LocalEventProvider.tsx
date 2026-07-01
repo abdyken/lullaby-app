@@ -53,7 +53,10 @@ import {
 } from '@/data/mock';
 import { clearHandoffCursor, LOCAL_CURSOR_CONTEXT } from '@/data/handoffCursor';
 import type { LogEvent } from '@/data/models';
+import { useAnalytics, type AnalyticsEvent } from '@/lib/analytics';
+import { fireMilestoneOnce, firstLogMilestoneKey } from '@/lib/analyticsMilestones';
 import { hapticSave, hapticUndo } from '@/lib/haptics';
+import { useAuth } from '@/state/AuthProvider';
 import {
   diffEvents,
   isEmptyChange,
@@ -170,6 +173,26 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
   }, []);
   const dismissToast = useCallback(() => setToast(null), []);
 
+  const { session, baby } = useAuth();
+  const track = useAnalytics();
+  // first_log_created fires once per account+baby (persisted, scoped by
+  // userId+babyId). The ref tracks the last key it fired for, so a burst of saves
+  // can't double-fire AND a sign-out/in (a new key) re-arms it. `noteLogged` is
+  // called wherever an event is actually added; pass the per-type event
+  // (feed/sleep) when there is one.
+  const firstLogFiredKeyRef = useRef<string | null>(null);
+  const noteLogged = useCallback(
+    (event?: AnalyticsEvent) => {
+      if (event) track(event);
+      const key = firstLogMilestoneKey(session?.user.id ?? null, baby?.id ?? null);
+      if (firstLogFiredKeyRef.current !== key) {
+        firstLogFiredKeyRef.current = key;
+        void fireMilestoneOnce(key, () => track('first_log_created'));
+      }
+    },
+    [track, session?.user.id, baby?.id],
+  );
+
   // Resolve the backend, load once on mount, then (Supabase) subscribe to live
   // changes. If valid saved state exists, adopt it; otherwise keep the seed.
   // Either way we mark hydrated so saving can begin. In local-only mode this is
@@ -280,9 +303,10 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
     if (next.events.length > prev.events.length) {
       hapticSave();
       showToast(TOAST_COPY.sleepStart);
+      noteLogged();
     }
     setState(next);
-  }, [showToast]);
+  }, [showToast, noteLogged]);
 
   // Sheet saves: only fire when the user taps Save (opening a sheet logs
   // nothing). Each shows its toast only when an event was actually added — the
@@ -293,9 +317,10 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
     if (next.events.length > prev.events.length) {
       hapticSave();
       showToast(TOAST_COPY.feed);
+      noteLogged('feed_log_created');
     }
     setState(next);
-  }, [showToast]);
+  }, [showToast, noteLogged]);
 
   const saveDiaper = useCallback((details?: DiaperDetails) => {
     const prev = stateRef.current;
@@ -303,23 +328,26 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
     if (next.events.length > prev.events.length) {
       hapticSave();
       showToast(TOAST_COPY.diaper);
+      noteLogged();
     }
     setState(next);
-  }, [showToast]);
+  }, [showToast, noteLogged]);
 
   const saveNote = useCallback((details?: NoteDetails) => {
     // Notes are explicit (no dedup) → always added, always toast.
     hapticSave();
     showToast(TOAST_COPY.note);
+    noteLogged();
     setState((prev) => addNote(prev, details ?? { label: NOTE_PRESET_LABEL }));
-  }, [showToast]);
+  }, [showToast, noteLogged]);
 
   const savePump = useCallback((details?: PumpDetails) => {
     // Pumps are explicit side-logs (no dedup, no orb state) → always added, always toast.
     hapticSave();
     showToast(TOAST_COPY.pump);
+    noteLogged();
     setState((prev) => addPump(prev, details));
-  }, [showToast]);
+  }, [showToast, noteLogged]);
 
   const onPrimaryAction = useCallback(() => {
     const prev = stateRef.current;
@@ -329,12 +357,14 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
     if (prev.orbView === 'calm' && next.events.length > prev.events.length) {
       hapticSave();
       showToast(TOAST_COPY.sleepStart);
+      noteLogged();
     } else if (prev.orbView === 'sleep') {
       hapticSave();
       showToast(TOAST_COPY.sleepEnd);
+      noteLogged('sleep_log_created');
     }
     setState(next);
-  }, [showToast]);
+  }, [showToast, noteLogged]);
 
   const undoLastEvent = useCallback(() => {
     hapticUndo();

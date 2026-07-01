@@ -159,6 +159,12 @@ Still required (needs accounts/secrets — intentionally not done here):
       `EXPO_PUBLIC_SUPABASE_ANON_KEY` as **EAS environment variables** (per build
       profile), since `EXPO_PUBLIC_*` is inlined at build time. Never commit `.env`.
       (Anon/publishable values only; RLS protects the data — see supabase/README.md.)
+- [ ] **Pro-preview flag** — `EXPO_PUBLIC_PRO_PREVIEW_ENABLED` **defaults to `false`**:
+      the non-paid Lullaby Pro preview cards (`UpgradeCard` / `ProPreviewCard`) stay
+      hidden. Set it to `1` as an **EAS environment variable** *only* for a dedicated
+      Pro-preview retention build; leave it unset for control/standard builds. It is
+      inlined at build time, so toggling requires a rebuild. No payment or paywall is
+      ever implied — the cards only record interest analytics.
 - [ ] **Privacy** — App Store privacy questionnaire + a privacy policy URL
       (account email + baby log data are collected in Supabase mode).
 - [ ] Decide TestFlight mode: **local-only build** (no env, nothing to disclose) or

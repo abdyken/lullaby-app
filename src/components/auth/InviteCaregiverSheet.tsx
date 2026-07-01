@@ -14,12 +14,14 @@ import { Modal, Pressable, Share, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { BabyInvite, CaregiverRole } from '@/data/models';
+import { useAnalytics } from '@/lib/analytics';
 import { hapticSuccess } from '@/lib/haptics';
 import { useAuth } from '@/state/AuthProvider';
 import { createInvite, formatInviteCode, getActiveInvites } from '@/sync';
 import { colors, fonts, radii, shadows } from '@/theme';
 
 import { AuthButton } from './AuthShell';
+import { buildInviteShareMessage, resolveAppInstallUrl } from './inviteShareMessage';
 
 const ROLES: { role: CaregiverRole; label: string; color: string }[] = [
   { role: 'mom', label: 'Mom', color: colors.mom },
@@ -30,6 +32,7 @@ const ROLES: { role: CaregiverRole; label: string; color: string }[] = [
 export function InviteCaregiverSheet({ onClose }: { onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const { baby } = useAuth();
+  const track = useAnalytics();
   const [role, setRole] = useState<CaregiverRole>('dad');
   const [invite, setInvite] = useState<BabyInvite | null>(null);
   const [busy, setBusy] = useState(false);
@@ -59,6 +62,9 @@ export function InviteCaregiverSheet({ onClose }: { onClose: () => void }) {
       if (created) {
         hapticSuccess();
         setInvite(created);
+        // No props: role (mom/dad/other) is intentionally not sent — analytics
+        // carry only coarse counts and UI source/surface, never family detail.
+        track('caregiver_invited');
       }
     } catch (e) {
       setError(
@@ -76,7 +82,7 @@ export function InviteCaregiverSheet({ onClose }: { onClose: () => void }) {
     const pretty = formatInviteCode(invite.code);
     try {
       await Share.share({
-        message: `Join our baby's night log on Lullaby. Open the app, choose “Join with a code,” and enter: ${pretty}`,
+        message: buildInviteShareMessage({ code: pretty, installUrl: resolveAppInstallUrl() }),
       });
     } catch {
       // user dismissed the share sheet — nothing to do
@@ -152,25 +158,35 @@ export function InviteCaregiverSheet({ onClose }: { onClose: () => void }) {
                   accessibilityState={{ selected: active }}
                   accessibilityLabel={opt.label}
                   onPress={() => setRole(opt.role)}
-                  style={({ pressed }) => ({
-                    flex: 1,
-                    minHeight: 46,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: radii.medium,
-                    backgroundColor: active ? opt.color : colors.surfaceSoft,
-                    borderWidth: 2,
-                    borderColor: active ? opt.color : colors.line,
-                    transform: [{ scale: pressed ? 0.97 : 1 }],
-                  })}>
-                  <Text
-                    style={{
-                      fontFamily: fonts.bodyBold,
-                      fontSize: 14,
-                      color: active ? colors.white : colors.inkSoft,
-                    }}>
-                    {opt.label}
-                  </Text>
+                  style={{ flex: 1 }}>
+                  {({ pressed }) => (
+                    // The painted surface lives on this inner View, never on the
+                    // Pressable itself: on real Android the Pressable's own
+                    // background/border can fail to repaint after the selection
+                    // changes, making the chips look like they vanish. The 2px
+                    // border is present in both states so selecting a role never
+                    // shifts the row's layout, and every option always renders.
+                    <View
+                      style={{
+                        minHeight: 46,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: radii.medium,
+                        backgroundColor: active ? opt.color : colors.surfaceSoft,
+                        borderWidth: 2,
+                        borderColor: active ? opt.color : colors.line,
+                        opacity: pressed ? 0.85 : 1,
+                      }}>
+                      <Text
+                        style={{
+                          fontFamily: fonts.bodyBold,
+                          fontSize: 14,
+                          color: active ? colors.white : colors.inkSoft,
+                        }}>
+                        {opt.label}
+                      </Text>
+                    </View>
+                  )}
                 </Pressable>
               );
             })}
