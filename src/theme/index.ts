@@ -39,6 +39,12 @@ export const colors = {
   pump: '#FFB12E',
   pumpTint: '#FFF1D6',
 
+  // alert — Reassure's triage tone (the reassure demo's `--alert`). Serious but
+  // never a blaring alarm red; identical in day and night (safety is not themed).
+  alert: '#E0574B',
+  alert2: '#E97367',
+  alertTint: '#FBE7E4',
+
   // caregivers (mom/dad palette from the mockup)
   mom: '#FF9E5E',
   dad: '#5560C6',

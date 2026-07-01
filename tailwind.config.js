@@ -16,6 +16,7 @@ module.exports = {
         feed: { DEFAULT: '#FF7A3D', tint: '#FFEDE0' },
         sleep: { DEFAULT: '#5560C6', tint: '#E9EBFB' },
         diaper: { DEFAULT: '#23B79E', tint: '#DDF5EF' },
+        alert: { DEFAULT: '#E0574B', tint: '#FBE7E4' },
       },
       borderRadius: {
         lg: '34px',
