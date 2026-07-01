@@ -15,6 +15,7 @@ import { View } from 'react-native';
 import { AppToast } from '@/components/AppToast';
 import { AuthGate } from '@/components/auth/AuthGate';
 import { LullabyTabBar } from '@/components/LullabyTabBar';
+import { ProPaywallHost } from '@/components/pro/ProPaywallHost';
 import { LoggingProvider } from '@/features/logging/state/LoggingProvider';
 import { LoggingToast } from '@/features/logging/ui/LoggingToast';
 import { AuthProvider } from '@/state/AuthProvider';
@@ -32,11 +33,14 @@ export default function TabsLayout() {
   return (
     <AuthProvider>
       <AuthGate>
-        {/* Pro entitlement seam. Phase 1 foundation only — no RevenueCat, no
-            paywall, no network; usePro defaults to free. Mounted under AuthGate so
-            later phases can read the signed-in caregiver / baby for baby-scoped
-            entitlement. Adds no UI and no layout of its own. */}
+        {/* Pro entitlement seam — no RevenueCat, no purchases, no network; usePro
+            defaults to free. Mounted under AuthGate so later phases can read the
+            signed-in caregiver / baby for baby-scoped entitlement. No layout of its
+            own. */}
         <ProProvider>
+          {/* Single paywall instance any Pro surface opens via usePro().openPaywall().
+              Renders nothing until requested; no layout of its own. */}
+          <ProPaywallHost />
           {/* One shared event store for all tabs, so Tonight and Log see the same
               events. Reassure simply ignores it. */}
           <LocalEventProvider>

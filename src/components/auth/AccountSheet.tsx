@@ -195,11 +195,10 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
             </>
           )}
 
-          {/* Non-paid Lullaby Pro preview — only in fake-door "preview" mode
-              (EXPO_PUBLIC_PRO_PREVIEW_ENABLED on, PRO_ENABLED off; off by default)
-              AND only for a signed-in user (never guest/local). Real Pro supersedes
-              it (§11). Records interest only; no payment, no navigation. */}
-          {getProMode() === 'preview' && signedIn ? <UpgradeCard source="account_sheet" /> : null}
+          {/* Lullaby Pro card — signed-in users only (never guest/local), in either
+              Pro mode: "preview" is the non-paid fake-door; "enabled" opens the
+              Phase 2 paywall. Hidden when Pro is off. */}
+          {getProMode() !== 'off' && signedIn ? <UpgradeCard source="account_sheet" /> : null}
         </View>
       </View>
 

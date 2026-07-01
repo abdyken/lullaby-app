@@ -34,7 +34,12 @@ export type AnalyticsEvent =
   | 'reached_4_data_days'
   | 'insights_recap_available'
   | 'upgrade_card_tapped'
-  | 'export_tapped';
+  | 'export_tapped'
+  // Pro Phase 2 — paywall entry points (no purchase/restore events yet; those
+  // land with RevenueCat in a later phase). Props stay coarse: source / surface /
+  // gate / mode only — never names, notes, volumes, or store/RevenueCat ids.
+  | 'paywall_opened'
+  | 'pro_gate_seen';
 
 /** Small, serializable property bag stored in the row's `props` jsonb column. */
 export type AnalyticsProps = Record<string, string | number | boolean | null>;

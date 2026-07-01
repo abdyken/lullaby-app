@@ -12,7 +12,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
+import { getProMode } from '@/lib/proConfig';
 import { useAnalytics } from '@/lib/useAnalytics';
+import { usePro } from '@/state/ProProvider';
 import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
 type Props = {
@@ -35,10 +37,19 @@ const CONFIRM = 'Thanks — Lullaby Pro is coming soon.';
 
 export function UpgradeCard({ source, surfaceMode = 'day' }: Props) {
   const track = useAnalytics();
+  const { openPaywall } = usePro();
   const [tapped, setTapped] = useState(false);
   const palette = surfaces[surfaceMode];
 
   const onPress = () => {
+    // Real Pro build → open the paywall (Phase 2 skeleton). Coarse props only.
+    if (getProMode() === 'enabled') {
+      track('paywall_opened', { source, surface: 'upgrade_card' });
+      openPaywall();
+      return;
+    }
+    // Preview (fake-door) and any non-enabled mode → interest signal + calm
+    // "coming soon" confirmation. No paywall, no purchase.
     track('upgrade_card_tapped', { source });
     setTapped(true);
   };
