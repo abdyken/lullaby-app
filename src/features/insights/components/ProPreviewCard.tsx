@@ -12,7 +12,9 @@
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
+import { getProMode } from '@/lib/proConfig';
 import { useAnalytics } from '@/lib/useAnalytics';
+import { usePro } from '@/state/ProProvider';
 import { useTheme } from '@/state/ThemeProvider';
 import { colors, fonts, radii, surfaces } from '@/theme';
 
@@ -43,13 +45,29 @@ export function ProPreviewCard() {
   const { mode } = useTheme();
   const palette = surfaces[mode];
   const track = useAnalytics();
+  const { openPaywall } = usePro();
   const [tapped, setTapped] = useState(false);
 
   const onUpgrade = () => {
+    // Real Pro build → open the paywall (Phase 2 skeleton).
+    if (getProMode() === 'enabled') {
+      track('paywall_opened', { source: 'insights', surface: 'pro_preview_card' });
+      openPaywall();
+      return;
+    }
+    // Preview (fake-door) → interest signal + calm "coming soon".
     track('upgrade_card_tapped', { source: 'insights' });
     setTapped(true);
   };
   const onExport = () => {
+    // Real export is Phase 3 — for now the export CTA routes to the paywall and
+    // records the gate it hit. It never claims export works yet.
+    if (getProMode() === 'enabled') {
+      track('pro_gate_seen', { gate: 'export_weekly_recap', surface: 'insights' });
+      openPaywall();
+      return;
+    }
+    // Preview (fake-door) → interest signal + calm "coming soon".
     track('export_tapped', { surface: 'insights' });
     setTapped(true);
   };

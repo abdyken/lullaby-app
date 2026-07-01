@@ -4391,6 +4391,9 @@ const CORE_LOGGING_SRCS: Array<[string, string]> = [
   ],
 ];
 
+const PAYWALL_SHEET_SRC = readFileSync(new URL('../src/components/pro/PaywallSheet.tsx', import.meta.url), 'utf8');
+const PRO_PAYWALL_HOST_SRC = readFileSync(new URL('../src/components/pro/ProPaywallHost.tsx', import.meta.url), 'utf8');
+
 // The user-facing Pro surfaces — where an accidental payment link would surface.
 const PRO_SURFACE_SRCS: Array<[string, string]> = [
   ['proConfig.ts', PRO_CONFIG_SRC],
@@ -4400,6 +4403,8 @@ const PRO_SURFACE_SRCS: Array<[string, string]> = [
   ['ProPreviewCard.tsx', PRO_PREVIEW_CARD_SRC],
   ['AccountSheet.tsx', ACCOUNT_SHEET_SRC],
   ['InsightsScreen.tsx', INSIGHTS_SCREEN_SRC],
+  ['PaywallSheet.tsx', PAYWALL_SHEET_SRC],
+  ['ProPaywallHost.tsx', PRO_PAYWALL_HOST_SRC],
 ];
 
 // Every .ts/.tsx under src/ — for the repo-wide "no RevenueCat SDK yet" sweep.
@@ -4494,10 +4499,11 @@ check('W7. fake-door preview survives: preview mode resolves and the interest an
   withEnv({ EXPO_PUBLIC_PRO_ENABLED: 'false', EXPO_PUBLIC_PRO_PREVIEW_ENABLED: 'true' }, () =>
     assert.equal(getProMode(), 'preview'),
   );
-  // The fake-door surfaces gate on preview mode, still fire the interest events,
-  // and keep their calm "coming soon" copy — no paywall, no purchase.
-  assert.ok(INSIGHTS_SCREEN_SRC.includes("getProMode() === 'preview'"), 'Insights gates the preview on preview mode');
-  assert.ok(ACCOUNT_SHEET_SRC.includes("getProMode() === 'preview'"), 'AccountSheet gates the preview on preview mode');
+  // The call sites render the Pro card whenever Pro is on (preview OR enabled);
+  // in preview mode the card behaves as the fake-door — the interest events and
+  // the calm "coming soon" copy are still present. Real Pro is off here.
+  assert.ok(INSIGHTS_SCREEN_SRC.includes("getProMode() !== 'off'"), 'Insights shows the Pro card whenever Pro is on');
+  assert.ok(ACCOUNT_SHEET_SRC.includes("getProMode() !== 'off'"), 'AccountSheet shows the Pro card whenever Pro is on');
   assert.ok(UPGRADE_CARD_SRC.includes("track('upgrade_card_tapped'"), 'UpgradeCard fires upgrade_card_tapped');
   assert.ok(/coming soon/i.test(UPGRADE_CARD_SRC), 'UpgradeCard keeps its coming-soon copy');
   assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('upgrade_card_tapped'"), 'ProPreviewCard fires upgrade_card_tapped');
@@ -4509,8 +4515,9 @@ check('W8. analytics unchanged: no client SELECT, fake-door events kept, no purc
   assert.ok(!/\.select\s*\(/.test(ANALYTICS_SRC), 'analytics must never .select() from analytics_events');
   assert.ok(ANALYTICS_SRC.includes("'upgrade_card_tapped'"), 'upgrade_card_tapped stays in the event union');
   assert.ok(ANALYTICS_SRC.includes("'export_tapped'"), 'export_tapped stays in the event union');
+  // Purchase/restore analytics belong to the RevenueCat phase — still not added.
+  // (Phase 2 adds paywall_opened / pro_gate_seen; see §X.)
   for (const notYet of [
-    'paywall_opened',
     'purchase_started',
     'purchase_completed',
     'purchase_failed',
@@ -4561,6 +4568,91 @@ check('W12. ProProvider is mounted under AuthGate in the tab shell', () => {
   const localIdx = TABS_LAYOUT_SRC.indexOf('<LocalEventProvider>');
   assert.ok(gateIdx >= 0 && proIdx > gateIdx, 'ProProvider sits under AuthGate');
   assert.ok(localIdx > proIdx, 'ProProvider wraps the event/logging providers');
+});
+
+// X. Pro Phase 2 — paywall UI skeleton + real Pro entry points. Verifies the
+// paywall carries the required calm/safety copy and NO prices/payment links/SDK;
+// that UpgradeCard/ProPreviewCard open the paywall in "enabled" mode while keeping
+// the fake-door in "preview"; that the host is wired; and that the two new
+// analytics events landed without any purchase/restore events (still Phase 3+).
+
+check('X1. PaywallSheet carries the required title, restore control, and non-medical safety copy', () => {
+  assert.ok(PAYWALL_SHEET_SRC.includes('Lullaby Pro'), 'PaywallSheet shows the Lullaby Pro title');
+  assert.ok(PAYWALL_SHEET_SRC.includes('Restore purchase'), 'PaywallSheet includes a Restore purchase control');
+  assert.ok(PAYWALL_SHEET_SRC.includes('Not medical advice'), 'PaywallSheet includes the non-medical safety line');
+  assert.ok(/App Store \/ Play Store/.test(PAYWALL_SHEET_SRC), 'PaywallSheet says billing is store-managed');
+  assert.ok(
+    /not configured in this build yet/i.test(PAYWALL_SHEET_SRC),
+    'PaywallSheet shows the calm unavailable state',
+  );
+});
+
+check('X2. PaywallSheet hardcodes no prices and no fake packages', () => {
+  assert.ok(!PAYWALL_SHEET_SRC.includes('$'), 'no "$" price glyph in the paywall');
+  assert.ok(!/\bUSD\b/.test(PAYWALL_SHEET_SRC), 'no USD currency code');
+  assert.ok(!/monthly price|yearly price/i.test(PAYWALL_SHEET_SRC), 'no monthly/yearly price label');
+  for (const price of ['6.99', '44.99']) {
+    assert.ok(!PAYWALL_SHEET_SRC.includes(price), `no hardcoded ${price} price`);
+  }
+});
+
+check('X3. PaywallSheet has no external payment link and no subscription SDK', () => {
+  assert.ok(!/https?:\/\//.test(PAYWALL_SHEET_SRC), 'no external URL in the paywall');
+  assert.ok(!PAYWALL_SHEET_SRC.includes('react-native-purchases'), 'no RevenueCat SDK import');
+  assert.ok(!/\bPurchases\./.test(PAYWALL_SHEET_SRC), 'no Purchases SDK call');
+  assert.ok(!/RevenueCat/i.test(PAYWALL_SHEET_SRC), 'no RevenueCat reference');
+  for (const token of [/stripe/i, /paypal/i, /checkout\./i, /web checkout/i]) {
+    assert.ok(!token.test(PAYWALL_SHEET_SRC), `no ${token} reference`);
+  }
+});
+
+check('X4. ProPaywallHost drives PaywallSheet from usePro and is mounted under ProProvider', () => {
+  assert.ok(PRO_PAYWALL_HOST_SRC.includes('usePro'), 'host reads Pro state via usePro');
+  assert.ok(PRO_PAYWALL_HOST_SRC.includes('isPaywallOpen'), 'host renders on isPaywallOpen');
+  assert.ok(PRO_PAYWALL_HOST_SRC.includes('closePaywall'), 'host closes via closePaywall');
+  assert.ok(PRO_PAYWALL_HOST_SRC.includes('PaywallSheet'), 'host renders PaywallSheet');
+  assert.ok(TABS_LAYOUT_SRC.includes('<ProPaywallHost'), 'ProPaywallHost is mounted');
+  const proIdx = TABS_LAYOUT_SRC.indexOf('<ProProvider>');
+  const hostIdx = TABS_LAYOUT_SRC.indexOf('<ProPaywallHost');
+  assert.ok(proIdx >= 0 && hostIdx > proIdx, 'ProPaywallHost sits under ProProvider');
+});
+
+check('X5. UpgradeCard opens the paywall in enabled mode and keeps the fake-door in preview', () => {
+  assert.ok(UPGRADE_CARD_SRC.includes('getProMode('), 'UpgradeCard branches on getProMode');
+  assert.ok(UPGRADE_CARD_SRC.includes("=== 'enabled'"), 'UpgradeCard has an enabled branch');
+  assert.ok(UPGRADE_CARD_SRC.includes('openPaywall('), 'UpgradeCard opens the paywall via usePro');
+  assert.ok(UPGRADE_CARD_SRC.includes("track('paywall_opened'"), 'UpgradeCard fires paywall_opened in enabled mode');
+  assert.ok(UPGRADE_CARD_SRC.includes("track('upgrade_card_tapped'"), 'UpgradeCard keeps the fake-door event');
+});
+
+check('X6. ProPreviewCard opens the paywall in enabled mode and keeps the fake-door in preview', () => {
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes('getProMode('), 'ProPreviewCard branches on getProMode');
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes("=== 'enabled'"), 'ProPreviewCard has an enabled branch');
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes('openPaywall('), 'ProPreviewCard opens the paywall via usePro');
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('paywall_opened'"), 'See-included fires paywall_opened');
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('pro_gate_seen'"), 'Export CTA fires pro_gate_seen');
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('upgrade_card_tapped'"), 'keeps the fake-door upgrade event');
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('export_tapped'"), 'keeps the fake-door export event');
+});
+
+check('X7. analytics union gains paywall_opened + pro_gate_seen only (no purchase/restore)', () => {
+  assert.ok(ANALYTICS_SRC.includes("'paywall_opened'"), 'paywall_opened added to the union');
+  assert.ok(ANALYTICS_SRC.includes("'pro_gate_seen'"), 'pro_gate_seen added to the union');
+  for (const notYet of [
+    'purchase_started',
+    'purchase_completed',
+    'purchase_failed',
+    'restore_started',
+    'restore_completed',
+  ]) {
+    assert.ok(!ANALYTICS_SRC.includes(notYet), `${notYet} must not be added yet`);
+  }
+});
+
+check('X8. parent call sites render the Pro card in preview + enabled, hide it when off', () => {
+  assert.ok(INSIGHTS_SCREEN_SRC.includes("getProMode() !== 'off'"), 'Insights renders the card unless Pro is off');
+  assert.ok(ACCOUNT_SHEET_SRC.includes("getProMode() !== 'off'"), 'AccountSheet renders the card unless Pro is off');
+  assert.ok(ACCOUNT_SHEET_SRC.includes('signedIn'), 'AccountSheet still gates the card on a signed-in user');
 });
 
 runAsyncChecks()
