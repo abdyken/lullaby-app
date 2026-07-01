@@ -29,7 +29,7 @@ live, Supabase-synced legacy events into the shape the selectors expect, via the
 ### 1.2 Analytics → Supabase `analytics_events`
 - New: `src/lib/analytics.ts` (`trackEvent` + `useAnalytics`), `src/lib/analyticsMilestones.ts`
   (once-ever guards, **scoped by userId + babyId**).
-- New migration: `supabase/migrations/20260701000007_create_analytics_events.sql`.
+- New migration: `supabase/migrations/20260701050347_create_analytics_events.sql`.
 - Analytics is a **no-op unless the build is Supabase-configured AND a user is signed in**
   (the local/dev demo just logs to the console). So real data only flows from the sync build.
 - **RLS** allows insert only when `auth.uid() = user_id AND (baby_id is null OR
@@ -65,7 +65,7 @@ silently (fire-and-forget swallows the error — no crash, just no rows).
    `public.is_baby_caregiver(p_baby_id uuid)`).
 2. Apply, either:
    - `supabase db push` (CLI, applies pending migrations in filename order), or
-   - paste `supabase/migrations/20260701000007_create_analytics_events.sql` into the Supabase
+   - paste `supabase/migrations/20260701050347_create_analytics_events.sql` into the Supabase
      SQL editor.
 3. Verify the table + policy:
    ```sql
