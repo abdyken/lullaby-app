@@ -7,89 +7,113 @@
  * (`startGoogleOAuth`), but on some Android setups the browser fires the redirect
  * as a fresh deep link instead — which Expo Router renders as the built-in
  * "Unmatched Route" screen when no route matches `auth-callback`. This file IS
- * that route: it reads the full incoming URL (query + fragment), completes the
- * Supabase session exchange through the SHARED redirect plumbing
- * (`parseAuthRedirect` → `completeAuthRedirect` — the very helpers the email
- * links use), shows a calm spinner while it works, and routes into the app.
+ * that route.
+ *
+ * Design contract (the fix for the false "Could not finish signing in" flash):
+ *   - Success is detected by the SESSION appearing — from THIS route's exchange,
+ *     from the in-browser `startGoogleOAuth` exchange, or from any onAuthStateChange
+ *     emit — never by a single exchange call's return value. Whichever exchanger
+ *     wins the single-use PKCE code, we route into the app.
+ *   - An EMPTY / credential-less callback is NOT a failure. Android routinely
+ *     delivers a stale or bare `lullaby://auth-callback` (the original launch URL,
+ *     a duplicate redirect) before — or instead of — the real `?code=…` one. On an
+ *     empty callback the screen keeps the calm "Finishing sign-in…" state and waits
+ *     for the real URL / the session, rather than declaring "Missing code".
+ *   - Only a real provider `?error=…`, or the hard timeout with a confirmed
+ *     no-session, lands on the recoverable error surface. A later SIGNED_IN always
+ *     wins over an earlier empty callback because empty never settles the screen.
  *
  * It adds NO new auth logic and writes NO local storage: it only drives the
- * existing exchange against the `supabase` singleton, then hands off to AuthGate
- * (inside the (tabs) group) to choose the post-sign-in surface. Local baby/log
- * data is never read or cleared here, so the local-first guarantee is untouched.
- * Email/password sign-in and "Continue locally" are unaffected — those never
- * route through here.
+ * shared, idempotent exchange against the `supabase` singleton, then hands off to
+ * AuthGate (inside the (tabs) group) to choose the post-sign-in surface. Local
+ * baby/log data is never read or cleared here, so the local-first guarantee is
+ * untouched. Email/password sign-in and "Continue locally" are unaffected — those
+ * never route through here.
  */
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Text, View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 
-import { AuthLoading } from '@/components/auth/AuthLoading';
-import { AuthButton } from '@/components/auth/AuthShell';
-import { completeAuthRedirect, parseAuthRedirect } from '@/lib/authLinking';
+import { AuthButton, AuthLink } from '@/components/auth/AuthShell';
+import { exchangeAuthCallback, parseAuthCallbackUrl } from '@/lib/authLinking';
+import { authDebug, authError } from '@/lib/authLogger';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts } from '@/theme';
 
 /**
  * Hard ceiling on the whole callback. If the deep link never delivers usable
- * credentials, or the Supabase token exchange stalls (offline, slow network),
- * the screen flips to a recoverable error instead of spinning forever — the
- * core fix for the "endless loading after choosing a Google account" report.
+ * credentials AND no session ever lands (offline, a genuinely failed sign-in),
+ * the screen flips to a recoverable error instead of spinning forever. This is
+ * the ONLY path to the error surface for an empty callback — an empty URL alone
+ * is never treated as fatal.
  */
 const CALLBACK_TIMEOUT_MS = 15_000;
 
-/** Dev-only diagnostic. Never logs the URL/code/tokens — only a short reason. */
-function warnCallback(reason: string): void {
-  if (__DEV__) console.warn(`[auth] auth-callback: ${reason}`);
-}
+/** How long to keep polling getSession after firing an exchange (10 × 300ms = 3s). */
+const SESSION_POLL_ATTEMPTS = 10;
+const SESSION_POLL_INTERVAL_MS = 300;
 
 export default function AuthCallbackScreen() {
   // The full deep link that opened/resumed the app — includes the fragment, which
-  // expo-router strips for routing but any implicit-flow tokens live in.
+  // expo-router strips for routing but any implicit-flow tokens live in. Re-runs
+  // the effect when it changes, so a real `?code=…` arriving AFTER a stale empty
+  // launch URL is picked up.
   const url = Linking.useURL();
   const [phase, setPhase] = useState<'working' | 'error'>('working');
   // Dev-only failure reason, shown under the calm copy in __DEV__ so a tester can
-  // see WHY (missing code / provider error / exchange failed) without reading logs.
+  // see WHY (provider error / exchange failed / timeout) without reading logs.
   // Always null in production builds, so the user only ever sees the calm message.
   const [devReason, setDevReason] = useState<string | null>(null);
-  // One-shot outcome guard: whichever path (success / error / timeout) lands
-  // first wins, so a racing exchange or a late URL can't double-resolve.
+  // One-shot TERMINAL guard. Only a success, a real provider error, or the timeout
+  // settles it — an empty callback deliberately does NOT, so a later SIGNED_IN can
+  // still win. Whichever terminal path lands first wins; the rest are no-ops.
   const settled = useRef(false);
 
   useEffect(() => {
     let active = true;
 
-    const finish = (ok: boolean, reason?: string) => {
+    const succeed = () => {
       if (!active || settled.current) return;
       settled.current = true;
-      if (ok) {
-        // Success: hand off to AuthGate, which routes by status — straight to baby
-        // setup (signed-in, no baby) or Tonight (signed-in + baby), never the intro.
-        router.replace('/');
-      } else {
-        if (reason) {
-          warnCallback(reason);
-          if (__DEV__) setDevReason(reason);
-        }
-        setPhase('error');
-      }
+      // Normal, expected breadcrumb (silent by default; never a LogBox warning).
+      authDebug('auth-callback: session resolved → routing home');
+      // Hand off to AuthGate, which routes by status — straight to baby setup
+      // (signed-in, no baby) or Tonight (signed-in + baby), never the intro.
+      router.replace('/');
+    };
+
+    const fail = (reason: string) => {
+      if (!active || settled.current) return;
+      settled.current = true;
+      // A terminal failure that blocks the user (provider error, exchange failed
+      // with no session, or the hard timeout) — a real error, so it surfaces.
+      authError(`auth-callback: ${reason}`);
+      if (__DEV__) setDevReason(reason);
+      setPhase('error');
     };
 
     const client = supabase;
 
-    // Treat a session landing from ANY exchanger as success. The single-use OAuth
-    // code can be consumed by THIS route OR by the in-browser startGoogleOAuth path
-    // (when the redirect both returns to the browser session and fires a deep link).
-    // Watching onAuthStateChange means whichever one wins, we route into the app —
-    // so a benign "code already used" on the loser never shows a false error.
+    // Treat a session landing from ANY exchanger as success — this route's own
+    // exchange OR the in-browser startGoogleOAuth path OR a refresh. The watcher
+    // stays armed for the whole callback (it is only torn down on unmount / a new
+    // URL), so a session that lands AFTER an empty callback still routes us in.
     const authSub = client
       ? client.auth.onAuthStateChange((_event, session) => {
-          if (session != null) finish(true);
+          if (session != null) succeed();
         }).data.subscription
       : null;
 
-    // Safety net: nothing may keep the user on the spinner past the deadline.
-    const timer = setTimeout(() => finish(false, 'timed out completing sign-in'), CALLBACK_TIMEOUT_MS);
+    // Safety net: nothing may keep the user on the spinner past the deadline. On
+    // expiry we re-check the session one last time before declaring failure.
+    const timer = setTimeout(() => {
+      void (async () => {
+        const after = await client?.auth.getSession().catch(() => null);
+        if (after?.data.session != null) succeed();
+        else fail('timed out completing sign-in');
+      })();
+    }, CALLBACK_TIMEOUT_MS);
 
     void (async () => {
       // Prefer the live link; fall back to the cold-start launch URL.
@@ -99,7 +123,7 @@ export default function AuthCallbackScreen() {
       // Unconfigured build (no Supabase): there is nothing to exchange — just
       // leave the interstitial and let AuthGate render the local app.
       if (!client) {
-        finish(true);
+        succeed();
         return;
       }
 
@@ -107,52 +131,60 @@ export default function AuthCallbackScreen() {
       const existing = await client.auth.getSession().catch(() => null);
       if (!active || settled.current) return;
       if (existing?.data.session != null) {
-        finish(true);
+        succeed();
         return;
       }
 
-      const redirect = parseAuthRedirect(incoming);
-      if (redirect == null) {
-        // The URL hasn't been delivered yet → wait for useURL to provide it (the
-        // effect re-runs when `url` changes; the timeout backstops the worst case).
-        // A present-but-credential-less URL can't be completed → calm error.
-        if (incoming == null) return;
-        warnCallback('callback URL had no recognizable auth params (hasCode=false hasAccessToken=false)');
-        finish(false, 'Missing code in callback');
-        return;
-      }
-      // Sanitized diagnostic — keys only, never the URL/code/tokens.
-      warnCallback(
-        `received hasCode=${redirect.code != null} hasAccessToken=${redirect.accessToken != null} error=${redirect.errorCode ?? 'none'}`,
-      );
-      if (redirect.kind === 'error') {
-        finish(false, `OAuth provider returned ${redirect.errorCode ?? 'an error'}`);
+      const cb = parseAuthCallbackUrl(incoming);
+      // Normal, expected breadcrumb — type only, never the URL/code/tokens. Silent
+      // unless EXPO_PUBLIC_AUTH_DEBUG=1; never a LogBox warning.
+      authDebug(`auth-callback: received type=${cb.type}`);
+
+      if (cb.type === 'oauth_error') {
+        // A real provider error (?error=access_denied, …) is the one genuinely
+        // fatal callback — surface the calm retry immediately.
+        fail(`OAuth provider returned ${cb.error}`);
         return;
       }
 
-      // Drive the exchange, but do NOT decide on its return value alone: the
-      // onAuthStateChange watcher above and the poll below catch a session that
-      // lands slightly later (or via a racing exchanger), so success is detected
-      // by the SESSION appearing, not by this single call's result.
-      const result = await completeAuthRedirect(client, redirect);
+      if (cb.type === 'empty') {
+        // NOT a failure. A bare / stale / duplicate callback with no credentials:
+        // keep "Finishing sign-in…" and wait for the real URL (this effect re-runs
+        // when `url` changes), the in-browser exchange's session (the watcher
+        // above), or — worst case — the timeout. Never "Missing code" here. A
+        // normal, expected state → authDebug (silent by default, never a LogBox warning).
+        authDebug('auth-callback: empty callback — awaiting the real redirect / session');
+        return;
+      }
+
+      // code | tokens → drive the shared, idempotent exchange. Do NOT decide on its
+      // return value alone: the onAuthStateChange watcher and the poll below catch a
+      // session that lands slightly later (or via the racing in-browser exchanger),
+      // so success is detected by the SESSION appearing.
+      const result = await exchangeAuthCallback(client, cb);
       if (!active || settled.current) return;
 
       // Poll for the session within the grace window before declaring failure.
-      for (let i = 0; i < 10 && active && !settled.current; i += 1) {
+      for (let i = 0; i < SESSION_POLL_ATTEMPTS && active && !settled.current; i += 1) {
         const after = await client.auth.getSession().catch(() => null);
         if (!active || settled.current) return;
         if (after?.data.session != null) {
-          finish(true);
+          succeed();
           return;
         }
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        await new Promise((resolve) => setTimeout(resolve, SESSION_POLL_INTERVAL_MS));
       }
 
-      // No session after the grace window → a genuine failure (dev reason only).
-      finish(
-        false,
-        result.ok ? 'no session after exchange' : `Supabase exchange failed: ${result.error ?? 'unknown'}`,
-      );
+      // No session after the grace window. Don't settle yet if the exchange itself
+      // succeeded — a slow onAuthStateChange may still deliver the session before
+      // the hard timeout; only a confirmed exchange FAILURE is terminal here.
+      if (!result.ok) {
+        fail(`Supabase exchange failed: ${result.error ?? 'unknown'}`);
+      } else {
+        // Expected transient state — the session may still arrive via
+        // onAuthStateChange before the timeout. Not a problem → authDebug.
+        authDebug('auth-callback: exchange ok but no session yet — awaiting onAuthStateChange / timeout');
+      }
     })();
 
     return () => {
@@ -185,8 +217,8 @@ export default function AuthCallbackScreen() {
             color: colors.inkSoft,
             textAlign: 'center',
           }}>
-          That sign-in link could not be completed. Head back and try again — your baby and logs on
-          this phone are safe.
+          That sign-in did not complete. You can try again — your baby and logs on this phone are
+          safe either way.
         </Text>
         {/* Dev-only: the exact reason, so a tester can act without reading logs.
             Never rendered in production (devReason stays null there). */}
@@ -202,12 +234,35 @@ export default function AuthCallbackScreen() {
             {`dev: ${devReason}`}
           </Text>
         )}
-        <View style={{ alignSelf: 'stretch' }}>
-          <AuthButton label="Back to sign in" onPress={() => router.replace('/')} />
+        <View style={{ alignSelf: 'stretch', gap: 10 }}>
+          {/* Both land on the account-entry surface, which offers the Google retry
+              AND the "Continue locally" escape hatch — never a dead end. */}
+          <AuthButton label="Try again" onPress={() => router.replace('/')} />
+          <AuthLink
+            label="Continue without an account"
+            tone="quiet"
+            onPress={() => router.replace('/')}
+          />
         </View>
       </View>
     );
   }
 
-  return <AuthLoading />;
+  // Working: a calm interstitial with an explicit "Finishing sign-in…" label so
+  // the OAuth round-trip reads as progress, never a stall.
+  return (
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: colors.cream,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 16,
+      }}>
+      <ActivityIndicator color={colors.sleep} />
+      <Text style={{ fontFamily: fonts.body, fontSize: 15, color: colors.inkSoft }}>
+        Finishing sign-in…
+      </Text>
+    </View>
+  );
 }
