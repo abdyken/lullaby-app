@@ -4390,6 +4390,11 @@ check('DV1. the npm run android + npm run dev entry points still exist and point
     'node scripts/dev-client.mjs',
     'npm run dev must run dev-client.mjs',
   );
+  assert.equal(
+    PACKAGE_JSON.scripts?.['dev:clear'],
+    'node scripts/dev-client.mjs --clear',
+    'npm run dev:clear must use the interactive dev-client wrapper with cache clearing',
+  );
 });
 
 check('DV2. npm run dev falls back to another port when 8081 is busy — it never hard-fails on a non-Metro process', () => {
@@ -4417,6 +4422,25 @@ check('DV3. the dev launcher never force-kills arbitrary processes (SIGTERM only
   assert.ok(
     DEV_CLIENT_SRC.includes('Stopping stale Metro'),
     'a process is only ever stopped when it is the script’s own stale Metro',
+  );
+});
+
+check('DV4. the dev launcher gives Expo a real TTY so terminal hotkeys work', () => {
+  assert.ok(
+    DEV_CLIENT_SRC.includes("stdio: 'inherit'"),
+    'Expo must inherit stdin/stdout/stderr for Terminal UI hotkeys',
+  );
+  assert.ok(
+    !DEV_CLIENT_SRC.includes("stdio: ['inherit', 'pipe', 'pipe']"),
+    'Expo stdout/stderr must not be piped because that disables the interactive Terminal UI',
+  );
+  assert.ok(
+    !DEV_CLIENT_SRC.includes("child.stdout.on('data'"),
+    'dev-client must not depend on piped Expo stdout for readiness',
+  );
+  assert.ok(
+    DEV_CLIENT_SRC.includes('/_expo/open?platform=android&runtime=custom'),
+    'auto-open readiness should use Expo open endpoint polling instead of stdout piping',
   );
 });
 

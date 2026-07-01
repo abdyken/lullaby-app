@@ -174,8 +174,14 @@ export function BabyHeader({
       </Pressable>
 
       {/* Explicit, labeled account entry — sits inline left of the (absolute)
-          theme toggle, inside the reserved right padding. */}
-      {onAccount ? <AccountIconButton surfaceMode={surfaceMode} onPress={onAccount} /> : null}
+          theme toggle, inside the reserved right padding. The extra marginLeft
+          keeps a clear, intentional gap from the caregiver avatar cluster so the
+          person glyph doesn't crowd the "+" invite chip. */}
+      {onAccount ? (
+        <View style={{ marginLeft: 8 }}>
+          <AccountIconButton surfaceMode={surfaceMode} onPress={onAccount} />
+        </View>
+      ) : null}
 
       {onThemeToggle ? (
         <View style={{ position: 'absolute', top: 6, right: 2 }}>
