@@ -71,3 +71,42 @@ export function isProDevEntitlementEnabled(): boolean {
 export function resolveDevProEntitlement(isDev: boolean): boolean {
   return isDev && isProDevEntitlementEnabled();
 }
+
+/**
+ * RevenueCat platform we can configure for. Web / other platforms have no store,
+ * so the service treats them as "no RevenueCat config" and degrades to free.
+ */
+export type RevenueCatPlatform = 'ios' | 'android';
+
+function trimmedEnv(raw: string | undefined): string | null {
+  const value = raw?.trim();
+  return value && value.length > 0 ? value : null;
+}
+
+/**
+ * The public RevenueCat SDK key for a platform, or null if unset. iOS reads
+ * EXPO_PUBLIC_REVENUECAT_IOS_API_KEY; Android reads the ANDROID key. Never a
+ * hardcoded key — a missing key simply means "not configured" (no crash).
+ */
+export function getRevenueCatApiKey(platform: RevenueCatPlatform): string | null {
+  return trimmedEnv(
+    platform === 'ios'
+      ? process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY
+      : process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY,
+  );
+}
+
+/** The RevenueCat entitlement id that unlocks Pro. Defaults to 'pro'. */
+export function getRevenueCatEntitlementId(): string {
+  return trimmedEnv(process.env.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID) ?? 'pro';
+}
+
+/** The RevenueCat offering id to present. Defaults to 'default'. */
+export function getRevenueCatOfferingId(): string {
+  return trimmedEnv(process.env.EXPO_PUBLIC_REVENUECAT_OFFERING_ID) ?? 'default';
+}
+
+/** Whether this platform has a RevenueCat key configured (purchase is possible). */
+export function hasRevenueCatConfig(platform: RevenueCatPlatform): boolean {
+  return getRevenueCatApiKey(platform) !== null;
+}

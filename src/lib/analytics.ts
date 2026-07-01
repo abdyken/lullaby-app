@@ -43,7 +43,16 @@ export type AnalyticsEvent =
   // Pro Phase 3 — real weekly export/share flow (Pro-entitled users only). Same
   // coarse props; the shared text itself is descriptive/non-medical aggregates.
   | 'export_started'
-  | 'export_completed';
+  | 'export_completed'
+  // Pro Phase 4 — RevenueCat purchase / restore flow. Props stay coarse:
+  // source / surface / packageType / entitlement / errorCode / cancelled — never
+  // names, notes, prices, store receipts, or RevenueCat customer ids.
+  | 'purchase_started'
+  | 'purchase_completed'
+  | 'purchase_failed'
+  | 'restore_started'
+  | 'restore_completed'
+  | 'restore_failed';
 
 /** Small, serializable property bag stored in the row's `props` jsonb column. */
 export type AnalyticsProps = Record<string, string | number | boolean | null>;
