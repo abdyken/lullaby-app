@@ -18,7 +18,7 @@ import type { CareEvent } from '@/features/logging/domain/types';
 import { useLogging } from '@/features/logging/state/LoggingProvider';
 import { useAnalytics } from '@/lib/useAnalytics';
 import { fireMilestoneOnce, reached4DataDaysMilestoneKey } from '@/lib/analyticsMilestones';
-import { isProPreviewEnabled } from '@/lib/proPreview';
+import { getProMode } from '@/lib/proConfig';
 import { useAuth } from '@/state/AuthProvider';
 import { useLocalEvents } from '@/state/LocalEventProvider';
 import { useTheme } from '@/state/ThemeProvider';
@@ -276,9 +276,11 @@ export function InsightsScreen() {
           </View>
         ) : null}
 
-        {/* Non-paid Lullaby Pro preview — behind EXPO_PUBLIC_PRO_PREVIEW_ENABLED
-            (off by default), additive, never blocks logging. */}
-        {isProPreviewEnabled() && viewModel.dataDays >= 4 ? (
+        {/* Non-paid Lullaby Pro preview — only in fake-door "preview" mode
+            (EXPO_PUBLIC_PRO_PREVIEW_ENABLED on, PRO_ENABLED off; off by default).
+            Real Pro supersedes it (§11), so nothing shows here when PRO_ENABLED is
+            on and there is no paywall yet. Additive; never blocks logging. */}
+        {getProMode() === 'preview' && viewModel.dataDays >= 4 ? (
           <View style={{ marginTop: 13 }}>
             <ProPreviewCard />
           </View>
