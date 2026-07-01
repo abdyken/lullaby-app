@@ -3,10 +3,22 @@
 /**
  * Reliable Android dev-client launcher.
  *
- * Verifies a device is connected, makes Metro reachable over `adb reverse`,
- * frees a stale Metro on the port, starts Expo for the development build,
- * and auto-opens the installed dev build through the expo-development-client
- * deep link once Metro is ready. Ctrl+C cleanly stops the child Expo process.
+ * Verifies a device is connected, picks a usable Metro port, makes Metro reachable
+ * over `adb reverse` on that port, starts Expo for the development build, and
+ * auto-opens the installed dev build through the expo-development-client deep link
+ * once Metro is ready. Ctrl+C cleanly stops the child Expo process.
+ *
+ * Port selection (never fails just because a port is taken):
+ *   - Preferred port = `--port <n>` CLI arg, else EXPO_DEV_PORT, else 8081.
+ *   - Preferred port free                       → use it.
+ *   - Preferred port held by THIS script's own
+ *     stale Metro (node/expo/metro)             → stop it (SIGTERM) and reuse the
+ *                                                  port. Pre-existing behavior; the
+ *                                                  script owns its own port.
+ *   - Preferred port held by an UNRELATED,
+ *     non-Metro process (a browser, some server) → never touch it; scan upward
+ *                                                  (8082, 8083, …) for the next free
+ *                                                  port and use that instead.
  *
  * This does NOT build or install the app — run `npm run android` for that.
  */
@@ -15,9 +27,10 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 
 const root = process.cwd();
-const PORT = 8081;
-// expo-development-client deep link pointing Metro at the reversed loopback port.
-const DEEP_LINK = `lullaby://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A${PORT}`;
+
+const DEFAULT_PORT = 8081;
+// How far above the preferred port to look for a free one before giving up.
+const MAX_PORT_SCAN = 20;
 
 // Default the local-dev feature flag unless the caller already set it.
 if (!process.env.EXPO_PUBLIC_LOGGING_V2) {
@@ -69,18 +82,11 @@ function connectedDevice() {
   fail('No authorized Android device found. Plug in your phone (USB debugging on) or start an emulator, then run `npm run dev` again.');
 }
 
-function ensureReverse(serial) {
-  // Remove a stale 8081 reverse only if one already exists, then (re)apply.
-  const list = adb(['-s', serial, 'reverse', '--list'], { check: false });
-  if (/\btcp:8081\b/.test(list)) {
-    adb(['-s', serial, 'reverse', '--remove', `tcp:${PORT}`], { check: false });
-  }
-  try {
-    adb(['-s', serial, 'reverse', `tcp:${PORT}`, `tcp:${PORT}`]);
-    console.log(`[dev] adb reverse tcp:${PORT} -> device tcp:${PORT} ready.`);
-  } catch (err) {
-    fail(`adb reverse failed; Metro on the phone won't reach your machine.\n  ${err.message}`);
-  }
+// --- port selection -------------------------------------------------------
+
+/** A process on our port is "ours to reclaim" only if it looks like Metro/Expo. */
+function looksLikeMetro(args) {
+  return /node|expo|metro/i.test(args);
 }
 
 function pidsOnPort(port) {
@@ -94,34 +100,99 @@ function processArgs(pid) {
   return (res.stdout || '').trim();
 }
 
-function freePort(port) {
-  const pids = pidsOnPort(port);
-  if (pids.length === 0) return;
-  for (const pid of pids) {
-    if (String(pid) === String(process.pid)) continue;
-    const args = processArgs(pid);
-    const looksLikeMetro = /node|expo|metro/i.test(args);
-    if (!looksLikeMetro) {
-      fail(`Port ${port} is busy with PID ${pid}, which does not look like Metro:\n  ${args || '(unknown process)'}\nStop it manually, then retry.`);
+/** Classify a port: 'free', 'metro' (only our stale dev server), or 'blocked'. */
+function classifyPort(port) {
+  const pids = pidsOnPort(port).filter((pid) => String(pid) !== String(process.pid));
+  if (pids.length === 0) return { state: 'free', infos: [] };
+  const infos = pids.map((pid) => ({ pid, args: processArgs(pid) }));
+  const allMetro = infos.every((info) => looksLikeMetro(info.args));
+  return { state: allMetro ? 'metro' : 'blocked', infos };
+}
+
+/** Read the caller's preferred port from `--port <n>` / `--port=<n>` or EXPO_DEV_PORT. */
+function preferredPort() {
+  const argv = process.argv.slice(2);
+  let fromCli = null;
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--port' && argv[i + 1]) fromCli = argv[i + 1];
+    else if (argv[i].startsWith('--port=')) fromCli = argv[i].slice('--port='.length);
+  }
+  const raw = fromCli ?? process.env.EXPO_DEV_PORT ?? String(DEFAULT_PORT);
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 1024 || parsed > 65535) {
+    console.warn(`[dev] Ignoring invalid port "${raw}"; using ${DEFAULT_PORT}.`);
+    return DEFAULT_PORT;
+  }
+  return parsed;
+}
+
+/**
+ * Resolve a usable Metro port starting from `preferred`. Reclaims ONLY this
+ * script's own stale Metro on the preferred port (SIGTERM); a non-Metro process is
+ * never killed — we fall back to the next free port instead, so `npm run dev`
+ * never fails just because 8081 is taken by an unrelated app.
+ */
+function resolvePort(preferred) {
+  const primary = classifyPort(preferred);
+
+  if (primary.state === 'free') return preferred;
+
+  if (primary.state === 'metro') {
+    for (const { pid } of primary.infos) {
+      console.log(`[dev] Stopping stale Metro on port ${preferred} (PID ${pid}).`);
+      try {
+        process.kill(Number(pid), 'SIGTERM');
+      } catch {
+        /* already gone */
+      }
     }
-    console.log(`[dev] Stopping stale Metro on port ${port} (PID ${pid}).`);
-    try {
-      process.kill(Number(pid), 'SIGTERM');
-    } catch {
-      /* already gone */
+    sleepMs(1000); // let the OS release the socket
+    return preferred;
+  }
+
+  // 'blocked' — an unrelated, non-Metro process holds the preferred port. Leave it
+  // running and scan upward for the next genuinely free port (no killing).
+  const heldBy = primary.infos.map((info) => info.args || '(unknown process)').join(', ');
+  for (let port = preferred + 1; port <= preferred + MAX_PORT_SCAN; port += 1) {
+    if (classifyPort(port).state === 'free') {
+      console.log(`[dev] Port ${preferred} is busy with non-Metro process, using ${port} instead.`);
+      console.log(`[dev]   (${preferred} is held by: ${heldBy})`);
+      return port;
     }
   }
-  sleepMs(1000); // let the OS release the socket
+
+  fail(
+    `Port ${preferred} is busy with a non-Metro process and no free port was found in ` +
+      `${preferred + 1}-${preferred + MAX_PORT_SCAN}.\n  ${preferred} is held by: ${heldBy}\n` +
+      `Free a port, or set EXPO_DEV_PORT=<n> / pass \`-- --port <n>\`, then retry.`,
+  );
+}
+
+function ensureReverse(serial, port) {
+  // Remove a stale reverse for this port only if one already exists, then (re)apply.
+  const list = adb(['-s', serial, 'reverse', '--list'], { check: false });
+  if (new RegExp(`\\btcp:${port}\\b`).test(list)) {
+    adb(['-s', serial, 'reverse', '--remove', `tcp:${port}`], { check: false });
+  }
+  try {
+    adb(['-s', serial, 'reverse', `tcp:${port}`, `tcp:${port}`]);
+    console.log(`[dev] adb reverse tcp:${port} -> device tcp:${port} ready.`);
+  } catch (err) {
+    fail(`adb reverse failed; Metro on the phone won't reach your machine.\n  ${err.message}`);
+  }
 }
 
 function main() {
   const serial = connectedDevice();
   console.log(`[dev] Using Android device ${serial}.`);
 
-  freePort(PORT);
-  ensureReverse(serial);
+  const port = resolvePort(preferredPort());
+  // expo-development-client deep link pointing Metro at the reversed loopback port.
+  const deepLink = `lullaby://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A${port}`;
 
-  const expoArgs = ['expo', 'start', '--dev-client', '--clear', '--port', String(PORT), '--host', 'localhost'];
+  ensureReverse(serial, port);
+
+  const expoArgs = ['expo', 'start', '--dev-client', '--clear', '--port', String(port), '--host', 'localhost'];
   console.log(`[dev] Starting Metro: npx ${expoArgs.join(' ')}`);
 
   const child = spawn('npx', expoArgs, {
@@ -145,14 +216,14 @@ function main() {
     // device-side shell treats `?` as a literal, not a glob.
     const res = spawnSync(
       adbBin(),
-      ['-s', serial, 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', `'${DEEP_LINK}'`],
+      ['-s', serial, 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', `'${deepLink}'`],
       { encoding: 'utf8' }
     );
     if (res.error || res.status !== 0) {
       const msg = (res.stderr || res.stdout || res.error?.message || '').trim();
       console.error(`[dev] Could not auto-open the app (${msg || 'unknown error'}).`);
       console.error('[dev] Is the dev build installed? If not, run `npm run android` first.');
-      console.error(`[dev] To open manually:\n  adb shell am start -a android.intent.action.VIEW -d "${DEEP_LINK}"`);
+      console.error(`[dev] To open manually:\n  adb shell am start -a android.intent.action.VIEW -d "${deepLink}"`);
     } else {
       console.log('[dev] App launched. Metro is running here — press Ctrl+C to stop.');
     }

@@ -162,3 +162,38 @@ All must hold before recruiting parent pairs:
 - [ ] **No payments.**
 - [ ] **No RevenueCat.**
 - [ ] **No App Store / Google Play dependency** for the Android test.
+
+---
+
+## 10. Local Android dev loop
+
+Two commands, run from the repo root with a device plugged in (USB debugging on) or an
+emulator running. RevenueCat is a native dependency, so use `npm run android` (not just
+Metro) whenever native deps change.
+
+```
+npm run android   # builds + installs the debug/dev APK on the connected device
+npm run dev       # starts Metro/dev-client, sets adb reverse, opens the app
+```
+
+- **`npm run android`** ([scripts/android-dev.mjs](../scripts/android-dev.mjs)) builds the debug
+  APK (`:app:assembleDebug`), installs it on the selected device, and prints
+  `Installed. Now run: npm run dev`. It does **not** need Metro running first. Set
+  `ANDROID_SERIAL=<serial>` to target a specific device when several are attached.
+- **`npm run dev`** ([scripts/dev-client.mjs](../scripts/dev-client.mjs)) prefers port **8081**.
+  If **8081 is busy with an unrelated (non-Metro) process** — e.g. a browser — it does **not**
+  fail: it automatically picks the next free port (8082, 8083, …), sets `adb reverse` for that
+  port, starts Metro on it, and opens the dev build with the matching deep link. You'll see a
+  line like `Port 8081 is busy with non-Metro process, using 8082 instead.` **No need to
+  manually kill anything.** If 8081 is held by this script's own stale Metro, it's stopped and
+  the port reused (as before).
+- **Override the port** when you want a specific one:
+
+  ```
+  EXPO_DEV_PORT=8082 npm run dev
+  # or
+  npm run dev -- --port 8082
+  ```
+
+  The default (`npm run dev`) stays fully automatic — you never have to run
+  `npx expo start --port …` by hand. `Ctrl+C` stops Metro cleanly.
