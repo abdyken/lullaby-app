@@ -1,6 +1,7 @@
 # Lullaby — Retention-Test Readiness & Experiment Plan
 
-Status: APPROVED · Companion to `docs/pricing-strategy.md` and `docs/testflight-readiness.md`
+Status: APPROVED · Companion to `docs/pricing-strategy.md`, `docs/testflight-readiness.md`, and
+`docs/beta-distribution-and-caregiver-qa.md`
 
 Goal: get 3–5 real parent-pairs onto TestFlight and **measure activation + retention** before
 any paywall is built. We are **not** building payments here. The pricing north-star lives in
@@ -10,6 +11,13 @@ how to read the result).
 
 The single number that should unlock a future paywall flip is **retention** (do parents come
 back night after night), not a finished integration.
+
+> **Before recruiting parent-pairs:** the operational distribution + QA runbook lives in
+> `docs/beta-distribution-and-caregiver-qa.md` (Android-first beta install, invite copy, and the
+> two-phone sync checklist). **Beta distribution and caregiver QA must pass before recruiting
+> parent pairs**, and **caregiver invite / two-phone sync is a blocker for the parent retention
+> test** — if two caregivers can't join the same baby and see each other's logs, the handoff
+> wedge isn't real and the experiment can't measure it.
 
 ---
 
