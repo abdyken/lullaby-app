@@ -69,7 +69,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
     // surface, or a stale signed-out screen while the status is still unknown.
     case 'authenticating':
     case 'postAuthSync':
-      return <AuthTransition message="Preparing your account…" />;
     case 'loading':
     default:
       return <AuthTransition />;

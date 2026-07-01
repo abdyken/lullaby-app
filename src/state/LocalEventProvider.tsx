@@ -57,6 +57,7 @@ import { type AnalyticsEvent } from '@/lib/analytics';
 import { useAnalytics } from '@/lib/useAnalytics';
 import { fireMilestoneOnce, firstLogMilestoneKey } from '@/lib/analyticsMilestones';
 import { hapticSave, hapticUndo } from '@/lib/haptics';
+import { logStartupStep } from '@/lib/startupDiagnostics';
 import { useAuth } from '@/state/AuthProvider';
 import {
   diffEvents,
@@ -175,6 +176,9 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
   const dismissToast = useCallback(() => setToast(null), []);
 
   const { session, baby } = useAuth();
+  const authUserId = session?.user.id ?? null;
+  const authBabyId = baby?.id;
+  const authBabyReady = baby != null;
   const track = useAnalytics();
   // first_log_created fires once per account+baby (persisted, scoped by
   // userId+babyId). The ref tracks the last key it fired for, so a burst of saves
@@ -201,8 +205,15 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
+    logStartupStep('events hydrate start', {
+      signedIn: authUserId != null,
+      babyReady: authBabyReady,
+    });
     (async () => {
-      const repository = await resolveRepository();
+      const repository = await resolveRepository({
+        userId: authUserId,
+        babyId: authBabyId,
+      });
       if (cancelled) return;
       repositoryRef.current = repository;
       setSyncMode(repository.mode);
@@ -245,12 +256,16 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
         }
       }
       setIsHydrated(true);
+      logStartupStep('events hydrate ready', {
+        mode: repository.mode,
+        restored: saved != null,
+      });
     })();
     return () => {
       cancelled = true;
       unsubscribe?.();
     };
-  }, []);
+  }, [authUserId, authBabyId, authBabyReady]);
 
   // Persist on every change, but only after hydration.
   //  - local-only: whole-state save to AsyncStorage (unchanged; writes the seed

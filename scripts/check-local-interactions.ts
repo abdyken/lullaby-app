@@ -4485,6 +4485,18 @@ const INSIGHTS_SCREEN_SRC = readFileSync(
 );
 const TABS_LAYOUT_SRC = readFileSync(new URL('../src/app/(tabs)/_layout.tsx', import.meta.url), 'utf8');
 const PKG_JSON_SRC = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
+const AUTH_TRANSITION_SRC = readFileSync(
+  new URL('../src/components/auth/AuthTransition.tsx', import.meta.url),
+  'utf8',
+);
+const RESOLVE_REPOSITORY_SRC = readFileSync(
+  new URL('../src/sync/resolveRepository.ts', import.meta.url),
+  'utf8',
+);
+const STARTUP_DIAGNOSTICS_SRC = readFileSync(
+  new URL('../src/lib/startupDiagnostics.ts', import.meta.url),
+  'utf8',
+);
 
 // Core-logging leaves that must stay free of any Pro dependency.
 const CORE_LOGGING_SRCS: Array<[string, string]> = [
@@ -4561,6 +4573,60 @@ const BANNED_PRO_IMPORTS = [
   '@/lib/revenueCat',
   'react-native-purchases',
 ];
+
+check('ST1. the app-shell startup gate owns v2 hydration before the tab navigator mounts', () => {
+  const gateFn = TABS_LAYOUT_SRC.indexOf('function AppShellStartupGate');
+  const gateUse = TABS_LAYOUT_SRC.indexOf('<AppShellStartupGate>');
+  const tabs = TABS_LAYOUT_SRC.indexOf('<Tabs');
+  assert.ok(gateFn !== -1, 'Tabs layout must define the app-shell startup gate');
+  assert.ok(gateUse !== -1 && tabs !== -1 && gateUse < tabs, 'the startup gate must wrap Tabs');
+  const gateBody = TABS_LAYOUT_SRC.slice(gateFn, TABS_LAYOUT_SRC.indexOf('export default function TabsLayout'));
+  assert.ok(gateBody.includes('useLogging()'), 'the gate must read logging hydration from useLogging');
+  assert.ok(gateBody.includes('return <AuthTransition />'), 'the gate owns the full-screen loading screen');
+});
+
+check('ST2. Home no longer renders a nested AuthLoading inside the tab shell', () => {
+  assert.ok(!TONIGHT_SRC.includes('import { AuthLoading }'), 'Tonight must not import AuthLoading');
+  assert.ok(
+    !/waitingForV2Hydration\s*\?\s*<AuthLoading/.test(TONIGHT_SRC),
+    'Tonight must not swap its Screen body to AuthLoading while tabs are mounted',
+  );
+});
+
+check('ST3. startup loading copy is stable across auth loading states', () => {
+  assert.ok(
+    AUTH_TRANSITION_SRC.includes("AUTH_TRANSITION_MESSAGE = 'Preparing Lullaby...'"),
+    'AuthTransition must define the single default startup copy',
+  );
+  assert.ok(
+    !AUTH_GATE_SRC.includes('Preparing your account'),
+    'AuthGate must not override startup copy for postAuthSync/loading and cause text bouncing',
+  );
+});
+
+check('ST4. repository startup reuses known auth + baby ids instead of re-fetching them', () => {
+  assert.ok(RESOLVE_REPOSITORY_SRC.includes('type RepositoryBootstrap'), 'resolveRepository accepts bootstrap ids');
+  assert.ok(RESOLVE_REPOSITORY_SRC.includes('input.userId === undefined'), 'userId input controls session re-read');
+  assert.ok(RESOLVE_REPOSITORY_SRC.includes('input.babyId === undefined'), 'babyId input controls linked-baby re-read');
+  assert.ok(
+    LOCAL_EVENT_PROVIDER_SRC.includes('resolveRepository({') &&
+      LOCAL_EVENT_PROVIDER_SRC.includes('userId: authUserId') &&
+      LOCAL_EVENT_PROVIDER_SRC.includes('babyId: authBabyId'),
+    'LocalEventProvider must pass the already-known auth/baby ids into resolveRepository',
+  );
+});
+
+check('ST5. startup diagnostics are dev-only and routed through one helper', () => {
+  assert.ok(STARTUP_DIAGNOSTICS_SRC.includes('if (!__DEV__) return'), 'startup logs must be dev-only');
+  assert.ok(AUTH_PROVIDER_SRC.includes('logStartupStep'), 'AuthProvider should emit startup milestones');
+  assert.ok(TABS_LAYOUT_SRC.includes('logStartupStep'), 'Tabs layout should log app-shell readiness');
+  assert.ok(
+    LOCAL_EVENT_PROVIDER_SRC.includes('logStartupStep') && CORE_LOGGING_SRCS.some(([name, src]) =>
+      name === 'features/logging/state/LoggingProvider.tsx' && src.includes('logStartupStep'),
+    ),
+    'event and logging providers should log their hydrate milestones',
+  );
+});
 
 check('W1. proConfig reads EXPO_PUBLIC_PRO_ENABLED and treats "true"/"1" as enabled', () => {
   assert.ok(PRO_CONFIG_SRC.includes('EXPO_PUBLIC_PRO_ENABLED'), 'proConfig references the master flag');
