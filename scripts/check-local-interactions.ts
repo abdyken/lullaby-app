@@ -220,6 +220,14 @@ import {
   undoLoggingMutation,
   type LoggingActor,
 } from '../src/features/logging/application';
+// Caregiver invite beta share copy (this task) — the pure message builder behind
+// InviteCaregiverSheet's Share action. The .tsx imports react-native and can't
+// load here, so the string logic lives in a dependency-free leaf and is covered
+// directly, alongside source-level checks on the role-selector markup.
+import {
+  buildInviteShareMessage,
+  resolveAppInstallUrl,
+} from '../src/components/auth/inviteShareMessage';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
 const NOW = Date.parse('2026-06-17T00:00:00.000Z');
@@ -3848,6 +3856,86 @@ async function runAsyncChecks(): Promise<void> {
     await storage.removeItem(SECURE_SESSION_KEY); // idempotent — no throw on an empty store
   });
 }
+
+// V. Caregiver invite — role-selector stability + beta-tester share copy (this
+// task). The role chips must always render all three roles (Mom/Dad/Other) and
+// never conditionally drop the selected one; the share text must point beta
+// testers at an install link (or a link-less fallback) and never leak a secret.
+const INVITE_SHEET_SRC = readFileSync(
+  new URL('../src/components/auth/InviteCaregiverSheet.tsx', import.meta.url),
+  'utf8',
+);
+const INVITE_MSG_SRC = readFileSync(
+  new URL('../src/components/auth/inviteShareMessage.ts', import.meta.url),
+  'utf8',
+);
+const INVITE_CODE = 'ABCD-EFGH';
+const BETA_INSTALL_URL = 'https://example.test/install/lullaby';
+
+check('V1. the role chips render Mom, Dad and Other as stable options', () => {
+  for (const label of ['Mom', 'Dad', 'Other']) {
+    assert.ok(INVITE_SHEET_SRC.includes(`label: '${label}'`), `role option ${label} present`);
+  }
+  // All three come from a single .map over ROLES — every option is always rendered.
+  assert.match(INVITE_SHEET_SRC, /ROLES\.map\(/);
+});
+
+check('V2. the selected role is styled, never conditionally removed or hidden', () => {
+  // Selection only drives styling (active ? … : …); it must not gate rendering
+  // of an option, and no label/chip is ever fully transparent.
+  assert.ok(!/active\s*&&\s*</.test(INVITE_SHEET_SRC), 'no `active && <…>` conditional render of an option');
+  assert.ok(!/opacity:\s*0(?![.\d])/.test(INVITE_SHEET_SRC), 'no opacity:0 on any role label/chip');
+  // The painted surface sits on an inner View (Android repaint gotcha) with a
+  // constant 2px border in both states, so selecting never jumps the layout.
+  assert.match(INVITE_SHEET_SRC, /borderWidth:\s*2/);
+});
+
+check('V3. share copy WITH an install link lists install → join → enter-code steps', () => {
+  const msg = buildInviteShareMessage({ code: INVITE_CODE, installUrl: BETA_INSTALL_URL });
+  assert.ok(msg.includes('Install the Lullaby beta'), 'beta install line present');
+  assert.ok(msg.includes(BETA_INSTALL_URL), 'the configured install link is included');
+  assert.ok(msg.includes('Join with a code'), 'join-with-a-code instruction present');
+  assert.ok(msg.includes(INVITE_CODE), 'the invite code is included');
+  assert.ok(msg.includes('This invite expires in 7 days.'), 'expiry reminder present');
+});
+
+check('V4. share copy WITHOUT an install link uses the "link I sent you" fallback', () => {
+  const msg = buildInviteShareMessage({ code: INVITE_CODE, installUrl: null });
+  assert.ok(msg.includes('Install the Lullaby beta from the link I sent you'), 'fallback install line');
+  assert.ok(msg.includes('Join with a code'), 'join-with-a-code instruction present');
+  assert.ok(msg.includes(INVITE_CODE), 'the invite code is included');
+  assert.ok(msg.includes('This invite expires in 7 days.'), 'expiry reminder present');
+  assert.ok(!/https?:\/\//.test(msg), 'no URL is fabricated when none is configured');
+});
+
+check('V5. resolveAppInstallUrl treats unset/blank as no link, trims a real one', () => {
+  assert.equal(resolveAppInstallUrl(undefined), null);
+  assert.equal(resolveAppInstallUrl(''), null);
+  assert.equal(resolveAppInstallUrl('   '), null);
+  assert.equal(resolveAppInstallUrl('  https://example.test/x  '), 'https://example.test/x');
+});
+
+check('V6. no hardcoded App Store / Google Play URL is introduced', () => {
+  for (const src of [INVITE_SHEET_SRC, INVITE_MSG_SRC]) {
+    for (const banned of ['apps.apple.com', 'itunes.apple.com', 'play.google.com', 'testflight.apple.com']) {
+      assert.ok(!src.includes(banned), `must not hardcode ${banned}`);
+    }
+  }
+});
+
+check('V7. no RevenueCat / paywall / subscription code is introduced in the invite flow', () => {
+  for (const src of [INVITE_SHEET_SRC, INVITE_MSG_SRC]) {
+    for (const banned of [/RevenueCat/i, /\bPurchases\b/, /paywall/i, /subscription/i]) {
+      assert.ok(!banned.test(src), `must not reference ${banned}`);
+    }
+  }
+});
+
+check('V8. the invite share text never leaks a Supabase URL or anon key', () => {
+  const msg = buildInviteShareMessage({ code: INVITE_CODE, installUrl: BETA_INSTALL_URL });
+  assert.ok(!/supabase/i.test(msg), 'no supabase reference in share text');
+  assert.ok(!/eyJ[A-Za-z0-9]/.test(msg), 'no JWT-looking anon key in share text');
+});
 
 runAsyncChecks()
   .then(() => {
