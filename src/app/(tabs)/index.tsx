@@ -35,7 +35,7 @@ import { TonightStatus } from '@/components/TonightStatus';
 import { buildHandoffSummary, buildQuickLogMeta, type PreviewState } from '@/data/currentState';
 import { LOCAL_CURSOR_CONTEXT } from '@/data/handoffCursor';
 import type { Baby } from '@/data/models';
-import { useAnalytics } from '@/lib/analytics';
+import { useAnalytics } from '@/lib/useAnalytics';
 import { hapticSave } from '@/lib/haptics';
 import { baby as seedBaby } from '@/data/mock';
 import { useAuth } from '@/state/AuthProvider';

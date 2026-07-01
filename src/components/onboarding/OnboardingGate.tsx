@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
 import { AuthLoading } from '@/components/auth/AuthLoading';
-import { useAnalytics } from '@/lib/analytics';
+import { useAnalytics } from '@/lib/useAnalytics';
 
 import { OnboardingScreen } from './OnboardingScreen';
 import {

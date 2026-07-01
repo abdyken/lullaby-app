@@ -12,7 +12,7 @@
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
-import { useAnalytics } from '@/lib/analytics';
+import { useAnalytics } from '@/lib/useAnalytics';
 import { useTheme } from '@/state/ThemeProvider';
 import { colors, fonts, radii, surfaces } from '@/theme';
 

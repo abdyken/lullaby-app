@@ -16,7 +16,7 @@ import type { InsightStatViewModel, InsightsViewModel } from '@/features/insight
 import { isLoggingV2Enabled } from '@/features/logging';
 import type { CareEvent } from '@/features/logging/domain/types';
 import { useLogging } from '@/features/logging/state/LoggingProvider';
-import { useAnalytics } from '@/lib/analytics';
+import { useAnalytics } from '@/lib/useAnalytics';
 import { fireMilestoneOnce, reached4DataDaysMilestoneKey } from '@/lib/analyticsMilestones';
 import { isProPreviewEnabled } from '@/lib/proPreview';
 import { useAuth } from '@/state/AuthProvider';

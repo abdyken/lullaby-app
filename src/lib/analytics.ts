@@ -8,12 +8,17 @@
  * and means real analytics only flow from the configured "retention" build —
  * exactly where they are useful. Fire-and-forget; an insert failure never throws
  * and never blocks the UI.
+ *
+ * Leaf module: this file must NOT import AuthProvider. AuthProvider imports
+ * `trackEvent` from here, so importing it back formed the require cycle
+ *   src/lib/analytics.ts → src/state/AuthProvider.tsx → src/lib/analytics.ts
+ * The React hook that binds events to the signed-in identity lives in
+ * `useAnalytics.ts` (the seam that depends on both); callers pass identity to
+ * `trackEvent` explicitly, so this stays a pure, dependency-light service.
  */
-import { useCallback, useMemo } from 'react';
 import { Platform } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
-import { useAuth } from '@/state/AuthProvider';
 
 /** The closed set of events instrumented for the activation/retention funnel. */
 export type AnalyticsEvent =
@@ -73,25 +78,4 @@ export function trackEvent(
         // Network/transport rejection — swallow; analytics is best-effort.
       },
     );
-}
-
-/**
- * Hook form: returns a stable `track(event, props?)` bound to the current auth
- * identity. Safe to call from any screen/provider under AuthProvider.
- */
-export function useAnalytics(): (event: AnalyticsEvent, props?: AnalyticsProps) => void {
-  const { session, baby, caregiver } = useAuth();
-  const identity = useMemo<AnalyticsIdentity>(
-    () => ({
-      userId: session?.user.id ?? null,
-      babyId: baby?.id ?? null,
-      caregiverId: caregiver?.id ?? null,
-    }),
-    [session?.user.id, baby?.id, caregiver?.id],
-  );
-
-  return useCallback(
-    (event: AnalyticsEvent, props?: AnalyticsProps) => trackEvent(event, identity, props),
-    [identity],
-  );
 }

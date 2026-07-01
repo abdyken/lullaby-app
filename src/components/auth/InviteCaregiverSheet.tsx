@@ -14,7 +14,7 @@ import { Modal, Pressable, Share, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { BabyInvite, CaregiverRole } from '@/data/models';
-import { useAnalytics } from '@/lib/analytics';
+import { useAnalytics } from '@/lib/useAnalytics';
 import { hapticSuccess } from '@/lib/haptics';
 import { useAuth } from '@/state/AuthProvider';
 import { createInvite, formatInviteCode, getActiveInvites } from '@/sync';

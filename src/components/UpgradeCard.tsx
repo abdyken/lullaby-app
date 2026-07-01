@@ -12,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
-import { useAnalytics } from '@/lib/analytics';
+import { useAnalytics } from '@/lib/useAnalytics';
 import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
 type Props = {
