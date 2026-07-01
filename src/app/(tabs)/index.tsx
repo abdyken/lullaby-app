@@ -11,7 +11,8 @@
  * across restarts). Tapping the toggle lets the native circular-reveal module
  * screenshot the current window, then the real app commits the new mode beneath it.
  */
-import { useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 
 import { AccountSheet } from '@/components/auth/AccountSheet';
@@ -31,9 +32,10 @@ import { QuickLogRow } from '@/components/QuickLogRow';
 import { Screen } from '@/components/Screen';
 import { TimelineCard } from '@/components/TimelineCard';
 import { TonightStatus } from '@/components/TonightStatus';
-import { buildQuickLogMeta, type PreviewState } from '@/data/currentState';
+import { buildHandoffSummary, buildQuickLogMeta, type PreviewState } from '@/data/currentState';
 import { LOCAL_CURSOR_CONTEXT } from '@/data/handoffCursor';
 import type { Baby } from '@/data/models';
+import { useAnalytics } from '@/lib/analytics';
 import { hapticSave } from '@/lib/haptics';
 import { baby as seedBaby } from '@/data/mock';
 import { useAuth } from '@/state/AuthProvider';
@@ -159,8 +161,10 @@ export default function TonightScreen() {
   // local-only mode. A soft FALLBACK_BABY covers a brief missing Supabase read.
   const isSupabase = syncMode === 'supabase';
   const baby = activeBaby ?? FALLBACK_BABY;
-  const caregivers =
-    activeCaregivers.length > 0 ? activeCaregivers : ownCaregiver ? [ownCaregiver] : [];
+  const caregivers = useMemo(
+    () => (activeCaregivers.length > 0 ? activeCaregivers : ownCaregiver ? [ownCaregiver] : []),
+    [activeCaregivers, ownCaregiver],
+  );
   // Age derives from the baby's real birth date against the live clock (no more
   // frozen demo date), so it is correct for both the seed and a real baby.
   const ageWeeks = ageInWeeks(baby.birthDate);
@@ -177,6 +181,28 @@ export default function TonightScreen() {
   // re-reads it (the seeded night shows its catch-up story again, not "Nothing
   // new"). resetNonce never changes in Supabase mode.
   const { cursor, ready: cursorReady, markCaughtUp } = useHandoffCursor(cursorContext, resetNonce);
+
+  const track = useAnalytics();
+  // handoff_has_new_on_open — fire once per focus, only when there is genuinely
+  // new caregiver activity on open (the wedge moment). Live values read from a ref
+  // so the focus callback stays stable and never re-runs on the 1s clock tick.
+  const handoffDataRef = useRef({ events, caregivers, currentCaregiverId, cursor });
+  useEffect(() => {
+    handoffDataRef.current = { events, caregivers, currentCaregiverId, cursor };
+  }, [events, caregivers, currentCaregiverId, cursor]);
+  useFocusEffect(
+    useCallback(() => {
+      const data = handoffDataRef.current;
+      const summary = buildHandoffSummary(
+        data.events,
+        data.caregivers,
+        data.currentCaregiverId,
+        data.cursor ?? null,
+        Date.now(),
+      );
+      if (summary.hasNew) track('handoff_has_new_on_open');
+    }, [track]),
+  );
 
   const { mode: surfaceMode, isTransitioning, toggleThemeFromPoint } = useTheme();
 

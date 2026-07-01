@@ -38,6 +38,7 @@ import {
 import { clearLocalEventStorage } from '@/data/localStorage';
 import { baby as seedBaby, caregivers as seedCaregivers } from '@/data/mock';
 import type { Baby, Caregiver, CaregiverRole } from '@/data/models';
+import { trackEvent } from '@/lib/analytics';
 import { calmAuthErrorMessage } from '@/lib/authErrors';
 import { getAuthRedirectUrl, startGoogleOAuth } from '@/lib/authLinking';
 import { authWarn } from '@/lib/authLogger';
@@ -602,7 +603,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setBusy(true);
       setErrorMessage(null);
       try {
-        await ensureCaregiverSetup({
+        const { babyId } = await ensureCaregiverSetup({
           caregiverId: session.user.id,
           displayName: fields.displayName.trim(),
           role: fields.role,
@@ -610,6 +611,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           babyName: fields.babyName.trim(),
           birthDate: fields.birthDate,
         });
+        trackEvent(
+          'baby_profile_created',
+          { userId: session.user.id, babyId, caregiverId: session.user.id },
+          { method: 'account' },
+        );
         await evaluate(session); // → ready
       } catch (e) {
         if (mounted.current) {
@@ -628,12 +634,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setBusy(true);
       setErrorMessage(null);
       try {
-        await acceptInvite({
+        const { babyId } = await acceptInvite({
           caregiverId: session.user.id,
           code: fields.code,
           displayName: fields.displayName.trim(),
           role: fields.role,
           colorHex: fields.colorHex,
+        });
+        trackEvent('caregiver_invite_accepted', {
+          userId: session.user.id,
+          babyId,
+          caregiverId: session.user.id,
         });
         hapticSuccess(); // affirm the join landed before the app swaps in
         await evaluate(session); // → ready (now linked to the shared baby)
