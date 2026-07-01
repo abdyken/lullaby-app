@@ -7,6 +7,11 @@ ships from it today is the phased infrastructure in §7, and **no paywall goes l
 retention is proven** (see `docs/retention-test-plan.md`). No payment, RevenueCat,
 subscription, or paywall code exists in the app yet.
 
+> **The concrete technical build plan is `docs/pro-implementation-plan.md`** — it turns the
+> §7 architecture into a step-by-step ticket (entitlement table, RevenueCat wiring, feature
+> gates, UI, analytics, testing, rollout). The canonical entitlement table there is
+> **`pro_entitlements`**, which refines the `subscriptions` sketch in §7 below.
+
 ---
 
 ## 1. Positioning (read this first)
@@ -125,7 +130,9 @@ It needs a config plugin + the existing custom dev client (not Expo Go).
 3. The app reads **family entitlement from Supabase** (the source of truth for cross-caregiver
    unlock), with RevenueCat as the purchase/restore mechanism + a fast local cache.
 
-**New table (future migration), mirroring the `events` RLS/membership model:**
+**New table (future migration), mirroring the `events` RLS/membership model.** The sketch below
+is superseded by the concrete **`pro_entitlements`** schema in `docs/pro-implementation-plan.md §5`
+(same baby-scoped, service-role-write, caregiver-read model — that doc is the build reference):
 
 ```
 public.subscriptions
