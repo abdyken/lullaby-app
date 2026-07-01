@@ -1,6 +1,6 @@
 # Lullaby — Pro Implementation Plan (technical build ticket)
 
-Status: PHASE 3 IN PROGRESS (foundation + gates + paywall skeleton + real weekly export landed; RevenueCat/purchases/restore/migration still not built)
+Status: PHASE 4 IN PROGRESS (RevenueCat purchases + restore landed; Supabase pro_entitlements/webhook household backend still not built)
 · Branch: `feat/revenuecat-pro-mvp`
 Companion to `docs/pricing-strategy.md` (the monetization north-star), `docs/retention-test-plan.md`
 (the experiment that must clear before a live paywall), and `docs/beta-distribution-and-caregiver-qa.md`.
@@ -140,6 +140,104 @@ true → "Export this week" opens the OS share sheet with the generated recap.
   still resolves only from the dev override.
 - No pediatrician-summary export yet (the builder is the recap; the doctor
   summary layout is a fast-follow), no history-depth gate yet.
+
+---
+
+## Phase 4 implementation status (RevenueCat purchases + restore)
+
+**Landed** — real StoreKit / Play Billing purchases through RevenueCat, with
+CustomerInfo as the **on-device source of truth** for `isPro` (the Supabase
+household backend is a later phase):
+
+- Installed **`react-native-purchases@10.4.0`** (NOT `react-native-purchases-ui` —
+  we keep our own `PaywallSheet`). No config plugin is required; a dev-client /
+  EAS rebuild picks up the native module via autolinking.
+- `src/lib/proConfig.ts` — `getRevenueCatApiKey(platform)`,
+  `getRevenueCatEntitlementId()` (default `pro`), `getRevenueCatOfferingId()`
+  (default `default`), `hasRevenueCatConfig(platform)`. Keys come from env only;
+  a missing key means "not configured" (never a crash).
+- `src/lib/revenueCat.ts` — the **only** module that imports the SDK. Configures
+  once per session with `appUserID = supabase user.id` (logs in on identity
+  change, logs out on sign-out so entitlement never leaks between accounts),
+  exposes `getRevenueCatCustomerInfo` / `getRevenueCatOffering` /
+  `purchaseRevenueCatPackage` / `restoreRevenueCatPurchases` /
+  `hasActiveRevenueCatEntitlement`, and `normalizeRevenueCatError` (coarse
+  `{ code, message, cancelled }` — a user cancel is calm). No Supabase, no URL.
+- `src/state/ProProvider.tsx` — now uses `useAuth()`; configures RevenueCat and
+  loads the offering + CustomerInfo **only when** Pro is enabled, signed-in, and a
+  platform key exists. Exposes `packages`, `paywallStatus`, `canPurchase`,
+  `isPurchasing`/`isRestoring`, `purchaseError`/`restoreError`, `purchasePackage`,
+  `restorePurchases`. Fires the purchase/restore analytics. The dev override still
+  unlocks `isPro`. Degrades calmly (unconfigured / signed-out / unavailable). It
+  never imports the SDK directly and writes no Supabase.
+- `src/components/pro/PaywallSheet.tsx` — renders real packages using the store's
+  own `priceString` (never hardcoded), a purchase CTA per package, a **real**
+  Restore purchase, and calm states (unconfigured / sign-in / loading / no
+  packages / already-active). Safety copy kept (not medical; store-managed billing;
+  cancel/manage in store settings). No `$`, no external link, no SDK import.
+- `src/lib/analytics.ts` — added `purchase_started` / `purchase_completed` /
+  `purchase_failed` / `restore_started` / `restore_completed` / `restore_failed`
+  (coarse `surface`/`packageType`/`entitlement`/`errorCode`/`cancelled` only).
+- Weekly export (Phase 3) unlocks automatically once `isPro` flips true after a
+  purchase / restore — no change needed to ProPreviewCard.
+- `scripts/check-local-interactions.ts` §Z (+ rescoped §W9/§W11/§X3/§X7/§Y8) —
+  RevenueCat installed but SDK-isolated to the service; keys from env, none
+  hardcoded; real purchase/restore surface; the six new events.
+
+**Intentionally NOT built in Phase 4** (household backend — next phase):
+
+- No Supabase `pro_entitlements` table / migration, no RevenueCat **webhook** /
+  Edge Function. Entitlement is device-local this phase, so a second caregiver on
+  the same baby does **not** yet inherit Pro until they purchase/restore
+  themselves. Cross-caregiver, reinstall-proof unlock lands with §4–§6.
+- No external payment links, no Stripe / web checkout, no hardcoded pricing.
+
+---
+
+## Phase 4 QA — env, dashboards, and sandbox test steps
+
+**Required env (build-time `EXPO_PUBLIC_*`):**
+
+```
+EXPO_PUBLIC_PRO_ENABLED=1
+EXPO_PUBLIC_PRO_PREVIEW_ENABLED=0
+EXPO_PUBLIC_REVENUECAT_IOS_API_KEY=<public iOS SDK key, appl_…>
+EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY=<public Android SDK key, goog_… — optional>
+EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID=pro
+EXPO_PUBLIC_REVENUECAT_OFFERING_ID=default
+# Dev-only bypass to exercise Pro without a purchase (never in a shipped build):
+EXPO_PUBLIC_PRO_DEV_ENTITLEMENT=1
+```
+
+**RevenueCat dashboard (app.revenuecat.com):**
+- Create the iOS app (and Android later); copy the **public** SDK keys into the
+  env above (never commit real keys).
+- Entitlement **`pro`**. Offering **`default`** with packages **Monthly** and
+  **Annual** attached to the store products below.
+
+**App Store Connect (iOS):**
+- Auto-renewable subscription products **`lullaby_pro_monthly`** and
+  **`lullaby_pro_yearly`** in one subscription group; prices are set in ASC and
+  read back through RevenueCat `priceString` (never hardcoded in the app).
+- A **sandbox tester** account (Users and Access → Sandbox).
+
+**Sandbox purchase test:**
+1. Build the dev client / TestFlight build with the env above and sign in.
+2. Open Insights (needs `dataDays >= 4`) → Lullaby Pro card → "See what's included"
+   → the paywall lists Monthly/Annual with store prices.
+3. Tap a package → complete the sandbox purchase → paywall shows "You're all set"
+   and "Export this week" now shares the real recap. `purchase_started` →
+   `purchase_completed` fire; cancelling fires `purchase_failed` with
+   `cancelled: true` and shows no scary error.
+
+**Restore purchase test:**
+1. Delete + reinstall (or a second device) and sign in with the same account.
+2. Open the paywall → **Restore purchase** → active entitlement re-grants Pro
+   (`restore_started` → `restore_completed`). With no purchase it shows
+   "No active subscription found." (`restore_failed`, `no_entitlement`).
+
+**Degrade-calmly checks:** no key → "not configured in this build yet"; signed-out
+→ "Sign in to subscribe"; logging + first caregiver invite unaffected throughout.
 
 ---
 

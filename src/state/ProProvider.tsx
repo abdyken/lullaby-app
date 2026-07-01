@@ -1,75 +1,262 @@
 /**
  * ProProvider — the React seam for "Pro" entitlement state.
  *
- * Phase 1 is a FOUNDATION SKELETON only. It resolves the Pro mode from the build
- * flags (via @/lib/proConfig) and exposes an entitlement (`isPro`) plus a paywall
- * open/close latch, so later phases can wire RevenueCat + the Supabase
- * `pro_entitlements` row behind the same shape without touching call sites.
+ * Phase 4 wires the RevenueCat purchase flow behind the same shape the earlier
+ * phases used, so call sites (UpgradeCard / ProPreviewCard / PaywallSheet) did not
+ * change their contract. It:
+ *   - configures RevenueCat (via @/lib/revenueCat) ONLY when Pro is enabled, a
+ *     signed-in session exists, and the platform has an API key,
+ *   - reads CustomerInfo → `isPro` (RevenueCat is the on-device source of truth
+ *     this phase; the Supabase `pro_entitlements` household row is a later phase),
+ *   - loads the configured offering into SDK-free `packages`,
+ *   - exposes real `purchasePackage` / `restorePurchases`.
  *
- * What it deliberately does NOT do yet (see docs/pro-implementation-plan.md §12):
- *   - no RevenueCat SDK, no purchases, no restore
- *   - no network / Supabase entitlement read
- *   - no real paywall UI
- * It also must not break anything: it never requires a signed-in user, never
- * touches Supabase, never clears data, and never blocks rendering. It does not
- * import AuthProvider — entitlement is baby-scoped in a later phase, but Phase 1
- * needs no identity, which keeps this a light, always-safe wrapper.
+ * It never imports the RevenueCat SDK directly (that lives only in
+ * @/lib/revenueCat), never writes Supabase, never blocks rendering, never gates
+ * logging, and degrades calmly when keys/products are missing or the user is
+ * signed out. The dev/QA override (EXPO_PUBLIC_PRO_DEV_ENTITLEMENT, __DEV__ only)
+ * still unlocks `isPro` so Pro can be exercised before store products exist.
  *
- * `isPro` defaults to false. The only way it becomes true in Phase 1 is the
- * dev/QA override EXPO_PUBLIC_PRO_DEV_ENTITLEMENT, and only in a __DEV__ build
- * (resolveDevProEntitlement) — a shipped build always resolves free.
- *
- * No useEffect: all state uses lazy initializers, so there is no setState-in-
- * effect (the expo lint / React Compiler rule) and no render-time work.
+ * Effects are lint/React-Compiler-safe: state is set only inside async callbacks,
+ * never synchronously in the effect body.
  */
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { Platform } from 'react-native';
 
-import { getProMode, isProEnabled, resolveDevProEntitlement, type ProMode } from '@/lib/proConfig';
+import {
+  getProMode,
+  getRevenueCatEntitlementId,
+  hasRevenueCatConfig,
+  isProEnabled,
+  resolveDevProEntitlement,
+  type ProMode,
+  type RevenueCatPlatform,
+} from '@/lib/proConfig';
+import { useAnalytics } from '@/lib/useAnalytics';
+import {
+  configureRevenueCat,
+  findRawPackage,
+  getRevenueCatCustomerInfo,
+  getRevenueCatOffering,
+  hasActiveRevenueCatEntitlement,
+  logOutRevenueCat,
+  purchaseRevenueCatPackage,
+  restoreRevenueCatPurchases,
+  toProPackageViews,
+  type ProPackageView,
+  type RcOffering,
+} from '@/lib/revenueCat';
+import { useAuth } from '@/state/AuthProvider';
+
+/**
+ * The paywall's high-level state, so PaywallSheet can render calmly without
+ * knowing anything about RevenueCat:
+ *   unconfigured → no key / Pro off — "not configured in this build yet"
+ *   signed_out   → configured but no session — "sign in to subscribe"
+ *   loading      → configuring / fetching the offering
+ *   ready        → packages available to purchase
+ *   unavailable  → configured + signed-in, but no packages came back
+ */
+export type PaywallStatus = 'unconfigured' | 'signed_out' | 'loading' | 'ready' | 'unavailable';
+
+/** The resolved Pro state from one RevenueCat sync (computed off-render). */
+type ProSnapshot = {
+  isPro: boolean;
+  packages: ProPackageView[];
+  paywallStatus: PaywallStatus;
+  offering: RcOffering | null;
+};
 
 type ProContextValue = {
-  /** Whether REAL Pro is enabled for this build (the master flag). */
   isProEnabled: boolean;
-  /** The resolved Pro mode: 'off' | 'preview' | 'enabled'. */
   proMode: ProMode;
-  /** Whether the current household has a Pro entitlement. Phase 1: dev override only. */
   isPro: boolean;
-  /** True while an entitlement resolve is in flight. Phase 1: always false (no I/O). */
   isLoading: boolean;
-  /** The last entitlement-resolve error, if any. Phase 1: always null. */
   error: string | null;
-  /** Re-resolve the entitlement. Phase 1: re-reads the dev override only (no network). */
   refreshProStatus: () => Promise<void>;
-  /** Whether the (future) paywall is currently requested open. */
   isPaywallOpen: boolean;
-  /** Request the paywall. Phase 1: flips a latch only — no paywall UI renders yet. */
   openPaywall: () => void;
-  /** Dismiss the paywall latch. */
   closePaywall: () => void;
+  // Phase 4 — purchase surface.
+  paywallStatus: PaywallStatus;
+  packages: ProPackageView[];
+  canPurchase: boolean;
+  isPurchasing: boolean;
+  isRestoring: boolean;
+  purchaseError: string | null;
+  restoreError: string | null;
+  purchasePackage: (pkg: ProPackageView) => Promise<void>;
+  restorePurchases: () => Promise<void>;
 };
 
 const ProContext = createContext<ProContextValue | null>(null);
 
 export function ProProvider({ children }: { children: ReactNode }) {
+  const { session } = useAuth();
+  const track = useAnalytics();
+  const userId = session?.user.id ?? null;
+
   const proMode = useMemo<ProMode>(() => getProMode(), []);
   const proEnabled = useMemo<boolean>(() => isProEnabled(), []);
+  const entitlementId = useMemo<string>(() => getRevenueCatEntitlementId(), []);
 
-  // Entitlement. Lazy initializer (no effect): resolves the dev/QA override, which
-  // is gated on __DEV__ so a production build is always free. Real resolution
-  // (RevenueCat + Supabase `pro_entitlements`) lands in a later phase.
   const [isPro, setIsPro] = useState<boolean>(() => resolveDevProEntitlement(__DEV__));
-  const [isLoading] = useState<boolean>(false);
-  const [error] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(() => getProMode() === 'enabled');
+  const [error, setError] = useState<string | null>(null);
   const [isPaywallOpen, setIsPaywallOpen] = useState<boolean>(false);
+  const [paywallStatus, setPaywallStatus] = useState<PaywallStatus>(() =>
+    getProMode() === 'enabled' ? 'loading' : 'unconfigured',
+  );
+  const [packages, setPackages] = useState<ProPackageView[]>([]);
+  const [isPurchasing, setIsPurchasing] = useState<boolean>(false);
+  const [isRestoring, setIsRestoring] = useState<boolean>(false);
+  const [purchaseError, setPurchaseError] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+
+  // Raw offering kept out of state (its SDK types stay internal); the UI only
+  // sees `packages`.
+  const offeringRef = useRef<RcOffering | null>(null);
+
+  // Compute the next Pro state WITHOUT touching React state — callers apply it.
+  // Keeping this pure of setState lets the effect apply it inside a `.then`
+  // (an async callback), which is the lint/React-Compiler-safe pattern.
+  const computeProSnapshot = useCallback(async (): Promise<ProSnapshot> => {
+    const devPro = resolveDevProEntitlement(__DEV__);
+    const platform: RevenueCatPlatform | null =
+      Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : null;
+
+    const notReady: PaywallStatus | null =
+      proMode !== 'enabled' || !platform || !hasRevenueCatConfig(platform)
+        ? 'unconfigured'
+        : userId === null
+          ? 'signed_out'
+          : null;
+
+    if (notReady || userId === null) {
+      // Signing out reverts RevenueCat to anonymous so entitlement never leaks.
+      if (notReady === 'signed_out') void logOutRevenueCat();
+      return { isPro: devPro, packages: [], paywallStatus: notReady ?? 'unconfigured', offering: null };
+    }
+
+    const ok = await configureRevenueCat({ userId });
+    if (!ok) return { isPro: devPro, packages: [], paywallStatus: 'unconfigured', offering: null };
+
+    const [customerInfo, offering] = await Promise.all([
+      getRevenueCatCustomerInfo(),
+      getRevenueCatOffering(),
+    ]);
+    const nextPackages = toProPackageViews(offering);
+    const entitled = hasActiveRevenueCatEntitlement(customerInfo, entitlementId) || devPro;
+    return {
+      isPro: entitled,
+      packages: nextPackages,
+      paywallStatus: nextPackages.length > 0 ? 'ready' : 'unavailable',
+      offering,
+    };
+  }, [proMode, userId, entitlementId]);
+
+  const applySnapshot = useCallback((snap: ProSnapshot) => {
+    offeringRef.current = snap.offering;
+    setIsPro(snap.isPro);
+    setPackages(snap.packages);
+    setPaywallStatus(snap.paywallStatus);
+    setError(null);
+    setIsLoading(false);
+  }, []);
+
+  // Sync on mount and whenever the signed-in identity changes. All state is set
+  // inside the async `.then` continuation — never synchronously in the effect.
+  useEffect(() => {
+    let active = true;
+    void computeProSnapshot().then((snap) => {
+      if (active) applySnapshot(snap);
+    });
+    return () => {
+      active = false;
+    };
+  }, [computeProSnapshot, applySnapshot]);
 
   const refreshProStatus = useCallback(async () => {
-    // Phase 1: no RevenueCat, no Supabase entitlement read. Re-resolve the dev/QA
-    // override only. setState inside an async callback is allowed (it is only the
-    // synchronous setState-in-effect that the lint rule forbids).
-    setIsPro(resolveDevProEntitlement(__DEV__));
-  }, []);
+    const snap = await computeProSnapshot();
+    applySnapshot(snap);
+  }, [computeProSnapshot, applySnapshot]);
+
+  const purchasePackage = useCallback(
+    async (pkg: ProPackageView) => {
+      const raw = findRawPackage(offeringRef.current, pkg.id);
+      if (!raw) {
+        setPurchaseError('Something went wrong. Please try again.');
+        return;
+      }
+      setIsPurchasing(true);
+      setPurchaseError(null);
+      track('purchase_started', { surface: 'paywall', packageType: pkg.packageType });
+      const outcome = await purchaseRevenueCatPackage(raw);
+      if (outcome.ok) {
+        const entitled = hasActiveRevenueCatEntitlement(outcome.customerInfo, entitlementId);
+        if (entitled) {
+          setIsPro(true);
+          track('purchase_completed', {
+            surface: 'paywall',
+            packageType: pkg.packageType,
+            entitlement: entitlementId,
+          });
+        } else {
+          setPurchaseError('That purchase did not unlock Pro. Try Restore purchase.');
+          track('purchase_failed', { surface: 'paywall', errorCode: 'no_entitlement', cancelled: false });
+        }
+      } else {
+        // A user cancel is calm — no scary error line, just the coarse event.
+        if (!outcome.error.cancelled) setPurchaseError(outcome.error.message);
+        track('purchase_failed', {
+          surface: 'paywall',
+          errorCode: outcome.error.code,
+          cancelled: outcome.error.cancelled,
+        });
+      }
+      setIsPurchasing(false);
+    },
+    [track, entitlementId],
+  );
+
+  const restorePurchases = useCallback(async () => {
+    setIsRestoring(true);
+    setRestoreError(null);
+    track('restore_started', { surface: 'paywall' });
+    const outcome = await restoreRevenueCatPurchases();
+    if (outcome.ok) {
+      const entitled = hasActiveRevenueCatEntitlement(outcome.customerInfo, entitlementId);
+      if (entitled) {
+        setIsPro(true);
+        track('restore_completed', { surface: 'paywall', entitlement: entitlementId });
+      } else {
+        setRestoreError('No active subscription found.');
+        track('restore_failed', { surface: 'paywall', errorCode: 'no_entitlement', cancelled: false });
+      }
+    } else {
+      setRestoreError(outcome.error.message);
+      track('restore_failed', {
+        surface: 'paywall',
+        errorCode: outcome.error.code,
+        cancelled: outcome.error.cancelled,
+      });
+    }
+    setIsRestoring(false);
+  }, [track, entitlementId]);
 
   const openPaywall = useCallback(() => setIsPaywallOpen(true), []);
   const closePaywall = useCallback(() => setIsPaywallOpen(false), []);
+
+  const canPurchase = proMode === 'enabled' && userId !== null && paywallStatus === 'ready' && !isPurchasing;
 
   const value = useMemo<ProContextValue>(
     () => ({
@@ -82,8 +269,36 @@ export function ProProvider({ children }: { children: ReactNode }) {
       isPaywallOpen,
       openPaywall,
       closePaywall,
+      paywallStatus,
+      packages,
+      canPurchase,
+      isPurchasing,
+      isRestoring,
+      purchaseError,
+      restoreError,
+      purchasePackage,
+      restorePurchases,
     }),
-    [proEnabled, proMode, isPro, isLoading, error, refreshProStatus, isPaywallOpen, openPaywall, closePaywall],
+    [
+      proEnabled,
+      proMode,
+      isPro,
+      isLoading,
+      error,
+      refreshProStatus,
+      isPaywallOpen,
+      openPaywall,
+      closePaywall,
+      paywallStatus,
+      packages,
+      canPurchase,
+      isPurchasing,
+      isRestoring,
+      purchaseError,
+      restoreError,
+      purchasePackage,
+      restorePurchases,
+    ],
   );
 
   return <ProContext.Provider value={value}>{children}</ProContext.Provider>;

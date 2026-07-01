@@ -233,6 +233,10 @@ import {
 // predicate leaf. Both are safe to load here and are covered directly in §W.
 import {
   getProMode,
+  getRevenueCatApiKey,
+  getRevenueCatEntitlementId,
+  getRevenueCatOfferingId,
+  hasRevenueCatConfig,
   isProEnabled,
   resolveDevProEntitlement,
 } from '../src/lib/proConfig';
@@ -4406,6 +4410,7 @@ const SHARE_EXPORT_SRC = readFileSync(
   new URL('../src/features/insights/shareWeeklyExport.ts', import.meta.url),
   'utf8',
 );
+const REVENUECAT_SRC = readFileSync(new URL('../src/lib/revenueCat.ts', import.meta.url), 'utf8');
 
 // The user-facing Pro surfaces — where an accidental payment link would surface.
 const PRO_SURFACE_SRCS: Array<[string, string]> = [
@@ -4420,6 +4425,7 @@ const PRO_SURFACE_SRCS: Array<[string, string]> = [
   ['ProPaywallHost.tsx', PRO_PAYWALL_HOST_SRC],
   ['buildWeeklyExportText.ts', BUILD_EXPORT_SRC],
   ['shareWeeklyExport.ts', SHARE_EXPORT_SRC],
+  ['revenueCat.ts', REVENUECAT_SRC],
 ];
 
 // Every .ts/.tsx under src/ — for the repo-wide "no RevenueCat SDK yet" sweep.
@@ -4438,9 +4444,15 @@ function collectSourceFiles(dirUrl: URL, prefix: string): Array<[string, string]
 }
 const ALL_SRC_FILES = collectSourceFiles(new URL('../src/', import.meta.url), 'src');
 
-// Import paths that mark a dependency on the Pro foundation. Core logging and the
-// first-invite flow must never contain any of these.
-const BANNED_PRO_IMPORTS = ['@/lib/proGates', '@/lib/proConfig', '@/state/ProProvider'];
+// Import paths that mark a dependency on the Pro foundation / purchases. Core
+// logging and the first-invite flow must never contain any of these.
+const BANNED_PRO_IMPORTS = [
+  '@/lib/proGates',
+  '@/lib/proConfig',
+  '@/state/ProProvider',
+  '@/lib/revenueCat',
+  'react-native-purchases',
+];
 
 check('W1. proConfig reads EXPO_PUBLIC_PRO_ENABLED and treats "true"/"1" as enabled', () => {
   assert.ok(PRO_CONFIG_SRC.includes('EXPO_PUBLIC_PRO_ENABLED'), 'proConfig references the master flag');
@@ -4525,28 +4537,27 @@ check('W7. fake-door preview survives: preview mode resolves and the interest an
   assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('export_tapped'"), 'ProPreviewCard fires export_tapped');
 });
 
-check('W8. analytics unchanged: no client SELECT, fake-door events kept, no purchase events added yet', () => {
+check('W8. analytics stays privacy-safe: still no client SELECT, fake-door events kept', () => {
   assert.ok(ANALYTICS_SRC.includes('analytics_events'), 'analytics still targets analytics_events');
   assert.ok(!/\.select\s*\(/.test(ANALYTICS_SRC), 'analytics must never .select() from analytics_events');
   assert.ok(ANALYTICS_SRC.includes("'upgrade_card_tapped'"), 'upgrade_card_tapped stays in the event union');
   assert.ok(ANALYTICS_SRC.includes("'export_tapped'"), 'export_tapped stays in the event union');
-  // Purchase/restore analytics belong to the RevenueCat phase — still not added.
-  // (Phase 2 adds paywall_opened / pro_gate_seen; see §X.)
-  for (const notYet of [
-    'purchase_started',
-    'purchase_completed',
-    'purchase_failed',
-    'restore_started',
-    'restore_completed',
-  ]) {
-    assert.ok(!ANALYTICS_SRC.includes(notYet), `purchase analytics (${notYet}) must not be added yet`);
-  }
 });
 
-check('W9. no RevenueCat / react-native-purchases SDK is wired yet (repo-wide)', () => {
-  assert.ok(!PKG_JSON_SRC.includes('react-native-purchases'), 'react-native-purchases must not be a dependency yet');
+check('W9. RevenueCat SDK is installed but its import is isolated to the Pro service', () => {
+  // react-native-purchases is now a real dependency; the UI SDK is NOT installed
+  // (we render our own PaywallSheet).
+  assert.ok(PKG_JSON_SRC.includes('"react-native-purchases":'), 'react-native-purchases is a dependency');
+  assert.ok(!PKG_JSON_SRC.includes('react-native-purchases-ui'), 'react-native-purchases-ui must NOT be installed');
+  // Only src/lib/revenueCat.ts may import the SDK; every other src file must route
+  // through that service so the native dependency stays in one place.
+  const SDK_ALLOWED = new Set(['src/lib/revenueCat.ts']);
   for (const [rel, src] of ALL_SRC_FILES) {
-    assert.ok(!src.includes('react-native-purchases'), `${rel} must not import the RevenueCat SDK yet`);
+    if (SDK_ALLOWED.has(rel)) continue;
+    assert.ok(
+      !/from ['"]react-native-purchases['"]/.test(src),
+      `${rel} must not import react-native-purchases (only src/lib/revenueCat.ts may)`,
+    );
   }
 });
 
@@ -4568,12 +4579,13 @@ check('W10. Pro surfaces carry no external payment link / Stripe / web-checkout 
   }
 });
 
-check('W11. ProProvider is a Phase-1 skeleton: no SDK, no network, no purchase/restore', () => {
-  assert.ok(!/from ['"]react-native-purchases['"]/.test(PRO_PROVIDER_SRC), 'ProProvider must not import the RC SDK');
-  assert.ok(!/\bPurchases\.\w+\(/.test(PRO_PROVIDER_SRC), 'ProProvider must not call the RC Purchases SDK');
-  assert.ok(!PRO_PROVIDER_SRC.includes('@/lib/supabase'), 'ProProvider must not read Supabase in Phase 1');
-  assert.ok(!PRO_PROVIDER_SRC.includes('@/state/AuthProvider'), 'ProProvider must not depend on auth in Phase 1');
-  assert.ok(PRO_PROVIDER_SRC.includes('resolveDevProEntitlement'), 'isPro resolves via the dev override only');
+check('W11. ProProvider drives RevenueCat via the service (not the SDK) and writes no Supabase', () => {
+  assert.ok(!/from ['"]react-native-purchases['"]/.test(PRO_PROVIDER_SRC), 'ProProvider must not import the RC SDK directly');
+  assert.ok(!/\bPurchases\.\w+\(/.test(PRO_PROVIDER_SRC), 'ProProvider must not call the RC SDK directly');
+  assert.ok(PRO_PROVIDER_SRC.includes('@/lib/revenueCat'), 'ProProvider drives purchases through the service');
+  assert.ok(PRO_PROVIDER_SRC.includes('@/state/AuthProvider'), 'ProProvider reads the signed-in identity via useAuth');
+  assert.ok(!PRO_PROVIDER_SRC.includes('@/lib/supabase'), 'ProProvider must not read/write Supabase this phase');
+  assert.ok(PRO_PROVIDER_SRC.includes('resolveDevProEntitlement'), 'the dev override still unlocks isPro for testing');
 });
 
 check('W12. ProProvider is mounted under AuthGate in the tab shell', () => {
@@ -4611,11 +4623,11 @@ check('X2. PaywallSheet hardcodes no prices and no fake packages', () => {
   }
 });
 
-check('X3. PaywallSheet has no external payment link and no subscription SDK', () => {
+check('X3. PaywallSheet has no external payment link and does not import the subscription SDK', () => {
   assert.ok(!/https?:\/\//.test(PAYWALL_SHEET_SRC), 'no external URL in the paywall');
-  assert.ok(!PAYWALL_SHEET_SRC.includes('react-native-purchases'), 'no RevenueCat SDK import');
-  assert.ok(!/\bPurchases\./.test(PAYWALL_SHEET_SRC), 'no Purchases SDK call');
-  assert.ok(!/RevenueCat/i.test(PAYWALL_SHEET_SRC), 'no RevenueCat reference');
+  // It may use the Pro service (@/lib/revenueCat) but must not import the SDK itself.
+  assert.ok(!/from ['"]react-native-purchases['"]/.test(PAYWALL_SHEET_SRC), 'no direct RevenueCat SDK import');
+  assert.ok(!/\bPurchases\./.test(PAYWALL_SHEET_SRC), 'no direct Purchases SDK call');
   for (const token of [/stripe/i, /paypal/i, /checkout\./i, /web checkout/i]) {
     assert.ok(!token.test(PAYWALL_SHEET_SRC), `no ${token} reference`);
   }
@@ -4650,18 +4662,9 @@ check('X6. ProPreviewCard opens the paywall in enabled mode and keeps the fake-d
   assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('export_tapped'"), 'keeps the fake-door export event');
 });
 
-check('X7. analytics union gains paywall_opened + pro_gate_seen only (no purchase/restore)', () => {
-  assert.ok(ANALYTICS_SRC.includes("'paywall_opened'"), 'paywall_opened added to the union');
-  assert.ok(ANALYTICS_SRC.includes("'pro_gate_seen'"), 'pro_gate_seen added to the union');
-  for (const notYet of [
-    'purchase_started',
-    'purchase_completed',
-    'purchase_failed',
-    'restore_started',
-    'restore_completed',
-  ]) {
-    assert.ok(!ANALYTICS_SRC.includes(notYet), `${notYet} must not be added yet`);
-  }
+check('X7. analytics union carries the paywall entry events (paywall_opened + pro_gate_seen)', () => {
+  assert.ok(ANALYTICS_SRC.includes("'paywall_opened'"), 'paywall_opened in the union');
+  assert.ok(ANALYTICS_SRC.includes("'pro_gate_seen'"), 'pro_gate_seen in the union');
 });
 
 check('X8. parent call sites render the Pro card in preview + enabled, hide it when off', () => {
@@ -4742,9 +4745,12 @@ check('Y3. the weekly export leaks no name / notes / ids / secrets / volumes / p
   assert.ok(!/\bml\b/i.test(text), 'no feed volumes');
 });
 
-check('Y4. buildWeeklyExportText is pure (no react-native import) and Node-testable', () => {
+check('Y4. buildWeeklyExportText is pure (no react-native / SDK / Pro-state import) and Node-testable', () => {
   assert.ok(!/from ['"]react-native['"]/.test(BUILD_EXPORT_SRC), 'builder imports no react-native');
   assert.ok(/import type/.test(BUILD_EXPORT_SRC), 'builder imports only a type');
+  assert.ok(!BUILD_EXPORT_SRC.includes('react-native-purchases'), 'builder never touches the RC SDK');
+  assert.ok(!BUILD_EXPORT_SRC.includes('@/lib/revenueCat'), 'builder never imports the Pro purchase service');
+  assert.ok(!/\busePro\b/.test(BUILD_EXPORT_SRC), 'builder never reads Pro entitlement state');
   // generatedAt is deterministic (used above without it; pin it here).
   const dated = buildWeeklyExportText(EXPORT_RICH_VM, { generatedAt: new Date('2026-06-30T12:00:00.000Z') });
   assert.ok(dated.includes('2026-06-30'), 'generatedAt renders a deterministic date');
@@ -4778,17 +4784,106 @@ check('Y7. InsightsScreen passes the viewModel into ProPreviewCard and keeps the
   assert.ok(/dataDays >= 4/.test(INSIGHTS_SCREEN_SRC), 'keeps the dataDays >= 4 gate');
 });
 
-check('Y8. analytics union gains export_started + export_completed only (no purchase/restore)', () => {
-  assert.ok(ANALYTICS_SRC.includes("'export_started'"), 'export_started added to the union');
-  assert.ok(ANALYTICS_SRC.includes("'export_completed'"), 'export_completed added to the union');
-  for (const notYet of [
+check('Y8. analytics union carries the export events (export_started + export_completed)', () => {
+  assert.ok(ANALYTICS_SRC.includes("'export_started'"), 'export_started in the union');
+  assert.ok(ANALYTICS_SRC.includes("'export_completed'"), 'export_completed in the union');
+});
+
+// Z. Pro Phase 4 — RevenueCat purchases. Verifies the SDK is installed and
+// isolated to the service; that proConfig reads keys from env with pro/default
+// fallbacks and hardcodes no key; that the service exposes a real purchase/restore
+// surface with no Supabase/URL; that ProProvider drives it via useAuth; that the
+// PaywallSheet shows real store price strings + a real restore; and that the six
+// purchase/restore analytics events exist.
+
+check('Z1. react-native-purchases is installed; the RevenueCat UI SDK is not', () => {
+  assert.ok(PKG_JSON_SRC.includes('"react-native-purchases":'), 'react-native-purchases dependency present');
+  assert.ok(!PKG_JSON_SRC.includes('react-native-purchases-ui'), 'react-native-purchases-ui must be absent');
+});
+
+check('Z2. proConfig reads RevenueCat keys from env, with entitlement=pro / offering=default fallbacks', () => {
+  assert.ok(PRO_CONFIG_SRC.includes('EXPO_PUBLIC_REVENUECAT_IOS_API_KEY'), 'reads the iOS key from env');
+  assert.ok(PRO_CONFIG_SRC.includes('EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY'), 'reads the Android key from env');
+  withEnv({ EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID: undefined, EXPO_PUBLIC_REVENUECAT_OFFERING_ID: undefined }, () => {
+    assert.equal(getRevenueCatEntitlementId(), 'pro');
+    assert.equal(getRevenueCatOfferingId(), 'default');
+  });
+  withEnv({ EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID: 'premium', EXPO_PUBLIC_REVENUECAT_OFFERING_ID: 'launch' }, () => {
+    assert.equal(getRevenueCatEntitlementId(), 'premium');
+    assert.equal(getRevenueCatOfferingId(), 'launch');
+  });
+  withEnv({ EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: undefined }, () => {
+    assert.equal(getRevenueCatApiKey('ios'), null);
+    assert.equal(hasRevenueCatConfig('ios'), false);
+  });
+  withEnv({ EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: '  appl_fromEnv  ' }, () => {
+    assert.equal(getRevenueCatApiKey('ios'), 'appl_fromEnv'); // trimmed
+    assert.equal(hasRevenueCatConfig('ios'), true);
+  });
+});
+
+check('Z3. no RevenueCat SDK key is hardcoded in source', () => {
+  for (const [name, src] of [
+    ['proConfig.ts', PRO_CONFIG_SRC],
+    ['revenueCat.ts', REVENUECAT_SRC],
+  ] as Array<[string, string]>) {
+    assert.ok(!/\bappl_[A-Za-z0-9]{6,}/.test(src), `${name} must not hardcode an Apple RevenueCat key`);
+    assert.ok(!/\bgoog_[A-Za-z0-9]{6,}/.test(src), `${name} must not hardcode a Google RevenueCat key`);
+  }
+});
+
+check('Z4. revenueCat.ts is the SDK boundary: real configure/purchase/restore, no Supabase, no URL', () => {
+  assert.ok(/from ['"]react-native-purchases['"]/.test(REVENUECAT_SRC), 'the service imports the RC SDK');
+  for (const fn of [
+    'configureRevenueCat',
+    'getRevenueCatCustomerInfo',
+    'getRevenueCatOffering',
+    'purchaseRevenueCatPackage',
+    'restoreRevenueCatPurchases',
+    'hasActiveRevenueCatEntitlement',
+    'normalizeRevenueCatError',
+  ]) {
+    assert.ok(REVENUECAT_SRC.includes(fn), `service exports ${fn}`);
+  }
+  assert.ok(/Purchases\.purchasePackage/.test(REVENUECAT_SRC), 'makes a real purchasePackage call');
+  assert.ok(/Purchases\.restorePurchases/.test(REVENUECAT_SRC), 'makes a real restorePurchases call');
+  assert.ok(!REVENUECAT_SRC.includes('@/lib/supabase'), 'service writes no Supabase');
+  assert.ok(!/https?:\/\//.test(REVENUECAT_SRC), 'service has no external URL');
+});
+
+check('Z5. ProProvider exposes real purchase/restore driven by RevenueCat + the auth identity', () => {
+  assert.ok(PRO_PROVIDER_SRC.includes('useAuth'), 'uses the signed-in session');
+  assert.ok(PRO_PROVIDER_SRC.includes('configureRevenueCat'), 'configures RevenueCat');
+  assert.ok(PRO_PROVIDER_SRC.includes('purchasePackage'), 'exposes purchasePackage');
+  assert.ok(PRO_PROVIDER_SRC.includes('restorePurchases'), 'exposes restorePurchases');
+  assert.ok(
+    PRO_PROVIDER_SRC.includes("track('purchase_started'") && PRO_PROVIDER_SRC.includes("track('purchase_completed'"),
+    'fires purchase analytics',
+  );
+  assert.ok(
+    PRO_PROVIDER_SRC.includes("track('restore_started'") && PRO_PROVIDER_SRC.includes("track('restore_completed'"),
+    'fires restore analytics',
+  );
+});
+
+check('Z6. PaywallSheet shows real package price strings and a real restore', () => {
+  assert.ok(PAYWALL_SHEET_SRC.includes('priceString'), 'renders store price strings (never hardcoded)');
+  assert.ok(PAYWALL_SHEET_SRC.includes('purchasePackage'), 'buys via purchasePackage');
+  assert.ok(PAYWALL_SHEET_SRC.includes('restorePurchases'), 'restores via restorePurchases (real, not a stub)');
+  assert.ok(PAYWALL_SHEET_SRC.includes('packages'), 'lists packages from usePro');
+  assert.ok(PAYWALL_SHEET_SRC.includes('canRestore'), 'restore is enabled when configured + signed-in');
+});
+
+check('Z7. analytics union has the six purchase/restore events (coarse props only)', () => {
+  for (const event of [
     'purchase_started',
     'purchase_completed',
     'purchase_failed',
     'restore_started',
     'restore_completed',
+    'restore_failed',
   ]) {
-    assert.ok(!ANALYTICS_SRC.includes(notYet), `${notYet} must not be added yet`);
+    assert.ok(ANALYTICS_SRC.includes("'" + event + "'"), event + ' present in the union');
   }
 });
 
