@@ -39,7 +39,11 @@ export type AnalyticsEvent =
   // land with RevenueCat in a later phase). Props stay coarse: source / surface /
   // gate / mode only — never names, notes, volumes, or store/RevenueCat ids.
   | 'paywall_opened'
-  | 'pro_gate_seen';
+  | 'pro_gate_seen'
+  // Pro Phase 3 — real weekly export/share flow (Pro-entitled users only). Same
+  // coarse props; the shared text itself is descriptive/non-medical aggregates.
+  | 'export_started'
+  | 'export_completed';
 
 /** Small, serializable property bag stored in the row's `props` jsonb column. */
 export type AnalyticsProps = Record<string, string | number | boolean | null>;

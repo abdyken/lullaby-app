@@ -242,6 +242,11 @@ import {
   canSharePediatricianSummary,
   canViewFullHistory,
 } from '../src/lib/proGates';
+// Pro Phase 3 — the PURE weekly-export text builder (imports only a type, so it is
+// Node-safe). The Share wrapper (shareWeeklyExport) imports react-native and is
+// source-scanned only, never imported here.
+import { buildWeeklyExportText } from '../src/features/insights/buildWeeklyExportText';
+import type { InsightsViewModel } from '../src/features/insights/types';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
 const NOW = Date.parse('2026-06-17T00:00:00.000Z');
@@ -4393,6 +4398,14 @@ const CORE_LOGGING_SRCS: Array<[string, string]> = [
 
 const PAYWALL_SHEET_SRC = readFileSync(new URL('../src/components/pro/PaywallSheet.tsx', import.meta.url), 'utf8');
 const PRO_PAYWALL_HOST_SRC = readFileSync(new URL('../src/components/pro/ProPaywallHost.tsx', import.meta.url), 'utf8');
+const BUILD_EXPORT_SRC = readFileSync(
+  new URL('../src/features/insights/buildWeeklyExportText.ts', import.meta.url),
+  'utf8',
+);
+const SHARE_EXPORT_SRC = readFileSync(
+  new URL('../src/features/insights/shareWeeklyExport.ts', import.meta.url),
+  'utf8',
+);
 
 // The user-facing Pro surfaces — where an accidental payment link would surface.
 const PRO_SURFACE_SRCS: Array<[string, string]> = [
@@ -4405,6 +4418,8 @@ const PRO_SURFACE_SRCS: Array<[string, string]> = [
   ['InsightsScreen.tsx', INSIGHTS_SCREEN_SRC],
   ['PaywallSheet.tsx', PAYWALL_SHEET_SRC],
   ['ProPaywallHost.tsx', PRO_PAYWALL_HOST_SRC],
+  ['buildWeeklyExportText.ts', BUILD_EXPORT_SRC],
+  ['shareWeeklyExport.ts', SHARE_EXPORT_SRC],
 ];
 
 // Every .ts/.tsx under src/ — for the repo-wide "no RevenueCat SDK yet" sweep.
@@ -4653,6 +4668,128 @@ check('X8. parent call sites render the Pro card in preview + enabled, hide it w
   assert.ok(INSIGHTS_SCREEN_SRC.includes("getProMode() !== 'off'"), 'Insights renders the card unless Pro is off');
   assert.ok(ACCOUNT_SHEET_SRC.includes("getProMode() !== 'off'"), 'AccountSheet renders the card unless Pro is off');
   assert.ok(ACCOUNT_SHEET_SRC.includes('signedIn'), 'AccountSheet still gates the card on a signed-in user');
+});
+
+// Y. Pro Phase 3 — the first REAL Pro feature: a weekly export text + OS share,
+// gated behind canExportWeeklyRecap(isPro). Verifies the pure builder is calm,
+// non-medical, and leaks nothing sensitive; that the share wrapper is a calm
+// react-native wrapper that reuses the pure builder; that ProPreviewCard runs the
+// real export only for entitled Pro users (free → paywall, preview → fake-door);
+// and that only export_started/export_completed were added to analytics.
+
+// A rich, deterministic view model: 7 days × 6h sleep = 42h total.
+const EXPORT_RICH_VM: InsightsViewModel = {
+  updatedAt: 0,
+  hasEnoughData: true,
+  dataDays: 5,
+  cards: [],
+  weeklySleep: Array.from({ length: 7 }, (_, index) => ({
+    date: `2026-06-0${index + 1}`,
+    label: 'Day',
+    minutes: 360,
+  })),
+  stats: {
+    feedsPerDay: { value: '8', label: 'Feeds / day' },
+    sleepPerDay: { value: '6', unit: 'h', label: 'Sleep / day' },
+    diapersPerDay: { value: '6', label: 'Diapers / day' },
+  },
+};
+
+check('Y1. buildWeeklyExportText renders the calm, non-medical weekly summary', () => {
+  const text = buildWeeklyExportText(EXPORT_RICH_VM);
+  assert.ok(text.includes('Lullaby weekly summary'), 'has the title');
+  assert.ok(/not medical advice/i.test(text), 'has the non-medical safety line');
+  assert.ok(/Feeds:/.test(text), 'has a feeds label');
+  assert.ok(/Sleep:/.test(text), 'has a sleep label');
+  assert.ok(/Diaper changes:/.test(text), 'has a diaper label');
+  assert.ok(text.includes('42h total'), 'includes weekly total sleep');
+  assert.ok(text.includes('8'), 'includes feeds per day');
+  // Descriptive only — no diagnosis / prediction / recommendation language.
+  assert.ok(!/(diagnos|predict|should|recommend|abnormal)/i.test(text), 'no medical / prescriptive language');
+});
+
+check('Y2. buildWeeklyExportText falls back calmly when data is sparse', () => {
+  const text = buildWeeklyExportText({ ...EXPORT_RICH_VM, hasEnoughData: false });
+  assert.ok(text.includes('Lullaby weekly summary'), 'still has the title');
+  assert.ok(/not medical advice/i.test(text), 'still has the safety line');
+  assert.ok(
+    text.includes('Keep logging to build a clearer weekly summary'),
+    'has the sparse-data fallback line',
+  );
+});
+
+check('Y3. the weekly export leaks no name / notes / ids / secrets / volumes / payment links', () => {
+  // Even a view model that (defensively) carries a name-like card id + freeform
+  // text must not reach the output — the builder reads only aggregate numbers.
+  const text = buildWeeklyExportText({
+    ...EXPORT_RICH_VM,
+    cards: [
+      {
+        id: '7f3a9b2c-1234-4d5e-8a9b-0011deadbeef',
+        emoji: '🍼',
+        text: 'Mia fussed at 3am',
+        source: 'x',
+        tone: 'feed',
+      },
+    ],
+  });
+  assert.ok(!/Mia/.test(text), 'no baby name / card freeform text');
+  assert.ok(!text.includes('7f3a9b2c'), 'no raw id substring');
+  assert.ok(!/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/i.test(text), 'no UUID-looking id');
+  assert.ok(!/supabase/i.test(text), 'no supabase reference');
+  assert.ok(!/eyJ[A-Za-z0-9]/.test(text), 'no JWT-looking key');
+  assert.ok(!/https?:\/\//.test(text), 'no URL / external payment link');
+  assert.ok(!/\bml\b/i.test(text), 'no feed volumes');
+});
+
+check('Y4. buildWeeklyExportText is pure (no react-native import) and Node-testable', () => {
+  assert.ok(!/from ['"]react-native['"]/.test(BUILD_EXPORT_SRC), 'builder imports no react-native');
+  assert.ok(/import type/.test(BUILD_EXPORT_SRC), 'builder imports only a type');
+  // generatedAt is deterministic (used above without it; pin it here).
+  const dated = buildWeeklyExportText(EXPORT_RICH_VM, { generatedAt: new Date('2026-06-30T12:00:00.000Z') });
+  assert.ok(dated.includes('2026-06-30'), 'generatedAt renders a deterministic date');
+});
+
+check('Y5. shareWeeklyExport wraps the Share API calmly and reuses the pure builder', () => {
+  assert.ok(SHARE_EXPORT_SRC.includes('buildWeeklyExportText'), 'reuses the pure builder');
+  assert.ok(/Share\.share/.test(SHARE_EXPORT_SRC), 'uses the React Native Share API');
+  assert.ok(/catch/.test(SHARE_EXPORT_SRC), 'guards the share call (no crash on dismiss/error)');
+  assert.ok(/dismissed/.test(SHARE_EXPORT_SRC), 'treats a dismissed share calmly');
+});
+
+check('Y6. ProPreviewCard is Pro-gated: viewModel prop, real export only for Pro, paywall for free', () => {
+  assert.ok(/viewModel/.test(PRO_PREVIEW_CARD_SRC), 'accepts a viewModel prop');
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes('canExportWeeklyRecap'), 'gates export via canExportWeeklyRecap');
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes('isPro'), 'reads the Pro entitlement');
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes('shareWeeklyExport'), 'shares via the export helper');
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('export_started'"), 'fires export_started');
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('export_completed'"), 'fires export_completed');
+  // Free (enabled, not entitled) → the gate + paywall, never a real export.
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('pro_gate_seen'"), 'free path records the gate');
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes('openPaywall('), 'free path opens the paywall');
+  // Preview fake-door preserved.
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('export_tapped'"), 'preview keeps the export_tapped fake-door');
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('upgrade_card_tapped'"), 'preview keeps the upgrade fake-door');
+});
+
+check('Y7. InsightsScreen passes the viewModel into ProPreviewCard and keeps the render gates', () => {
+  assert.ok(/<ProPreviewCard\s+viewModel=\{viewModel\}/.test(INSIGHTS_SCREEN_SRC), 'passes viewModel');
+  assert.ok(INSIGHTS_SCREEN_SRC.includes("getProMode() !== 'off'"), 'renders in preview or enabled');
+  assert.ok(/dataDays >= 4/.test(INSIGHTS_SCREEN_SRC), 'keeps the dataDays >= 4 gate');
+});
+
+check('Y8. analytics union gains export_started + export_completed only (no purchase/restore)', () => {
+  assert.ok(ANALYTICS_SRC.includes("'export_started'"), 'export_started added to the union');
+  assert.ok(ANALYTICS_SRC.includes("'export_completed'"), 'export_completed added to the union');
+  for (const notYet of [
+    'purchase_started',
+    'purchase_completed',
+    'purchase_failed',
+    'restore_started',
+    'restore_completed',
+  ]) {
+    assert.ok(!ANALYTICS_SRC.includes(notYet), `${notYet} must not be added yet`);
+  }
 });
 
 runAsyncChecks()

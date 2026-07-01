@@ -1,23 +1,30 @@
 /**
- * ProPreviewCard — a NON-PAID "Lullaby Pro" teaser shown in Insights once the
- * parent has enough data to feel the value. No payment, no RevenueCat, no live
- * paywall, and no lock that blocks anything: the two actions only record
- * interest (`upgrade_card_tapped` / `export_tapped`) and show a calm "coming
- * soon" line. Purely presentational, additive to the screen.
+ * ProPreviewCard — the Lullaby Pro card in Insights, shown once the parent has
+ * enough data to feel the value. Its behavior depends on getProMode():
  *
- * Built on InsightsSectionCard so it matches the surrounding cards. Deliberately
- * avoids the absolute-fill scrim overlay (a known Android transparency pitfall) —
- * a plain card with a "Soon" badge reads as a preview without the fragile trick.
+ *   preview  → NON-PAID fake-door: the two CTAs only record interest
+ *              (`upgrade_card_tapped` / `export_tapped`) and show "coming soon".
+ *   enabled + free  → the CTAs open the PaywallSheet; "Export this week" records
+ *                     the gate it hit (`pro_gate_seen` + `paywall_opened`).
+ *   enabled + Pro   → "Export this week" runs the REAL weekly export: it shares
+ *                     the calm, non-medical `buildWeeklyExportText(viewModel)` via
+ *                     the OS share sheet (`export_started` / `export_completed`).
+ *
+ * The export gate is `canExportWeeklyRecap(isPro)`; core logging is never gated.
+ * Built on InsightsSectionCard so it matches the surrounding cards.
  */
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { getProMode } from '@/lib/proConfig';
+import { canExportWeeklyRecap } from '@/lib/proGates';
 import { useAnalytics } from '@/lib/useAnalytics';
 import { usePro } from '@/state/ProProvider';
 import { useTheme } from '@/state/ThemeProvider';
 import { colors, fonts, radii, surfaces } from '@/theme';
 
+import { shareWeeklyExport } from '../shareWeeklyExport';
+import type { InsightsViewModel } from '../types';
 import { InsightsSectionCard } from './InsightsSectionCard';
 
 const FEATURES = [
@@ -27,6 +34,7 @@ const FEATURES = [
 ];
 
 const CONFIRM = 'Lullaby Pro is coming soon — thanks for the interest.';
+const EXPORT_READY = 'Weekly export is ready to share.';
 
 function FeatureRow({ text, color, inkColor }: { text: string; color: string; inkColor: string }) {
   return (
@@ -41,15 +49,16 @@ function FeatureRow({ text, color, inkColor }: { text: string; color: string; in
   );
 }
 
-export function ProPreviewCard() {
+export function ProPreviewCard({ viewModel }: { viewModel: InsightsViewModel }) {
   const { mode } = useTheme();
   const palette = surfaces[mode];
   const track = useAnalytics();
-  const { openPaywall } = usePro();
-  const [tapped, setTapped] = useState(false);
+  const { openPaywall, isPro } = usePro();
+  // A calm one-line confirmation shown after a CTA (coming-soon / export-ready).
+  const [feedback, setFeedback] = useState<string | null>(null);
 
   const onUpgrade = () => {
-    // Real Pro build → open the paywall (Phase 2 skeleton).
+    // Real Pro build → open the paywall.
     if (getProMode() === 'enabled') {
       track('paywall_opened', { source: 'insights', surface: 'pro_preview_card' });
       openPaywall();
@@ -57,19 +66,37 @@ export function ProPreviewCard() {
     }
     // Preview (fake-door) → interest signal + calm "coming soon".
     track('upgrade_card_tapped', { source: 'insights' });
-    setTapped(true);
+    setFeedback(CONFIRM);
   };
+
+  const runExport = async () => {
+    // Pro entitlement → the real weekly export. Fire started before the share,
+    // completed after a share/dismiss (a dismiss is a calm, normal outcome). A
+    // platform failure degrades quietly — no crash, no completed event.
+    track('export_started', { surface: 'insights' });
+    const result = await shareWeeklyExport(viewModel);
+    if (result !== 'failed') {
+      track('export_completed', { surface: 'insights' });
+    }
+    setFeedback(EXPORT_READY);
+  };
+
   const onExport = () => {
-    // Real export is Phase 3 — for now the export CTA routes to the paywall and
-    // records the gate it hit. It never claims export works yet.
-    if (getProMode() === 'enabled') {
-      track('pro_gate_seen', { gate: 'export_weekly_recap', surface: 'insights' });
+    // Preview (fake-door) → interest signal + calm "coming soon". No real export.
+    if (getProMode() !== 'enabled') {
+      track('export_tapped', { surface: 'insights' });
+      setFeedback(CONFIRM);
+      return;
+    }
+    // Real Pro build, but not entitled → route to the paywall, record the gate.
+    if (!canExportWeeklyRecap(isPro)) {
+      track('pro_gate_seen', { gate: 'weekly_export', surface: 'insights' });
+      track('paywall_opened', { source: 'insights', surface: 'pro_preview_card' });
       openPaywall();
       return;
     }
-    // Preview (fake-door) → interest signal + calm "coming soon".
-    track('export_tapped', { surface: 'insights' });
-    setTapped(true);
+    // Entitled → run the real export/share flow.
+    void runExport();
   };
 
   return (
@@ -80,9 +107,9 @@ export function ProPreviewCard() {
         ))}
       </View>
 
-      {tapped ? (
+      {feedback ? (
         <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12, color: colors.feed, marginTop: 14 }}>
-          {CONFIRM}
+          {feedback}
         </Text>
       ) : (
         <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
