@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reassure — Lullaby killer feature</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#2E2A40; --ink-soft:#736E86; --ink-faint:#A8A2B8;
+    --bg:#FBF4EF; --surface:#FFFFFF; --surface-2:#FBF6F2; --line:#F0E8E2;
+    --feed:#FF7A3D; --feed-2:#FF9E5E; --feed-tint:#FFEDE0;
+    --sleep:#5560C6; --sleep-2:#7C84DA; --sleep-tint:#E9EBFB;
+    --diaper:#23B79E; --diaper-tint:#DDF5EF;
+    --growth:#FFB12E; --growth-tint:#FFF1D6;
+    --alert:#E0574B; --alert-tint:#FBE7E4;
+    --shadow-soft:0 22px 50px -18px rgba(60,40,30,.30);
+    --shadow-card:0 10px 26px -14px rgba(60,40,30,.22);
+    --r-lg:34px; --r-md:26px; --r-sm:18px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    font-family:'Nunito',system-ui,sans-serif;color:var(--ink);
+    background:
+      radial-gradient(820px 480px at 16% -6%, #FFE3CC 0%, transparent 55%),
+      radial-gradient(760px 520px at 92% 2%, #E7E9FC 0%, transparent 52%),
+      radial-gradient(680px 680px at 80% 98%, #DCF4EE 0%, transparent 50%),
+      #F4ECF3;
+    min-height:100%;display:flex;flex-direction:column;align-items:center;
+    padding:18px 16px 28px;gap:14px;
+  }
+  .intro{max-width:440px;text-align:center;}
+  .badge{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:800;
+    letter-spacing:.05em;text-transform:uppercase;color:var(--sleep);
+    background:rgba(85,96,198,.12);padding:6px 13px;border-radius:999px;margin-bottom:11px;}
+  .badge i{width:6px;height:6px;border-radius:50%;background:var(--sleep);}
+  .intro h1{font-family:'Fredoka',sans-serif;font-weight:600;font-size:32px;letter-spacing:-.01em;margin-bottom:6px;}
+  .intro p{color:var(--ink-soft);font-size:14px;line-height:1.5;font-weight:500;}
+
+  .phone{width:min(420px,100%);height:min(910px,calc(100vh - 36px));background:var(--bg);
+    border-radius:54px;box-shadow:var(--shadow-soft),0 0 0 11px #1d1726,0 0 0 13px #2c2436;
+    overflow:hidden;position:relative;display:flex;flex-direction:column;flex-shrink:0;}
+  .notch{position:absolute;top:0;left:50%;transform:translateX(-50%);width:128px;height:30px;background:#1d1726;border-radius:0 0 18px 18px;z-index:60;}
+  .statusbar{height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 6px;font-size:13px;font-weight:800;flex-shrink:0;}
+  .statusbar .right{display:flex;gap:6px;align-items:center;}
+  .viewport{flex:1;overflow-y:auto;overflow-x:hidden;position:relative;scrollbar-width:none;}
+  .viewport::-webkit-scrollbar{display:none;}
+  .screen{display:none;padding:2px 20px 132px;animation:fade .34s ease;}
+  .screen.active{display:block;}
+  @keyframes fade{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+
+  .page-head{padding:8px 2px 8px;}
+  .eyebrow{font-size:11.5px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--sleep);margin:0 2px 6px;}
+  .page-title{font-family:'Fredoka';font-weight:600;font-size:30px;letter-spacing:-.01em;}
+  .page-sub{font-size:13.5px;color:var(--ink-soft);font-weight:600;margin-top:3px;line-height:1.4;}
+  .section-gap{margin-top:20px;}
+  .kicker{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);margin:0 2px 9px;}
+
+  .card{background:var(--surface);border-radius:var(--r-md);padding:18px;box-shadow:var(--shadow-card);}
+  .card+.card{margin-top:13px;}
+
+  /* ===== NIGHT-SKY HERO + VOICE ORB (the signature moment) ===== */
+  .rx-hero{position:relative;border-radius:var(--r-lg);overflow:hidden;
+    padding:26px 20px 30px;margin-top:6px;
+    background:linear-gradient(168deg,#3B3A74 0%,#4A4D9C 52%,#6E6FC2 100%);
+    box-shadow:var(--shadow-card);}
+  .rx-star{position:absolute;color:#fff;opacity:.9;}
+  .st1{top:26px;left:34px;} .st2{top:52px;right:44px;} .st3{top:96px;left:52px;}
+  .st4{top:34px;right:96px;} .st5{top:120px;right:60px;} .st6{top:74px;left:24px;}
+  .rx-hero .hero-cap{position:relative;z-index:2;text-align:center;color:#fff;margin-bottom:20px;}
+  .rx-hero .hero-cap .hh{font-family:'Fredoka';font-weight:500;font-size:18px;}
+  .rx-hero .hero-cap .hs{font-size:12.5px;font-weight:600;opacity:.82;margin-top:2px;}
+
+  .orb-wrap{display:flex;flex-direction:column;align-items:center;position:relative;z-index:2;}
+  .rx-orb{width:154px;height:154px;border-radius:50%;position:relative;display:flex;align-items:center;justify-content:center;cursor:pointer;border:none;background:none;}
+  .rx-orb .halo{position:absolute;inset:-6px;border-radius:50%;background:radial-gradient(circle,rgba(190,196,255,.45) 0%,transparent 70%);animation:breathe 5s ease-in-out infinite;}
+  .rx-orb .glass{position:relative;z-index:3;width:100%;height:100%;border-radius:50%;
+    background:rgba(255,255,255,.92);backdrop-filter:blur(8px);
+    box-shadow:0 16px 34px -14px rgba(20,15,40,.65),inset 0 1px 2px rgba(255,255,255,.9);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;transition:transform .15s;}
+  .rx-orb:active .glass{transform:scale(.96);}
+  .rx-orb .mic{color:var(--sleep);transition:transform .2s;}
+  .rx-orb .lbl{font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--sleep);}
+  .rx-orb .pulse{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(255,255,255,.55);opacity:0;z-index:2;}
+  .rx-orb.listening .pulse{animation:rxpulse 1.6s ease-out infinite;}
+  .rx-orb.listening .pulse:nth-child(2){animation-delay:.53s;}
+  .rx-orb.listening .pulse:nth-child(3){animation-delay:1.06s;}
+  .rx-orb.listening .mic{transform:scale(1.12);}
+  @keyframes rxpulse{0%{transform:scale(1);opacity:.6;}100%{transform:scale(1.5);opacity:0;}}
+  @keyframes breathe{0%,100%{transform:scale(.98);}50%{transform:scale(1.04);}}
+  .dots span{animation:blink 1.2s infinite;}.dots span:nth-child(2){animation-delay:.2s;}.dots span:nth-child(3){animation-delay:.4s;}
+  @keyframes blink{0%,60%,100%{opacity:.25;}30%{opacity:1;}}
+  .hero-hint{position:relative;z-index:2;text-align:center;color:#fff;opacity:.85;font-size:12px;font-weight:600;line-height:1.45;margin-top:18px;padding:0 6px;}
+
+  /* ===== SAFETY LINE (bounded promise) ===== */
+  .rx-safety{display:flex;gap:11px;align-items:flex-start;background:var(--sleep-tint);
+    border-radius:var(--r-sm);padding:13px 15px;margin-top:13px;}
+  .rx-safety svg{flex-shrink:0;margin-top:1px;}
+  .rx-safety p{font-size:12.5px;font-weight:600;line-height:1.5;color:var(--ink);}
+
+  /* ===== ASK CARD (fallback text + quick example chips) ===== */
+  .ask-row{display:flex;gap:9px;align-items:center;background:var(--surface-2);border:1.5px solid var(--line);
+    border-radius:999px;padding:6px 6px 6px 16px;}
+  .ask-row input{flex:1;border:none;background:none;font-family:'Nunito';font-size:14px;font-weight:600;color:var(--ink);outline:none;}
+  .ask-row input::placeholder{color:var(--ink-faint);font-weight:600;}
+  .ask-send{border:none;cursor:pointer;width:38px;height:38px;border-radius:50%;flex-shrink:0;
+    background:var(--sleep);color:#fff;display:flex;align-items:center;justify-content:center;transition:transform .12s;}
+  .ask-send:active{transform:scale(.92);}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
+  .chip{border:1.5px solid var(--line);background:var(--surface);cursor:pointer;font-family:'Nunito';
+    font-size:12px;font-weight:700;color:var(--ink-soft);padding:8px 13px;border-radius:999px;transition:transform .12s,border-color .2s;}
+  .chip:active{transform:scale(.95);}
+  .chip.flag{color:var(--alert);border-color:rgba(224,87,75,.28);background:var(--alert-tint);}
+  .chip.flag::before{content:"⚑ ";}
+
+  /* ===== ANSWER (bounded; closes the loop) ===== */
+  .rx-answer{display:none;margin-top:14px;border-radius:var(--r-md);overflow:hidden;
+    box-shadow:var(--shadow-card);animation:rise .4s cubic-bezier(.2,.8,.25,1);}
+  .rx-answer.show{display:block;}
+  @keyframes rise{from{opacity:0;transform:translateY(14px) scale(.98);}to{opacity:1;transform:none;}}
+  .ans-head{padding:16px 18px 14px;display:flex;align-items:center;gap:10px;color:#fff;}
+  .ans-head .h-t{font-family:'Fredoka';font-weight:500;font-size:17px;flex:1;}
+  .ans-head .tag{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+    background:rgba(255,255,255,.24);padding:4px 9px;border-radius:999px;}
+  .ans-body{background:var(--surface);padding:4px 18px 18px;}
+  .ans-line{font-size:14px;font-weight:700;line-height:1.5;color:var(--ink);padding:14px 0 4px;}
+  .ans-block{padding:13px 0;border-top:1px solid var(--line);}
+  .ans-block .bh{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px;}
+  .ans-block .bt{font-size:13.5px;font-weight:600;line-height:1.5;color:var(--ink-soft);}
+  .ans-block.normal .bh{color:var(--diaper);}
+  .ans-block.call .bh{color:var(--alert);}
+  .ans-block.helps .bh{color:var(--sleep);}
+  .ans-foot{font-size:12.5px;font-weight:700;color:var(--ink-soft);background:var(--surface-2);
+    border-radius:var(--r-sm);padding:12px 14px;margin-top:6px;line-height:1.5;}
+  .ans-dismiss{width:100%;border:none;cursor:pointer;font-family:'Nunito';font-size:13.5px;font-weight:800;
+    color:var(--sleep);background:none;padding:14px 0 2px;}
+  /* tone: normal/comfort answers */
+  .rx-answer[data-tone="calm"] .ans-head{background:linear-gradient(150deg,var(--sleep-2),var(--sleep));}
+  /* tone: triage — serious but not alarming */
+  .rx-answer[data-tone="triage"] .ans-head{background:linear-gradient(150deg,#E97367,var(--alert));}
+  .triage-actions{display:flex;flex-direction:column;gap:9px;padding-top:12px;}
+  .triage-btn{border:none;cursor:pointer;font-family:'Nunito';font-size:14px;font-weight:800;padding:14px;border-radius:14px;
+    display:flex;align-items:center;justify-content:center;gap:8px;}
+  .triage-btn.primary{background:var(--alert);color:#fff;box-shadow:0 12px 22px -12px var(--alert);}
+  .triage-btn.ghost{background:var(--alert-tint);color:var(--alert);}
+
+  /* ===== TONIGHT RECAP (grounded in logs) ===== */
+  .recap-tally{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+  .tally{display:inline-flex;align-items:center;gap:7px;background:var(--surface-2);border-radius:999px;padding:7px 12px;font-size:12px;font-weight:800;}
+  .tally i{width:8px;height:8px;border-radius:50%;}
+  .read-kicker{font-size:10.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--sleep);margin-bottom:6px;}
+  .read-text{font-size:14px;font-weight:700;line-height:1.55;color:var(--ink);}
+  .read-chip{display:inline-flex;align-items:center;gap:6px;margin-top:12px;background:var(--diaper-tint);
+    color:var(--diaper);font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:6px 12px;border-radius:999px;}
+
+  /* ===== COMMON TONIGHT (tappable accordion) ===== */
+  .topic{background:var(--surface);border-radius:var(--r-md);box-shadow:var(--shadow-card);overflow:hidden;}
+  .topic+.topic{margin-top:11px;}
+  .topic-head{width:100%;border:none;background:none;cursor:pointer;font-family:'Nunito';text-align:left;
+    padding:16px 18px;display:flex;align-items:flex-start;gap:12px;}
+  .topic-head .dot{width:9px;height:9px;border-radius:50%;margin-top:6px;flex-shrink:0;}
+  .topic-head .tt{flex:1;}
+  .topic-head .tt .tn{font-family:'Fredoka';font-weight:500;font-size:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .topic-head .tt .tp{font-size:12.5px;font-weight:600;color:var(--ink-soft);line-height:1.5;margin-top:4px;}
+  .topic-head .chev{color:var(--ink-faint);flex-shrink:0;margin-top:4px;transition:transform .3s;}
+  .topic.open .chev{transform:rotate(90deg);}
+  .mini-tag{font-size:9.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:3px 8px;border-radius:999px;}
+  .mini-tag.common{background:var(--sleep-tint);color:var(--sleep);}
+  .mini-tag.comfort{background:var(--diaper-tint);color:var(--diaper);}
+  .topic-body{max-height:0;overflow:hidden;transition:max-height .38s ease;}
+  .topic.open .topic-body{max-height:520px;}
+  .topic-body-inner{padding:2px 18px 18px;}
+
+  /* nav */
+  .nav{position:absolute;left:16px;right:16px;bottom:16px;height:70px;z-index:50;
+    background:rgba(255,255,255,.9);backdrop-filter:blur(20px);border-radius:28px;
+    box-shadow:0 16px 36px -12px rgba(60,40,30,.4);display:flex;align-items:center;justify-content:space-around;
+    padding:0 8px;border:1px solid rgba(255,255,255,.7);}
+  .nav button{border:none;background:none;cursor:pointer;font-family:'Nunito';display:flex;flex-direction:column;
+    align-items:center;gap:4px;color:var(--ink-faint);font-size:10px;font-weight:800;padding:8px 6px;flex:1;transition:color .2s;}
+  .nav button svg{width:23px;height:23px;}
+  .nav button.active{color:var(--sleep);}
+  .nav .fab{position:relative;top:-3px;}
+  .nav .fab .ring2{width:52px;height:52px;border-radius:50%;background:linear-gradient(145deg,#FF9E5E,#FF7A3D);
+    display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 14px 24px -8px var(--feed);}
+  .nav .fab span{margin-top:2px;color:var(--ink-faint);}
+
+  /* light stubs for other tabs */
+  .stub{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+    min-height:60vh;gap:14px;color:var(--ink-soft);}
+  .stub .si{width:70px;height:70px;border-radius:24px;display:flex;align-items:center;justify-content:center;}
+  .stub h3{font-family:'Fredoka';font-weight:500;font-size:20px;color:var(--ink);}
+  .stub p{font-size:13.5px;font-weight:600;max-width:230px;line-height:1.5;}
+  .quick{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px;}
+  .qbtn{border:none;font-family:'Nunito';text-align:left;background:var(--surface);
+    border-radius:var(--r-md);padding:15px 16px;box-shadow:var(--shadow-card);display:flex;align-items:center;gap:13px;}
+  .qicon{width:46px;height:46px;border-radius:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+  .qbtn .lbl{font-family:'Fredoka';font-weight:500;font-size:15.5px;}
+  .qbtn .ago{font-size:11.5px;color:var(--ink-faint);font-weight:700;margin-top:1px;}
+
+  .foot{max-width:440px;text-align:center;color:var(--ink-soft);font-size:12.5px;line-height:1.65;font-weight:500;}
+  .foot b{color:var(--ink);}
+  .foot .arch{display:block;margin-top:8px;font-size:11.5px;color:var(--ink-faint);}
+
+  @media (prefers-reduced-motion: reduce){
+    *{animation:none!important;transition:none!important;}
+  }
+</style>
+</head>
+<body>
+
+  <div class="intro">
+    <span class="badge"><i></i>Killer feature demo</span>
+    <h1>Reassure</h1>
+    <p>Тапни орб «Tap to talk» — он «слушает» и отвечает. Или жми чипы: обычные ведут к спокойному ответу, красные (⚑) показывают триаж-переход к врачу.</p>
+  </div>
+
+  <div class="phone">
+    <div class="notch"></div>
+    <div class="statusbar">
+      <span>2:14</span>
+      <span class="right">
+        <svg width="17" height="12" viewBox="0 0 18 12" fill="none"><path d="M1 8h2v3H1zM5 5h2v6H5zM9 3h2v8H9zM13 1h2v10h-2z" fill="#2E2A40"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none"><path d="M8 2.5c2 0 3.8.8 5 2l1.2-1.3A9 9 0 0 0 1.8 3.2L3 4.5c1.2-1.2 3-2 5-2Z" fill="#2E2A40"/><path d="M8 6c1 0 1.9.4 2.5 1L8 9.6 5.5 7A3.5 3.5 0 0 1 8 6Z" fill="#2E2A40"/></svg>
+        <svg width="24" height="12" viewBox="0 0 24 12" fill="none"><rect x="1" y="1" width="20" height="10" rx="3" stroke="#2E2A40" stroke-width="1.3"/><rect x="3" y="3" width="15" height="6" rx="1.5" fill="#2E2A40"/><rect x="22" y="4" width="2" height="4" rx="1" fill="#2E2A40"/></svg>
+      </span>
+    </div>
+
+    <div class="viewport">
+
+      <!-- ===================== REASSURE (the star) ===================== -->
+      <section class="screen active" id="reassure">
+        <div class="page-head">
+          <div class="eyebrow">Is this normal?</div>
+          <div class="page-title">Reassure</div>
+          <div class="page-sub">Quick, bounded guidance for tonight — never a diagnosis.</div>
+        </div>
+
+        <!-- night-sky hero + voice orb -->
+        <div class="rx-hero">
+          <svg class="rx-star st1" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2 7 7 2-7 2-2 7-2-7-7-2 7-2 2-7Z"/></svg>
+          <svg class="rx-star st2" width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2 7 7 2-7 2-2 7-2-7-7-2 7-2 2-7Z"/></svg>
+          <svg class="rx-star st3" width="7" height="7" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2 7 7 2-7 2-2 7-2-7-7-2 7-2 2-7Z"/></svg>
+          <svg class="rx-star st4" width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2 7 7 2-7 2-2 7-2-7-7-2 7-2 2-7Z"/></svg>
+          <svg class="rx-star st5" width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2 7 7 2-7 2-2 7-2-7-7-2 7-2 2-7Z"/></svg>
+          <svg class="rx-star st6" width="6" height="6" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2 7 7 2-7 2-2 7-2-7-7-2 7-2 2-7Z"/></svg>
+
+          <div class="hero-cap">
+            <div class="hh">It's 2am and you're not sure.</div>
+            <div class="hs">That's exactly what this is for.</div>
+          </div>
+
+          <div class="orb-wrap">
+            <button class="rx-orb" id="orb" onclick="tapOrb()" aria-label="Tap to talk">
+              <span class="halo"></span>
+              <span class="pulse"></span><span class="pulse"></span><span class="pulse"></span>
+              <span class="glass">
+                <span class="mic" id="orbMic">
+                  <svg width="30" height="30" viewBox="0 0 24 24" fill="none"><rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" stroke-width="2"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </span>
+                <span class="lbl" id="orbLbl">Tap to talk</span>
+              </span>
+            </button>
+          </div>
+          <div class="hero-hint">Hands full? Just ask out loud. I only answer what's safe to — anything urgent, I send you straight to your doctor.</div>
+        </div>
+
+        <!-- bounded promise -->
+        <div class="rx-safety">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3l7 3v5c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V6l7-3Z" stroke="#5560C6" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 12l2 2 4-4" stroke="#5560C6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <p>Lullaby doesn't diagnose or treat. If something feels urgent, call your doctor or your local emergency number.</p>
+        </div>
+
+        <!-- ask fallback + example chips -->
+        <div class="card section-gap">
+          <div class="kicker" style="margin-bottom:12px">Or type it</div>
+          <div class="ask-row">
+            <input id="askInput" placeholder="Ask about tonight…" onkeydown="if(event.key==='Enter')askText()">
+            <button class="ask-send" onclick="askText()" aria-label="Ask">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M4 12h15M13 6l6 6-6 6" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+          <div class="chips">
+            <button class="chip" onclick="askChip('She hiccups after every feed')">Hiccups after feeds</button>
+            <button class="chip" onclick="askChip('A little spit-up after feeding')">Spit-up after a feed</button>
+            <button class="chip" onclick="askChip('Lots of grunting and squirming')">Grunting &amp; squirming</button>
+            <button class="chip" onclick="askChip(&quot;She won't settle at all&quot;)">Won't settle</button>
+            <button class="chip flag" onclick="askChip('She feels really hot')">She feels hot</button>
+            <button class="chip flag" onclick="askChip(&quot;She's hard to wake&quot;)">Hard to wake her</button>
+          </div>
+        </div>
+
+        <!-- answer surface (bounded / triage) -->
+        <div class="rx-answer" id="answer" data-tone="calm">
+          <div class="ans-head"><span class="h-t" id="ansTitle"></span><span class="tag" id="ansTag"></span></div>
+          <div class="ans-body" id="ansBody"></div>
+        </div>
+
+        <!-- tonight recap, grounded in logs -->
+        <div class="kicker section-gap">Based on tonight's logs</div>
+        <div class="card">
+          <div class="recap-tally" id="recapTally"></div>
+          <div class="read-kicker">The short version</div>
+          <div class="read-text" id="readText"></div>
+          <div class="read-chip" id="readChip"></div>
+        </div>
+
+        <!-- common tonight -->
+        <div class="kicker section-gap">Common tonight</div>
+        <div id="topics"></div>
+      </section>
+
+      <!-- ===================== light stubs ===================== -->
+      <section class="screen" id="today">
+        <div class="page-head"><div class="page-title">Today</div><div class="page-sub">Tuesday · your existing home screen</div></div>
+        <div class="quick section-gap">
+          <div class="qbtn"><div class="qicon" style="background:linear-gradient(145deg,#FFE0CC,#FFD0B6)"><svg width="23" height="23" viewBox="0 0 24 24" fill="none"><path d="M9 2h6M10 2v3.5a4 4 0 0 0-1.2 2.8L8 19a3 3 0 0 0 3 3h2a3 3 0 0 0 3-3l-.8-10.7A4 4 0 0 0 14 5.5V2" stroke="#FF7A3D" stroke-width="1.9"/></svg></div><div><div class="lbl">Feed</div><div class="ago">2h 45m ago</div></div></div>
+          <div class="qbtn"><div class="qicon" style="background:linear-gradient(145deg,#E5E8FB,#D6DBF7)"><svg width="23" height="23" viewBox="0 0 24 24" fill="none"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke="#5560C6" stroke-width="1.9"/></svg></div><div><div class="lbl">Sleep</div><div class="ago">Awake 1h 24m</div></div></div>
+          <div class="qbtn"><div class="qicon" style="background:linear-gradient(145deg,#DAF4EE,#C9EFE6)"><svg width="23" height="23" viewBox="0 0 24 24" fill="none"><path d="M3 7h18l-1.5 4.5A8 8 0 0 1 12 17a8 8 0 0 1-7.5-5.5L3 7Z" stroke="#23B79E" stroke-width="1.9"/></svg></div><div><div class="lbl">Diaper</div><div class="ago">1h 10m ago</div></div></div>
+          <div class="qbtn"><div class="qicon" style="background:linear-gradient(145deg,#FFF0D2,#FCE6B6)"><svg width="23" height="23" viewBox="0 0 24 24" fill="none"><path d="M7 21h10M8 21V11h8v10M6 11h12M9 11V7a3 3 0 0 1 6 0v4" stroke="#FFB12E" stroke-width="1.9"/></svg></div><div><div class="lbl">Pump</div><div class="ago">4h 20m ago</div></div></div>
+        </div>
+        <div class="stub"><p>Твой существующий экран Today — здесь для контекста таб-бара.</p></div>
+      </section>
+
+      <section class="screen" id="growth">
+        <div class="stub">
+          <div class="si" style="background:var(--growth-tint)"><svg width="30" height="30" viewBox="0 0 24 24" fill="none"><path d="M3 17 9 11l3 3 8-8M21 6h-4M21 6v4" stroke="#FFB12E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <h3>Growth</h3><p>Твой WHO-перцентиль экран живёт здесь.</p>
+        </div>
+      </section>
+
+      <section class="screen" id="history">
+        <div class="stub">
+          <div class="si" style="background:var(--sleep-tint)"><svg width="30" height="30" viewBox="0 0 24 24" fill="none"><path d="M8 6h12M8 12h12M8 18h12" stroke="#5560C6" stroke-width="2" stroke-linecap="round"/><circle cx="3.5" cy="6" r="1.5" fill="#5560C6"/><circle cx="3.5" cy="12" r="1.5" fill="#5560C6"/><circle cx="3.5" cy="18" r="1.5" fill="#5560C6"/></svg></div>
+          <h3>History</h3><p>Полный таймлайн событий.</p>
+        </div>
+      </section>
+
+    </div><!-- /viewport -->
+
+    <nav class="nav">
+      <button data-s="today" onclick="go(this)"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Today</button>
+      <button class="active" data-s="reassure" onclick="go(this)"><svg viewBox="0 0 24 24" fill="none"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>Reassure</button>
+      <button class="fab" onclick="go(document.querySelector('[data-s=today]'))"><div class="ring2"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg></div><span>Log</span></button>
+      <button data-s="growth" onclick="go(this)"><svg viewBox="0 0 24 24" fill="none"><path d="M3 17 9 11l3 3 8-8M21 6h-4M21 6v4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Growth</button>
+      <button data-s="history" onclick="go(this)"><svg viewBox="0 0 24 24" fill="none"><path d="M8 6h12M8 12h12M8 18h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="3.5" cy="6" r="1.5" fill="currentColor"/><circle cx="3.5" cy="12" r="1.5" fill="currentColor"/><circle cx="3.5" cy="18" r="1.5" fill="currentColor"/></svg>History</button>
+    </nav>
+  </div><!-- /phone -->
+
+  <p class="foot">
+    Хиро — это <b>ночное небо из твоей сигнатуры</b>, а внутри голосовой орб: Reassure живёт в 2 ночи, поэтому его лицо — та же ночь. Всё, что мы обсуждали, вшито: <b>voice-first</b> (Vapi), ответ <b>grounded в логах ночи</b>, ответы <b>bounded</b> (каждый упирается в «нормально» или «звони врачу»), а <b>триаж перебивает</b> любую утешалку на красных флагах.
+    <span class="arch">Архитектура: ⚑ триаж-чек → curated-база (hiccups/spit-up/gas/sleep) → иначе вежливый отказ. В проде это backend-вызов LLM: сначала триаж, потом ответ, граунднутый в твоём контенте + логах. Демо использует те же правила локально.</span>
+  </p>
+
+<script>
+  /* ---------- tab switching (mirrors your go()) ---------- */
+  function go(btn){
+    document.querySelectorAll('.nav button[data-s]').forEach(b=>b.classList.remove('active'));
+    if(btn.dataset.s) btn.classList.add('active');
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    document.getElementById(btn.dataset.s || 'today').classList.add('active');
+    document.querySelector('.viewport').scrollTo({top:0,behavior:'smooth'});
+  }
+
+  /* ---------- curated knowledge base (the "content" layer) ---------- */
+  const KB = {
+    hiccups:{ title:'Hiccups', tag:'Common', tone:'calm',
+      line:'Frequent little hiccups are a normal newborn reflex — they tend to bother us more than the baby.',
+      normal:'Hiccups after a feed, when excited, or for no clear reason, several times a day — with baby staying comfortable and breathing easily.',
+      call:'They seem to cause pain or choking, come with a lot of vomiting, or get in the way of breathing or feeding.',
+      helps:'Pause, burp, and hold baby upright for a few minutes. They usually stop on their own.' },
+    spitup:{ title:'Spit-up', tag:'Common', tone:'calm',
+      line:'Small spit-ups after feeds are typical while a tiny tummy is still settling.',
+      normal:'Effortless, small spit-ups after or between feeds, with a content baby who\'s gaining weight and having wet diapers.',
+      call:'Forceful or projectile vomiting, green or bloody spit-up, poor weight gain, or a baby who seems in pain after most feeds.',
+      helps:'Smaller, more frequent feeds, burping partway through, and keeping baby upright for 15–20 minutes after.' },
+    gas:{ title:'Gas', tag:'Comfort', tone:'calm',
+      line:'Wriggles, grunts, and passing gas are part of a brand-new gut finding its rhythm.',
+      normal:'Grunting, squirming, pulling legs up, and passing gas — often around feeds — with baby settling again after.',
+      call:'A hard, swollen belly with vomiting, no stool plus real distress, or crying that can\'t be soothed for hours.',
+      helps:'Gentle bicycle legs, tummy time while awake and watched, and burping partway through feeds.' },
+    sleep:{ title:'Sleep', tag:'Comfort', tone:'calm',
+      line:'Newborn sleep is wonderfully unpredictable — short stretches and mixed-up days and nights are normal early on.',
+      normal:'Short, irregular sleeps, waking to feed, noisy or twitchy sleep, and day/night confusion in the first weeks.',
+      call:'Baby is very hard to wake, has breathing pauses that worry you, or seems unusually limp or floppy.',
+      helps:'A calm, dark wind-down and the same short routine each night — with safe-sleep basics every time.' }
+  };
+  const TOPIC_ORDER = ['hiccups','spitup','gas','sleep'];
+  const dotColor = {Common:'var(--sleep)', Comfort:'var(--diaper)'};
+
+  /* ---------- red flags: checked FIRST, always override ---------- */
+  const REDFLAGS = ['fever','feels hot','really hot','burning up','temperature','won\'t wake',"won't wake",'wont wake',
+    'can\'t wake','cant wake','hard to wake','not waking','unresponsive','limp','floppy','turning blue','blue lips',
+    'dusky','not breathing','trouble breathing','struggling to breathe','can\'t breathe','gasping','choking','seizure',
+    'convulsion','blood','bloody','projectile','green vomit','dehydrat','no wet diaper','no wet diapers','sunken'];
+
+  /* ---------- router (triage → topic → out of scope) ---------- */
+  function route(text){
+    const t = text.toLowerCase();
+    if (REDFLAGS.some(f => t.includes(f))) return {kind:'triage'};
+    if (/hiccup/.test(t)) return {kind:'topic', key:'hiccups'};
+    if (/spit|posset|throw up|throwing up|vomit/.test(t)) return {kind:'topic', key:'spitup'};
+    if (/gas|grunt|squirm|wriggl|fart|wind|colic|tummy/.test(t)) return {kind:'topic', key:'gas'};
+    if (/sleep|nap|settle|won'?t sleep|wont sleep|fuss|restless|awake/.test(t)) return {kind:'topic', key:'sleep'};
+    return {kind:'oos'};
+  }
+
+  function block(cls,label,icon,text){
+    return `<div class="ans-block ${cls}"><div class="bh">${icon} ${label}</div><div class="bt">${text}</div></div>`;
+  }
+  const ICN = {
+    normal:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    call:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 8v5M12 16.5v.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M10.3 3.9 2.5 18a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg>',
+    helps:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 3a6 6 0 0 0-3.5 10.9c.5.4.8 1 .9 1.6l.1.5h5l.1-.5c.1-.6.4-1.2.9-1.6A6 6 0 0 0 12 3ZM9.5 20h5M10 22h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  };
+
+  function renderAnswer(res){
+    const ans = document.getElementById('answer');
+    const head = ans.querySelector('.ans-head');
+    const body = document.getElementById('ansBody');
+
+    if (res.kind === 'triage'){
+      ans.dataset.tone = 'triage';
+      document.getElementById('ansTitle').textContent = "This one's worth a real person";
+      document.getElementById('ansTag').textContent = 'Please call';
+      body.innerHTML =
+        `<div class="ans-line">What you're describing can need more than an app.</div>
+         <div class="ans-block call"><div class="bt">Call your pediatrician now. If baby is struggling to breathe, can't be woken, or is turning blue, call your local emergency number right away.</div></div>
+         <div class="triage-actions">
+           <button class="triage-btn primary"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M4 5c0 9 6 15 15 15l-1-4-4-1-2 2a11 11 0 0 1-5-5l2-2-1-4-4-1Z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/></svg> Call pediatrician</button>
+           <button class="triage-btn ghost">Local emergency number</button>
+         </div>
+         <button class="ans-dismiss" onclick="closeAnswer()">Close</button>`;
+    } else if (res.kind === 'oos'){
+      ans.dataset.tone = 'calm';
+      document.getElementById('ansTitle').textContent = "That's outside what I answer";
+      document.getElementById('ansTag').textContent = 'Bounded';
+      body.innerHTML =
+        `<div class="ans-line">I keep to common newborn-night worries — feeding, spit-up, gas, hiccups, and sleep.</div>
+         <div class="ans-foot">For anything else, or if you're simply not sure, your pediatrician is the right call.</div>
+         <button class="ans-dismiss" onclick="closeAnswer()">Got it</button>`;
+    } else {
+      const k = KB[res.key];
+      ans.dataset.tone = 'calm';
+      document.getElementById('ansTitle').textContent = k.title;
+      document.getElementById('ansTag').textContent = k.tag;
+      body.innerHTML =
+        `<div class="ans-line">${k.line}</div>` +
+        block('normal',"What's normal", ICN.normal, k.normal) +
+        block('helps','What can help', ICN.helps, k.helps) +
+        block('call','When to call', ICN.call, k.call) +
+        `<div class="ans-foot">Still worried after this? Trust your gut — it's always okay to call your doctor.</div>
+         <button class="ans-dismiss" onclick="closeAnswer()">Got it, thanks</button>`;
+    }
+
+    ans.classList.add('show');
+    setTimeout(()=>ans.scrollIntoView({behavior:'smooth', block:'center'}), 60);
+  }
+  function closeAnswer(){ document.getElementById('answer').classList.remove('show'); }
+
+  function ask(text){ if(text && text.trim()) renderAnswer(route(text)); }
+  function askText(){ const i=document.getElementById('askInput'); ask(i.value); i.value=''; }
+  function askChip(text){ document.getElementById('askInput').value=''; ask(text); }
+
+  /* ---------- voice sim (stands in for Vapi) ---------- */
+  const VOICE_SAMPLES = [
+    'She hiccups after every feed',
+    'A little spit-up after feeding',
+    'Lots of grunting and squirming tonight',
+    "She won't settle at all"
+  ];
+  let voiceIx = 0, listening = false;
+  function tapOrb(){
+    if (listening) return;
+    listening = true;
+    const orb = document.getElementById('orb');
+    const lbl = document.getElementById('orbLbl');
+    orb.classList.add('listening');
+    lbl.innerHTML = 'Listening<span class="dots"><span>.</span><span>.</span><span>.</span></span>';
+    const phrase = VOICE_SAMPLES[voiceIx % VOICE_SAMPLES.length];
+    voiceIx++;
+    setTimeout(()=>{ document.getElementById('askInput').value = phrase; }, 700);
+    setTimeout(()=>{
+      orb.classList.remove('listening');
+      lbl.textContent = 'Tap to talk';
+      listening = false;
+      document.getElementById('askInput').value = '';
+      ask(phrase);
+    }, 1600);
+  }
+
+  /* ---------- tonight recap, built FROM logs (grounded) ---------- */
+  // in production these are the parent's real saved logs for the night
+  const tonightLogs = [
+    {type:'feed'},{type:'feed'},
+    {type:'diaper'},
+    {type:'sleep', mins:40},
+    {type:'spitup'},{type:'spitup'}
+  ];
+  function buildRecap(){
+    const c = {feed:0,diaper:0,sleep:0,spitup:0}; let sleepMins=0;
+    tonightLogs.forEach(l=>{ c[l.type]++; if(l.type==='sleep') sleepMins+=(l.mins||0); });
+    const tally = [
+      c.feed   && {t:`${c.feed} feeds`,    col:'var(--feed)'},
+      c.diaper && {t:`${c.diaper} diaper`, col:'var(--diaper)'},
+      c.sleep  && {t:`one ${sleepMins}-min sleep`, col:'var(--sleep)'},
+      c.spitup && {t:`${c.spitup} small spit-ups`, col:'var(--growth)'}
+    ].filter(Boolean);
+    document.getElementById('recapTally').innerHTML =
+      tally.map(x=>`<span class="tally"><i style="background:${x.col}"></i>${x.t}</span>`).join('');
+
+    // grounded "night read" — plain-language summary of the tallies, not a diagnosis
+    document.getElementById('readText').textContent =
+      "A pretty ordinary newborn night so far. Amara's feeds, diaper, and small spit-ups all sit in a normal range — nothing here stands out.";
+    document.getElementById('readChip').innerHTML =
+      '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M20 6 9 17l-5-5" stroke="#23B79E" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg> Typical night';
+  }
+
+  /* ---------- common-tonight accordion ---------- */
+  function buildTopics(){
+    document.getElementById('topics').innerHTML = TOPIC_ORDER.map(key=>{
+      const k = KB[key];
+      const tagClass = k.tag === 'Common' ? 'common' : 'comfort';
+      return `<div class="topic" id="tp-${key}">
+        <button class="topic-head" onclick="toggleTopic('${key}')">
+          <span class="dot" style="background:${dotColor[k.tag]}"></span>
+          <span class="tt">
+            <span class="tn">${k.title}<span class="mini-tag ${tagClass}">${k.tag}</span></span>
+            <span class="tp">${k.line}</span>
+          </span>
+          <span class="chev"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        </button>
+        <div class="topic-body"><div class="topic-body-inner">
+          ${block('normal',"What's normal", ICN.normal, k.normal)}
+          ${block('helps','What can help', ICN.helps, k.helps)}
+          ${block('call','When to call', ICN.call, k.call)}
+        </div></div>
+      </div>`;
+    }).join('');
+  }
+  function toggleTopic(key){ document.getElementById('tp-'+key).classList.toggle('open'); }
+
+  buildRecap();
+  buildTopics();
+</script>
+</body>
+</html>

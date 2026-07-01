@@ -45,6 +45,7 @@ import { getAuthRedirectUrl, startGoogleOAuth } from '@/lib/authLinking';
 import { authWarn } from '@/lib/authLogger';
 import { isGoogleSignInConfigured } from '@/lib/googleAuth';
 import { hapticSuccess } from '@/lib/haptics';
+import { logStartupStep } from '@/lib/startupDiagnostics';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { resolveNoSessionStatus } from '@/state/authStatusResolver';
 import {
@@ -231,6 +232,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    logStartupStep('auth status', { status }, { once: false });
+  }, [status]);
+
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -275,12 +280,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (isCurrent()) {
       setErrorMessage(null);
       setStatus('postAuthSync');
+      logStartupStep('auth provisioning start');
     }
     const [babyId, profile] = await Promise.all([
       getLinkedBabyId(next.user.id),
       getCaregiverProfile(next.user.id),
     ]);
     if (!isCurrent()) return;
+    logStartupStep('auth profile and baby link ready', {
+      hasBaby: babyId != null,
+      hasProfile: profile != null,
+    });
     setCaregiver(profile);
     if (!babyId) {
       setBaby(null);
@@ -295,6 +305,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setBaby(babyRow);
     setCaregivers(linked);
     setStatus('ready');
+    logStartupStep('auth baby ready', {
+      hasBaby: babyRow != null,
+      caregiverCount: linked.length,
+    });
   }, []);
 
   // Fill the active baby/caregiver from the onboarding-persisted local baby (or
@@ -346,6 +360,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let active = true;
     let unsub = () => {};
     (async () => {
+      logStartupStep('auth bootstrap start', { configured: true });
       // Read the session AND the local-first preference before wiring the auth
       // listener, so the initial INITIAL_SESSION(null) emit can't transiently
       // flash the account-entry surface for a returning "continue locally" guest.
@@ -355,6 +370,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ]);
       if (!active) return;
       prefersLocalRef.current = storedPref === 'true';
+      logStartupStep('auth session ready', {
+        hasSession: current != null,
+        prefersLocal: prefersLocalRef.current,
+      });
       await applySession(current);
       if (!active) return;
       // Re-evaluate on any later auth change. Defer out of the callback (Supabase
@@ -426,6 +445,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (configured) return;
     let active = true;
     (async () => {
+      logStartupStep('auth bootstrap start', { configured: false });
       let storedPref: string | null = null;
       try {
         storedPref = await AsyncStorage.getItem(PREFERS_LOCAL_STORAGE_KEY);
@@ -437,6 +457,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await hydrateLocalIdentity();
       if (!active || !mounted.current) return;
       setStatus(resolveNoSessionStatus(prefersLocalRef.current));
+      logStartupStep('auth local identity ready', {
+        prefersLocal: prefersLocalRef.current,
+      });
     })();
     return () => {
       active = false;

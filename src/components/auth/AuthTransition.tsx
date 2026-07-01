@@ -17,8 +17,9 @@ import { ActivityIndicator, Image, Text, View } from 'react-native';
 import { colors, fonts } from '@/theme';
 
 const logoSource = require('../../../assets/images/lullaby-logo-mark.png');
+export const AUTH_TRANSITION_MESSAGE = 'Preparing Lullaby...';
 
-export function AuthTransition({ message = 'Just a moment…' }: { message?: string }) {
+export function AuthTransition({ message = AUTH_TRANSITION_MESSAGE }: { message?: string }) {
   return (
     <View
       style={{
