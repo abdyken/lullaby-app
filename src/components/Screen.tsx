@@ -3,7 +3,7 @@
  * indicator), and reserves room at the bottom so content never hides behind the
  * floating tab bar. The cream background is sacred (§6) — every screen uses it.
  */
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { type NativeScrollEvent, type NativeSyntheticEvent, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -21,6 +21,8 @@ type Props = {
   scrollEnabled?: boolean;
   /** initial scroll offset — used by the reveal overlay to mirror the base screen */
   contentOffset?: { x: number; y: number };
+  /** optional handle to the inner ScrollView (e.g. Reassure scrolls its answer into view) */
+  scrollRef?: RefObject<ScrollView | null>;
 };
 
 export function Screen({
@@ -30,6 +32,7 @@ export function Screen({
   onScroll,
   scrollEnabled = true,
   contentOffset,
+  scrollRef,
 }: Props) {
   const insets = useSafeAreaInsets();
   const background = surfaces[surfaceMode].bg;
@@ -49,6 +52,7 @@ export function Screen({
   if (scroll) {
     return (
       <ScrollView
+        ref={scrollRef}
         style={{ flex: 1, backgroundColor: background }}
         contentContainerStyle={padding}
         showsVerticalScrollIndicator={false}

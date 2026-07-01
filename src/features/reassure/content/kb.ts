@@ -107,6 +107,25 @@ export const OOS_COPY = {
 export const TOPIC_FOOT = "Still worried after this? Trust your gut — it's always okay to call your doctor.";
 export const TOPIC_DISMISS = 'Got it, thanks';
 
+export type ExampleChip = {
+  /** short chip label shown in the ask card */
+  label: string;
+  /** the full ask sent through route() when tapped */
+  ask: string;
+  /** red ⚑ styling — the chip demonstrates the triage path */
+  flagged: boolean;
+};
+
+/* PLACEHOLDER — pending clinician review (chips demonstrate real asks). */
+export const EXAMPLE_CHIPS: ExampleChip[] = [
+  { label: 'Hiccups after feeds', ask: 'She hiccups after every feed', flagged: false },
+  { label: 'Spit-up after a feed', ask: 'A little spit-up after feeding', flagged: false },
+  { label: 'Grunting & squirming', ask: 'Lots of grunting and squirming', flagged: false },
+  { label: "Won't settle", ask: "She won't settle at all", flagged: false },
+  { label: 'She feels hot', ask: 'She feels really hot', flagged: true },
+  { label: 'Hard to wake her', ask: "She's hard to wake", flagged: true },
+];
+
 /**
  * Review metadata — the launch gate. Reassure ships publicly only when
  * status === 'approved' (release checklist + docs/reassure-content-review.md).

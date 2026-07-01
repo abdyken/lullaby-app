@@ -14,7 +14,7 @@
  */
 
 import type { LogEvent } from '@/data/models';
-import { nightWindowFor, NIGHT_RECAP_START_HOUR } from './nightWindow';
+import { nightWindowFor } from './nightWindow';
 import type { ReassureNightRecap } from './types';
 
 /**

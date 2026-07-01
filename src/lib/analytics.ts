@@ -52,7 +52,20 @@ export type AnalyticsEvent =
   | 'purchase_failed'
   | 'restore_started'
   | 'restore_completed'
-  | 'restore_failed';
+  | 'restore_failed'
+  // Reassure v2 — bounded triage/reassurance surface. PRIVACY RULE: props carry
+  // ONLY coarse enums (source / route_kind / topic / action) — NEVER the parent's
+  // raw question or transcript text. Raw text exists solely in the service-role
+  // reassure_audit table (Phase 2+), never in analytics.
+  | 'reassure_opened'
+  | 'reassure_asked'
+  | 'reassure_triage_shown'
+  | 'reassure_triage_call_tapped'
+  | 'reassure_voice_used'
+  | 'reassure_voice_permission_denied'
+  | 'reassure_topic_opened'
+  | 'reassure_recap_viewed'
+  | 'reassure_night_read_shown';
 
 /** Small, serializable property bag stored in the row's `props` jsonb column. */
 export type AnalyticsProps = Record<string, string | number | boolean | null>;
