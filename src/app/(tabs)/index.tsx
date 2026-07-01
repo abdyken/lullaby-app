@@ -20,6 +20,7 @@ import { BabyHeader } from '@/components/BabyHeader';
 import { FirstLogCoach, TonightCalibrating } from '@/components/FirstLogCoach';
 import { HandoffCard } from '@/components/HandoffCard';
 import { LogSheet, type SheetOption } from '@/components/LogSheet';
+import { SPITUP_NOTE_LABEL } from '@/features/reassure/domain/recap';
 import { isLoggingV2Enabled } from '@/features/logging';
 import { DiaperSheet } from '@/features/logging/diaper/DiaperSheet';
 import { FeedSheet } from '@/features/logging/feed/FeedSheet';
@@ -116,6 +117,9 @@ const SHEETS: Record<SheetKind, SheetConfig> = {
       { key: 'Fussy', label: 'Fussy' },
       { key: 'Cried', label: 'Cried' },
       { key: 'Settled', label: 'Settled' },
+      // Reassure counts these notes in its night recap — same constant on both
+      // sides so the writer and the counter can never drift (smoke §X guard).
+      { key: SPITUP_NOTE_LABEL, label: 'Spit-up' },
     ],
     defaultKey: 'Settled',
     saveLabel: 'Save note',
