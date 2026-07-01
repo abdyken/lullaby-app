@@ -4346,6 +4346,57 @@ check('V8. the invite share text never leaks a Supabase URL or anon key', () => 
   assert.ok(!/eyJ[A-Za-z0-9]/.test(msg), 'no JWT-looking anon key in share text');
 });
 
+// DV. Local Android dev workflow. `npm run dev` (scripts/dev-client.mjs) must
+// survive port 8081 being held by an unrelated process (e.g. a browser) by falling
+// back to the next free port instead of hard-failing, and must never kill arbitrary
+// processes. The .mjs launcher runs adb/expo on import, so it can't be imported
+// here — these are source scans, GP-style.
+const DEV_CLIENT_SRC = readFileSync(new URL('../scripts/dev-client.mjs', import.meta.url), 'utf8');
+const PACKAGE_JSON = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+) as { scripts?: Record<string, string> };
+
+check('DV1. the npm run android + npm run dev entry points still exist and point at the scripts', () => {
+  assert.equal(
+    PACKAGE_JSON.scripts?.android,
+    'node scripts/android-dev.mjs',
+    'npm run android must run android-dev.mjs',
+  );
+  assert.equal(
+    PACKAGE_JSON.scripts?.dev,
+    'node scripts/dev-client.mjs',
+    'npm run dev must run dev-client.mjs',
+  );
+});
+
+check('DV2. npm run dev falls back to another port when 8081 is busy — it never hard-fails on a non-Metro process', () => {
+  // Automatic fallback = a port resolver + an upward scan + the calm message.
+  assert.ok(DEV_CLIENT_SRC.includes('resolvePort'), 'dev-client must resolve a usable port');
+  assert.ok(
+    DEV_CLIENT_SRC.includes('busy with non-Metro process, using'),
+    'dev-client must print the non-Metro fallback message',
+  );
+  assert.ok(/preferred \+ 1/.test(DEV_CLIENT_SRC), 'dev-client must scan upward for the next free port');
+  // The old hard-exit when a non-Metro process held the port must be gone.
+  assert.ok(
+    !DEV_CLIENT_SRC.includes('does not look like Metro'),
+    'dev-client must NOT hard-fail when the port is held by a non-Metro process',
+  );
+});
+
+check('DV3. the dev launcher never force-kills arbitrary processes (SIGTERM only, no kill -9 / pkill / Firefox targeting)', () => {
+  assert.ok(!/kill\s+-9/.test(DEV_CLIENT_SRC), 'must not use kill -9');
+  assert.ok(!DEV_CLIENT_SRC.includes('SIGKILL'), 'must not SIGKILL');
+  assert.ok(!/\bpkill\b/.test(DEV_CLIENT_SRC), 'must not pkill');
+  assert.ok(!/firefox/i.test(DEV_CLIENT_SRC), 'must not reference or target Firefox (or any named unrelated app)');
+  // Any process it stops is its OWN stale Metro on the preferred port, via SIGTERM.
+  assert.ok(DEV_CLIENT_SRC.includes("'SIGTERM'"), 'the stale-Metro reclaim must use SIGTERM');
+  assert.ok(
+    DEV_CLIENT_SRC.includes('Stopping stale Metro'),
+    'a process is only ever stopped when it is the script’s own stale Metro',
+  );
+});
+
 runAsyncChecks()
   .then(() => {
     console.log(`\nAll ${passed} checks passed ✅`);
