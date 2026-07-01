@@ -20,10 +20,12 @@ import { Nunito_600SemiBold, Nunito_800ExtraBold } from '@expo-google-fonts/nuni
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
+import * as WebBrowser from 'expo-web-browser';
 import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { BrandSplashGate } from '@/components/boot/BrandSplashGate';
+import { AuthProvider } from '@/state/AuthProvider';
 import { ThemeProvider, useTheme } from '@/state/ThemeProvider';
 import { surfaces } from '@/theme';
 import '../global.css';
@@ -31,6 +33,12 @@ import '../global.css';
 SplashScreen.preventAutoHideAsync().catch(() => {
   /* no-op: safe if the splash is already hidden */
 });
+
+// Let Expo WebBrowser finalize any auth session the OS may deliver back to the JS
+// runtime (the documented top-level companion to openAuthSessionAsync). Native
+// deep-link delivery to /auth-callback is unaffected; this only ensures a returning
+// browser tab is dismissed cleanly instead of lingering as a blank page.
+WebBrowser.maybeCompleteAuthSession();
 
 export default function RootLayout() {
   const [loaded, error] = useFredoka({
@@ -68,20 +76,27 @@ function RootShell({ fontsReady }: { fontsReady: boolean }) {
   return (
     <>
       <StatusBar style={isNight ? 'light' : 'dark'} />
-      <BrandSplashGate>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: surfaces[mode].bg },
-          }}>
-          <Stack.Screen name="(tabs)" />
-          {/* OAuth / email auth deep-link landing (lullaby://auth-callback). A
-              real route here is what stops Expo Router rendering "Unmatched
-              Route" for the Supabase redirect; it fades in as a calm interstitial
-              while the session exchange completes. */}
-          <Stack.Screen name="auth-callback" options={{ animation: 'fade' }} />
-        </Stack>
-      </BrandSplashGate>
+      {/* AuthProvider sits ABOVE the navigator so both (tabs) and the auth-callback
+          route share ONE provider instance. Previously it lived inside (tabs), so a
+          deep-link into auth-callback + the router.replace('/') back caused (tabs)
+          — and the whole auth state machine — to remount, flashing a second loading
+          screen. Hoisting it keeps the session/status stable across that hop. */}
+      <AuthProvider>
+        <BrandSplashGate>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: surfaces[mode].bg },
+            }}>
+            <Stack.Screen name="(tabs)" />
+            {/* OAuth / email auth deep-link landing (lullaby://auth-callback). A
+                real route here is what stops Expo Router rendering "Unmatched
+                Route" for the Supabase redirect; it fades in as a calm interstitial
+                while the session exchange completes. */}
+            <Stack.Screen name="auth-callback" options={{ animation: 'fade' }} />
+          </Stack>
+        </BrandSplashGate>
+      </AuthProvider>
     </>
   );
 }

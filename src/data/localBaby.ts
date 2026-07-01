@@ -85,6 +85,23 @@ export function parseWeeks(input: string): number | null {
   return Math.floor(n);
 }
 
+/**
+ * Inverse of `birthDateFromWeeks`: recover a whole-week age from an ISO birth date
+ * (YYYY-MM-DD) so a persisted onboarding draft can prefill the "Age in weeks"
+ * field of BabySetupScreen. Returns null for blank/invalid input; clamps a future
+ * date to 0. Deterministic given `now`.
+ */
+export function weeksFromBirthDate(
+  birthDate: string | null | undefined,
+  now: number = Date.now(),
+): number | null {
+  if (typeof birthDate !== 'string' || birthDate.trim() === '') return null;
+  const parsed = Date.parse(birthDate);
+  if (!Number.isFinite(parsed)) return null;
+  const weeks = Math.round((now - parsed) / (7 * 24 * 60 * 60 * 1000));
+  return Number.isFinite(weeks) && weeks > 0 ? weeks : 0;
+}
+
 /** Inputs onboarding collects (all optional → a valid baby is always producible). */
 export type CreateLocalBabyInput = {
   /** Baby's name; blank/omitted → `DEFAULT_LOCAL_BABY_NAME`. */
