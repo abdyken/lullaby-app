@@ -1,6 +1,6 @@
 # Lullaby — Pro Implementation Plan (technical build ticket)
 
-Status: PHASE 2 IN PROGRESS (foundation + gates + paywall UI skeleton landed; RevenueCat/purchases/restore/export/migration still not built)
+Status: PHASE 3 IN PROGRESS (foundation + gates + paywall skeleton + real weekly export landed; RevenueCat/purchases/restore/migration still not built)
 · Branch: `feat/revenuecat-pro-mvp`
 Companion to `docs/pricing-strategy.md` (the monetization north-star), `docs/retention-test-plan.md`
 (the experiment that must clear before a live paywall), and `docs/beta-distribution-and-caregiver-qa.md`.
@@ -92,6 +92,54 @@ no purchase mechanism (this supersedes the Phase-1 "no paywall UI" note above):
 - No `pro_entitlements` migration, no Supabase entitlement read/write.
 - No prices in the app, no external payment links, no StoreKit / Play Billing,
   no Stripe / web checkout.
+
+---
+
+## Phase 3 implementation status (real weekly export — the first live Pro feature)
+
+**Landed** — a real, keepable/shareable weekly recap, gated behind the Pro
+entitlement (exercised today via the dev-entitlement override before RevenueCat
+exists):
+
+- `src/features/insights/buildWeeklyExportText.ts` — a **pure, Node-testable**
+  text builder over the existing `InsightsViewModel`. Emits "Lullaby weekly
+  summary", the non-medical safety line ("This is a calm summary of what you
+  logged, not medical advice."), days logged, sleep average + weekly total, feeds/
+  day and diaper changes/day, with a **sparse-data fallback** ("Keep logging to
+  build a clearer weekly summary."). Strictly descriptive — no diagnosis,
+  prediction, or recommendation — and it emits **only aggregate numbers**: no baby
+  name, notes, volumes, diaper detail, raw ids, secrets, or payment links.
+- `src/features/insights/shareWeeklyExport.ts` — a calm wrapper over React
+  Native's `Share.share` that reuses the pure builder and **never throws** (a
+  dismissed sheet → `'dismissed'`, any error → `'failed'`).
+- `ProPreviewCard` now takes a `viewModel` prop and gates the export CTA on
+  `canExportWeeklyRecap(isPro)`:
+  - **preview** → unchanged fake-door (`export_tapped`, "coming soon").
+  - **enabled + free** → `pro_gate_seen` (`gate: 'weekly_export'`) +
+    `paywall_opened`, opens the paywall (no export).
+  - **enabled + Pro** → runs the real export: `export_started` → share →
+    `export_completed`, then a calm "Weekly export is ready to share." line.
+- `InsightsScreen` passes `viewModel` into `ProPreviewCard`; render gates
+  unchanged (`getProMode() !== 'off'` and `dataDays >= 4`).
+- `src/lib/analytics.ts` — added `export_started` + `export_completed` (coarse
+  `surface` prop only). **No** purchase/restore events.
+- `scripts/check-local-interactions.ts` §Y — 8 Phase-3 checks (builder copy +
+  no-sensitive-content + purity, share wrapper, ProPreviewCard gating, viewModel
+  wiring, the two new events); `buildWeeklyExportText.ts` + `shareWeeklyExport.ts`
+  added to the payment-token scan.
+
+**How to test Pro before RevenueCat:** set `EXPO_PUBLIC_PRO_ENABLED=true` **and**
+`EXPO_PUBLIC_PRO_DEV_ENTITLEMENT=true` in a `__DEV__` build → `usePro().isPro` is
+true → "Export this week" opens the OS share sheet with the generated recap.
+
+**Intentionally NOT built in Phase 3** (still true — see §12):
+
+- No RevenueCat / `react-native-purchases`, no purchases, no working restore
+  (still a disabled stub), no real pricing, no external payment links.
+- No `pro_entitlements` migration, no Supabase entitlement read/write — `isPro`
+  still resolves only from the dev override.
+- No pediatrician-summary export yet (the builder is the recap; the doctor
+  summary layout is a fast-follow), no history-depth gate yet.
 
 ---
 

@@ -282,7 +282,7 @@ export function InsightsScreen() {
             logging. */}
         {getProMode() !== 'off' && viewModel.dataDays >= 4 ? (
           <View style={{ marginTop: 13 }}>
-            <ProPreviewCard />
+            <ProPreviewCard viewModel={viewModel} />
           </View>
         ) : null}
 
