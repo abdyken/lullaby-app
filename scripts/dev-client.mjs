@@ -24,6 +24,7 @@
  */
 
 import path from 'node:path';
+import http from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 
 const root = process.cwd();
@@ -110,20 +111,22 @@ function classifyPort(port) {
 }
 
 /** Read the caller's preferred port from `--port <n>` / `--port=<n>` or EXPO_DEV_PORT. */
-function preferredPort() {
+function devOptions() {
   const argv = process.argv.slice(2);
   let fromCli = null;
+  let clear = false;
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--port' && argv[i + 1]) fromCli = argv[i + 1];
     else if (argv[i].startsWith('--port=')) fromCli = argv[i].slice('--port='.length);
+    else if (argv[i] === '--clear' || argv[i] === '-c') clear = true;
   }
   const raw = fromCli ?? process.env.EXPO_DEV_PORT ?? String(DEFAULT_PORT);
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isInteger(parsed) || parsed < 1024 || parsed > 65535) {
     console.warn(`[dev] Ignoring invalid port "${raw}"; using ${DEFAULT_PORT}.`);
-    return DEFAULT_PORT;
+    return { port: DEFAULT_PORT, clear };
   }
-  return parsed;
+  return { port: parsed, clear };
 }
 
 /**
@@ -182,35 +185,100 @@ function ensureReverse(serial, port) {
   }
 }
 
+function waitForExpoServer(port, onReady) {
+  const startedAt = Date.now();
+  const deadlineMs = 25000;
+  const pollMs = 1000;
+  let done = false;
+  let timer = null;
+  let activeReq = null;
+
+  function finish() {
+    if (done) return;
+    done = true;
+    if (timer) clearTimeout(timer);
+    if (activeReq) activeReq.destroy();
+    onReady();
+  }
+
+  function poll() {
+    if (done) return;
+
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path: '/_expo/open?platform=android&runtime=custom',
+        method: 'GET',
+        timeout: 1000,
+      },
+      (res) => {
+        res.resume();
+        activeReq = null;
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 500) {
+          timer = setTimeout(finish, 1500);
+          return;
+        }
+        scheduleNext();
+      },
+    );
+
+    activeReq = req;
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => {
+      activeReq = null;
+      scheduleNext();
+    });
+    req.end();
+  }
+
+  function scheduleNext() {
+    if (done) return;
+    if (Date.now() - startedAt >= deadlineMs) {
+      finish();
+      return;
+    }
+    timer = setTimeout(poll, pollMs);
+  }
+
+  timer = setTimeout(poll, pollMs);
+
+  return () => {
+    done = true;
+    if (timer) clearTimeout(timer);
+    if (activeReq) activeReq.destroy();
+  };
+}
+
 function main() {
   const serial = connectedDevice();
   console.log(`[dev] Using Android device ${serial}.`);
 
-  const port = resolvePort(preferredPort());
+  const options = devOptions();
+  const port = resolvePort(options.port);
   // expo-development-client deep link pointing Metro at the reversed loopback port.
   const deepLink = `lullaby://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A${port}`;
 
   ensureReverse(serial, port);
 
-  const expoArgs = ['expo', 'start', '--dev-client', '--clear', '--port', String(port), '--host', 'localhost'];
+  const expoArgs = ['expo', 'start', '--dev-client', '--port', String(port), '--host', 'localhost'];
+  if (options.clear) expoArgs.push('--clear');
   console.log(`[dev] Starting Metro: npx ${expoArgs.join(' ')}`);
 
   const child = spawn('npx', expoArgs, {
     cwd: root,
     env: process.env,
-    // stdin inherited so Expo's interactive keys still work; stdout piped so we can watch for readiness.
-    stdio: ['inherit', 'pipe', 'pipe'],
+    // Expo's Terminal UI requires a real TTY for stdin/stdout/stderr.
+    stdio: 'inherit',
   });
 
   let opened = false;
-  let scheduled = false;
-  let buffer = '';
-  const READY_RE = /(Waiting on http|Logs for your project will appear below|Metro waiting|Bundler ready|exp:\/\/)/i;
+  let cancelReadyPoll = null;
 
   function openApp() {
     if (opened) return;
     opened = true;
-    clearTimeout(fallbackTimer);
+    if (cancelReadyPoll) cancelReadyPoll();
     console.log('\n[dev] Opening the dev build via the development-client deep link...');
     // No shell involved: args are passed literally; the URL is single-quoted so the
     // device-side shell treats `?` as a literal, not a glob.
@@ -229,24 +297,10 @@ function main() {
     }
   }
 
-  // Fallback: open even if we never match a readiness marker.
-  const fallbackTimer = setTimeout(() => {
-    if (!opened) openApp();
-  }, 25000);
-
-  child.stdout.on('data', (chunk) => {
-    process.stdout.write(chunk);
-    buffer += chunk.toString();
-    if (!opened && !scheduled && READY_RE.test(buffer)) {
-      scheduled = true;
-      setTimeout(openApp, 1500); // let the bundler settle before the deep link
-    }
-  });
-
-  child.stderr.on('data', (chunk) => process.stderr.write(chunk));
+  cancelReadyPoll = waitForExpoServer(port, openApp);
 
   function shutdown() {
-    clearTimeout(fallbackTimer);
+    if (cancelReadyPoll) cancelReadyPoll();
     if (child && child.exitCode === null && !child.killed) {
       child.kill('SIGINT');
     }
@@ -260,7 +314,7 @@ function main() {
 
   child.on('error', (err) => fail(`Failed to start Expo: ${err.message}`));
   child.on('exit', (code) => {
-    clearTimeout(fallbackTimer);
+    if (cancelReadyPoll) cancelReadyPoll();
     process.exit(code ?? 0);
   });
 }

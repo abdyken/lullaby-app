@@ -54,7 +54,7 @@
     "start": "expo start",
     "dev": "node scripts/dev-client.mjs",
     "dev:raw": "expo start --dev-client --clear --port 8081 --host localhost",
-    "dev:clear": "expo start --dev-client --clear",
+    "dev:clear": "node scripts/dev-client.mjs --clear",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "node scripts/android-dev.mjs",
     "android:reset": "node scripts/android-reset.mjs",
