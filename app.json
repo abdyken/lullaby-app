@@ -31,6 +31,14 @@
       "expo-router",
       "expo-apple-authentication",
       [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Lullaby uses the microphone so you can ask a question hands-free.",
+          "speechRecognitionPermission": "Lullaby uses speech recognition to hear your question and route it to a safe answer.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#E8D9FF",
