@@ -53,7 +53,8 @@ import {
 } from '@/data/mock';
 import { clearHandoffCursor, LOCAL_CURSOR_CONTEXT } from '@/data/handoffCursor';
 import type { LogEvent } from '@/data/models';
-import { useAnalytics, type AnalyticsEvent } from '@/lib/analytics';
+import { type AnalyticsEvent } from '@/lib/analytics';
+import { useAnalytics } from '@/lib/useAnalytics';
 import { fireMilestoneOnce, firstLogMilestoneKey } from '@/lib/analyticsMilestones';
 import { hapticSave, hapticUndo } from '@/lib/haptics';
 import { useAuth } from '@/state/AuthProvider';

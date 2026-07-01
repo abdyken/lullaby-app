@@ -1807,22 +1807,140 @@ check('OC11. Google sign-in clears its loading state on failure (no stuck spinne
   assert.ok(/finally\s*{[\s\S]*setBusy\(false\)/.test(body), 'signInWithGoogle must clear busy in finally');
 });
 
-check('OC12. an authenticated user with no baby routes straight to baby setup (no onboarding intro)', () => {
+check('OC12. an authenticated user with no baby routes to baby setup; the onboarding intro replays only under the dev force flag', () => {
   const start = AUTH_GATE_SRC.indexOf("case 'needs-setup':");
   const end = AUTH_GATE_SRC.indexOf("case 'ready':", start);
   assert.ok(start !== -1 && end !== -1 && end > start, 'AuthGate must handle needs-setup before ready');
   const seg = AUTH_GATE_SRC.slice(start, end);
-  assert.ok(seg.includes('BabySetupScreen'), 'needs-setup must render the baby setup form directly');
-  assert.ok(!seg.includes('OnboardingGate'), 'needs-setup must NOT replay the onboarding intro');
+  assert.ok(seg.includes('BabySetupScreen'), 'needs-setup must render the baby setup form');
+  // The intro is gated on the dev/QA override, never replayed unconditionally.
+  assert.ok(seg.includes('forceOnboarding'), 'needs-setup must gate the onboarding intro on the force flag');
+  // With the flag OFF (the ternary else branch), baby setup renders directly — no intro.
+  const elseBranch = seg.slice(seg.indexOf(') : ('));
+  assert.ok(elseBranch.includes('BabySetupScreen'), 'force-off needs-setup must render baby setup directly');
+  assert.ok(!elseBranch.includes('OnboardingGate'), 'force-off needs-setup must NOT replay the onboarding intro');
 });
 
-check('OC13. an authenticated user with a baby goes straight to the app (no onboarding intro)', () => {
+check('OC13. an authenticated user with a baby goes straight to the app; the onboarding intro replays only under the dev force flag', () => {
   const start = AUTH_GATE_SRC.indexOf("case 'ready':");
   const end = AUTH_GATE_SRC.indexOf("case 'loading':", start);
   assert.ok(start !== -1 && end !== -1 && end > start, 'AuthGate must handle ready before loading');
   const seg = AUTH_GATE_SRC.slice(start, end);
   assert.ok(seg.includes('{children}'), 'ready must render the app');
-  assert.ok(!seg.includes('OnboardingGate'), 'ready must NOT replay the onboarding intro');
+  // The intro is gated on the dev/QA override, never replayed unconditionally.
+  assert.ok(seg.includes('forceOnboarding'), 'ready must gate the onboarding intro on the force flag');
+  // With the flag OFF (the ternary else branch), the app renders directly — no intro.
+  const elseBranch = seg.slice(seg.indexOf(' : '));
+  assert.ok(elseBranch.includes('{children}'), 'force-off ready must render the app directly');
+  assert.ok(!elseBranch.includes('OnboardingGate'), 'force-off ready must NOT replay the onboarding intro');
+});
+
+// AC. Analytics ↔ AuthProvider require cycle broken (this task). `analytics.ts` is
+// a pure leaf service; the identity-binding hook now lives in `useAnalytics.ts`
+// (the single seam that imports both). analytics.ts / AuthProvider import
+// react-native and can't load in this pure runner, so the cycle + privacy contract
+// are covered by source scans (GP/OC-style).
+const ANALYTICS_SRC = readFileSync(new URL('../src/lib/analytics.ts', import.meta.url), 'utf8');
+const USE_ANALYTICS_SRC = readFileSync(new URL('../src/lib/useAnalytics.ts', import.meta.url), 'utf8');
+
+check('AN1. analytics.ts is a leaf — it does not import AuthProvider (the cycle edge is gone)', () => {
+  assert.ok(
+    !/from\s*['"]@\/state\/AuthProvider['"]/.test(ANALYTICS_SRC),
+    'src/lib/analytics.ts must NOT import from @/state/AuthProvider',
+  );
+  assert.ok(!/\buseAuth\s*\(/.test(ANALYTICS_SRC), 'analytics.ts must not call useAuth');
+  // The React hook moved to the seam, so no hook export remains in the leaf.
+  assert.ok(
+    !/export function useAnalytics/.test(ANALYTICS_SRC),
+    'useAnalytics must live in useAnalytics.ts, not in the analytics leaf',
+  );
+});
+
+check('AN2. AuthProvider/analytics no longer form the known cycle (only the allowed leaf→consumer edge remains)', () => {
+  // The allowed direction still holds: AuthProvider imports trackEvent from the leaf.
+  assert.ok(
+    /import\s*\{[^}]*\btrackEvent\b[^}]*\}\s*from\s*['"]@\/lib\/analytics['"]/.test(AUTH_PROVIDER_SRC),
+    'AuthProvider should import trackEvent from the analytics leaf',
+  );
+  // The reverse edge (leaf → AuthProvider) must be absent, so the pair can't cycle.
+  const leafImportsAuth = /from\s*['"]@\/state\/AuthProvider['"]/.test(ANALYTICS_SRC);
+  const authImportsLeaf = /from\s*['"]@\/lib\/analytics['"]/.test(AUTH_PROVIDER_SRC);
+  assert.ok(
+    !(leafImportsAuth && authImportsLeaf),
+    'analytics.ts ↔ AuthProvider.tsx must not import each other (require cycle)',
+  );
+});
+
+check('AN3. useAnalytics is the seam — it depends on BOTH the leaf and AuthProvider', () => {
+  assert.ok(/from\s*['"]@\/lib\/analytics['"]/.test(USE_ANALYTICS_SRC), 'useAnalytics.ts imports the analytics leaf');
+  assert.ok(/from\s*['"]@\/state\/AuthProvider['"]/.test(USE_ANALYTICS_SRC), 'useAnalytics.ts imports AuthProvider');
+  assert.ok(/export function useAnalytics/.test(USE_ANALYTICS_SRC), 'useAnalytics.ts exports the hook');
+  assert.ok(/\btrackEvent\b/.test(USE_ANALYTICS_SRC), 'the seam forwards to the leaf trackEvent');
+});
+
+check('AN4. analytics stays privacy-safe: fire-and-forget insert, never a client SELECT from analytics_events', () => {
+  assert.ok(ANALYTICS_SRC.includes("analytics_events"), 'analytics must still target the analytics_events table');
+  assert.ok(!/\.select\s*\(/.test(ANALYTICS_SRC), 'analytics must never .select() (no client read-back from analytics_events)');
+  assert.ok(/void\s+supabase/.test(ANALYTICS_SRC), 'the insert must stay fire-and-forget (void, not awaited)');
+});
+
+// FO. EXPO_PUBLIC_FORCE_ONBOARDING as an ABSOLUTE dev/QA override (this task). The
+// pure force resolver is covered by G4-G6; these guard the AuthGate WIRING (an
+// authenticated user who already has a baby still reaches onboarding under the
+// flag) and the non-destructive contract (the override never clears/removes data
+// or signs out — it only re-renders the intro on top).
+check('FO1. FORCE_ONBOARDING=true forces onboarding regardless of completion; off/unset preserves the prior decision (pure)', () => {
+  // true → always 'needed', even when onboarding was already completed.
+  assert.equal(resolveOnboardingGateState(true, { rawFlag: 'true', isDev: true }), 'needed');
+  // false → completion decides, unchanged (complete stays complete; incomplete stays needed).
+  assert.equal(resolveOnboardingGateState(true, { rawFlag: 'false', isDev: true }), 'complete');
+  assert.equal(resolveOnboardingGateState(false, { rawFlag: 'false', isDev: true }), 'needed');
+  // production never force-onboards, even with the flag literally set to 'true'.
+  assert.equal(isForceOnboardingEnabled({ rawFlag: 'true', isDev: false }), false);
+});
+
+check('FO2. AuthGate consults the force flag and gates BOTH authenticated states on it (baby present still reaches onboarding)', () => {
+  assert.ok(
+    AUTH_GATE_SRC.includes('isForceOnboardingEnabled'),
+    'AuthGate must consult isForceOnboardingEnabled for the QA override',
+  );
+  const needsSetup = AUTH_GATE_SRC.slice(
+    AUTH_GATE_SRC.indexOf("case 'needs-setup':"),
+    AUTH_GATE_SRC.indexOf("case 'ready':"),
+  );
+  const ready = AUTH_GATE_SRC.slice(
+    AUTH_GATE_SRC.indexOf("case 'ready':"),
+    AUTH_GATE_SRC.indexOf("case 'loading':"),
+  );
+  // Under the flag each authenticated surface is wrapped in OnboardingGate, so the
+  // intro replays even for a 'ready' user who already has a linked baby.
+  assert.ok(
+    needsSetup.includes('forceOnboarding') && needsSetup.includes('OnboardingGate'),
+    'needs-setup must replay onboarding when force-onboarding is on',
+  );
+  assert.ok(
+    ready.includes('forceOnboarding') && ready.includes('OnboardingGate'),
+    'ready (authenticated + baby) must replay onboarding when force-onboarding is on',
+  );
+});
+
+check('FO3. the force override is non-destructive — AuthGate never clears data, removes keys, or signs out', () => {
+  for (const forbidden of [
+    'AsyncStorage',
+    'multiRemove',
+    'removeItem',
+    '.clear(',
+    'signOut',
+    'clearLocalEventStorage',
+    'LOCAL_BABY_STORAGE_KEY',
+    'LOCAL_EVENTS_STORAGE_KEY',
+    'LOGGING_STORAGE_KEY',
+  ]) {
+    assert.ok(
+      !AUTH_GATE_SRC.includes(forbidden),
+      `AuthGate must not reference ${forbidden} (the QA override must not delete data or sign out)`,
+    );
+  }
 });
 
 check('OC14. no-session states still run onboarding first (intro→account entry; local-first preserved)', () => {
