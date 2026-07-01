@@ -5293,6 +5293,18 @@ check('X14. reassure domain/content are pure leaves (no RN, no Pro, no speech, n
   }
 });
 
+check('X16. the Tonight note sheet offers the Spit-up preset via the shared constant', () => {
+  const tonightSrc = readFileSync(new URL('../src/app/(tabs)/index.tsx', import.meta.url), 'utf8');
+  assert.ok(
+    tonightSrc.includes('SPITUP_NOTE_LABEL'),
+    'index.tsx uses SPITUP_NOTE_LABEL (never a drifting string literal)',
+  );
+  assert.ok(
+    tonightSrc.includes("from '@/features/reassure/domain/recap'"),
+    'the constant is imported from the recap domain, the single source of truth',
+  );
+});
+
 check('X15. clinician-review metadata is present, well-formed, and honest', () => {
   assert.ok(REASSURE_CONTENT.version.length > 0, 'content is versioned');
   assert.ok(['draft', 'approved'].includes(REASSURE_CONTENT.status), 'status is draft|approved');
