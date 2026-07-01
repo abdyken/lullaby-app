@@ -9,7 +9,7 @@
  * and the 4-item timeline cap.
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 import {
   addDiaper,
@@ -228,6 +228,20 @@ import {
   buildInviteShareMessage,
   resolveAppInstallUrl,
 } from '../src/components/auth/inviteShareMessage';
+// Pro foundation (Phase 1) — pure config + gate leaves. proConfig reads only
+// process.env (and re-exports the preview flag); proGates is a dependency-free
+// predicate leaf. Both are safe to load here and are covered directly in §W.
+import {
+  getProMode,
+  isProEnabled,
+  resolveDevProEntitlement,
+} from '../src/lib/proConfig';
+import {
+  canAddExtraCaregivers,
+  canExportWeeklyRecap,
+  canSharePediatricianSummary,
+  canViewFullHistory,
+} from '../src/lib/proGates';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
 const NOW = Date.parse('2026-06-17T00:00:00.000Z');
@@ -4311,6 +4325,242 @@ check('V8. the invite share text never leaks a Supabase URL or anon key', () => 
   const msg = buildInviteShareMessage({ code: INVITE_CODE, installUrl: BETA_INSTALL_URL });
   assert.ok(!/supabase/i.test(msg), 'no supabase reference in share text');
   assert.ok(!/eyJ[A-Za-z0-9]/.test(msg), 'no JWT-looking anon key in share text');
+});
+
+// W. Pro foundation (Phase 1) — proConfig (mode flags + dev override), proGates
+// (pure feature predicates), and the ProProvider skeleton. These checks lock the
+// invariants the plan (docs/pro-implementation-plan.md §§3,5,7,11,12) depends on:
+// real Pro (PRO_ENABLED) supersedes the fake-door preview; the four gates are
+// pure and never gate the FIRST caregiver invite or core logging; and no
+// RevenueCat SDK / paywall / purchase / external-payment code has landed yet.
+
+// Temporarily set env flags, run fn, then restore exactly (delete if originally
+// unset). proConfig reads process.env live, so this exercises the real parsing.
+function withEnv(overrides: Record<string, string | undefined>, fn: () => void): void {
+  const original: Record<string, string | undefined> = {};
+  for (const key of Object.keys(overrides)) original[key] = process.env[key];
+  try {
+    for (const [key, val] of Object.entries(overrides)) {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    }
+    fn();
+  } finally {
+    for (const [key, val] of Object.entries(original)) {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    }
+  }
+}
+
+const PRO_CONFIG_SRC = readFileSync(new URL('../src/lib/proConfig.ts', import.meta.url), 'utf8');
+const PRO_GATES_SRC = readFileSync(new URL('../src/lib/proGates.ts', import.meta.url), 'utf8');
+const PRO_PROVIDER_SRC = readFileSync(new URL('../src/state/ProProvider.tsx', import.meta.url), 'utf8');
+const UPGRADE_CARD_SRC = readFileSync(new URL('../src/components/UpgradeCard.tsx', import.meta.url), 'utf8');
+const PRO_PREVIEW_CARD_SRC = readFileSync(
+  new URL('../src/features/insights/components/ProPreviewCard.tsx', import.meta.url),
+  'utf8',
+);
+// ACCOUNT_SHEET_SRC is already read for the auth-surface checks above; reuse it.
+const INSIGHTS_SCREEN_SRC = readFileSync(
+  new URL('../src/features/insights/InsightsScreen.tsx', import.meta.url),
+  'utf8',
+);
+const TABS_LAYOUT_SRC = readFileSync(new URL('../src/app/(tabs)/_layout.tsx', import.meta.url), 'utf8');
+const PKG_JSON_SRC = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
+
+// Core-logging leaves that must stay free of any Pro dependency.
+const CORE_LOGGING_SRCS: Array<[string, string]> = [
+  ['data/localInteractions.ts', readFileSync(new URL('../src/data/localInteractions.ts', import.meta.url), 'utf8')],
+  ['data/currentState.ts', readFileSync(new URL('../src/data/currentState.ts', import.meta.url), 'utf8')],
+  [
+    'features/logging/state/loggingStore.ts',
+    readFileSync(new URL('../src/features/logging/state/loggingStore.ts', import.meta.url), 'utf8'),
+  ],
+  [
+    'features/logging/state/loggingSelectors.ts',
+    readFileSync(new URL('../src/features/logging/state/loggingSelectors.ts', import.meta.url), 'utf8'),
+  ],
+  [
+    'features/logging/state/LoggingProvider.tsx',
+    readFileSync(new URL('../src/features/logging/state/LoggingProvider.tsx', import.meta.url), 'utf8'),
+  ],
+  [
+    'features/logging/domain/rules.ts',
+    readFileSync(new URL('../src/features/logging/domain/rules.ts', import.meta.url), 'utf8'),
+  ],
+];
+
+// The user-facing Pro surfaces — where an accidental payment link would surface.
+const PRO_SURFACE_SRCS: Array<[string, string]> = [
+  ['proConfig.ts', PRO_CONFIG_SRC],
+  ['proGates.ts', PRO_GATES_SRC],
+  ['ProProvider.tsx', PRO_PROVIDER_SRC],
+  ['UpgradeCard.tsx', UPGRADE_CARD_SRC],
+  ['ProPreviewCard.tsx', PRO_PREVIEW_CARD_SRC],
+  ['AccountSheet.tsx', ACCOUNT_SHEET_SRC],
+  ['InsightsScreen.tsx', INSIGHTS_SCREEN_SRC],
+];
+
+// Every .ts/.tsx under src/ — for the repo-wide "no RevenueCat SDK yet" sweep.
+function collectSourceFiles(dirUrl: URL, prefix: string): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (const entry of readdirSync(dirUrl, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+    const rel = `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) {
+      out.push(...collectSourceFiles(new URL(`${entry.name}/`, dirUrl), rel));
+    } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) {
+      out.push([rel, readFileSync(new URL(entry.name, dirUrl), 'utf8')]);
+    }
+  }
+  return out;
+}
+const ALL_SRC_FILES = collectSourceFiles(new URL('../src/', import.meta.url), 'src');
+
+// Import paths that mark a dependency on the Pro foundation. Core logging and the
+// first-invite flow must never contain any of these.
+const BANNED_PRO_IMPORTS = ['@/lib/proGates', '@/lib/proConfig', '@/state/ProProvider'];
+
+check('W1. proConfig reads EXPO_PUBLIC_PRO_ENABLED and treats "true"/"1" as enabled', () => {
+  assert.ok(PRO_CONFIG_SRC.includes('EXPO_PUBLIC_PRO_ENABLED'), 'proConfig references the master flag');
+  withEnv({ EXPO_PUBLIC_PRO_ENABLED: 'true' }, () => assert.equal(isProEnabled(), true));
+  withEnv({ EXPO_PUBLIC_PRO_ENABLED: '1' }, () => assert.equal(isProEnabled(), true));
+  withEnv({ EXPO_PUBLIC_PRO_ENABLED: 'false' }, () => assert.equal(isProEnabled(), false));
+  withEnv({ EXPO_PUBLIC_PRO_ENABLED: undefined }, () => assert.equal(isProEnabled(), false));
+});
+
+check('W2. getProMode: PRO_ENABLED beats PRO_PREVIEW; preview when only preview; off when neither', () => {
+  withEnv({ EXPO_PUBLIC_PRO_ENABLED: 'true', EXPO_PUBLIC_PRO_PREVIEW_ENABLED: 'true' }, () =>
+    assert.equal(getProMode(), 'enabled'),
+  ); // precedence: real Pro supersedes the fake-door
+  withEnv({ EXPO_PUBLIC_PRO_ENABLED: '1', EXPO_PUBLIC_PRO_PREVIEW_ENABLED: '0' }, () =>
+    assert.equal(getProMode(), 'enabled'),
+  );
+  withEnv({ EXPO_PUBLIC_PRO_ENABLED: 'false', EXPO_PUBLIC_PRO_PREVIEW_ENABLED: 'true' }, () =>
+    assert.equal(getProMode(), 'preview'),
+  );
+  withEnv({ EXPO_PUBLIC_PRO_ENABLED: undefined, EXPO_PUBLIC_PRO_PREVIEW_ENABLED: undefined }, () =>
+    assert.equal(getProMode(), 'off'),
+  );
+});
+
+check('W3. proGates export the four gates; depth/export gate on isPro, extra caregivers stay open', () => {
+  assert.equal(canViewFullHistory(true), true);
+  assert.equal(canViewFullHistory(false), false);
+  assert.equal(canExportWeeklyRecap(true), true);
+  assert.equal(canExportWeeklyRecap(false), false);
+  assert.equal(canSharePediatricianSummary(true), true);
+  assert.equal(canSharePediatricianSummary(false), false);
+  // Future gate — open for now regardless of isPro, and NEVER the first invite.
+  assert.equal(canAddExtraCaregivers(false), true);
+  assert.equal(canAddExtraCaregivers(true), true);
+  assert.ok(/first caregiver invite/i.test(PRO_GATES_SRC), 'proGates documents the free first invite');
+});
+
+check('W4. resolveDevProEntitlement grants Pro only in a dev build with the override set', () => {
+  withEnv({ EXPO_PUBLIC_PRO_DEV_ENTITLEMENT: 'true' }, () => {
+    assert.equal(resolveDevProEntitlement(true), true); // dev + flag
+    assert.equal(resolveDevProEntitlement(false), false); // production → never
+  });
+  withEnv({ EXPO_PUBLIC_PRO_DEV_ENTITLEMENT: '0' }, () => assert.equal(resolveDevProEntitlement(true), false));
+  withEnv({ EXPO_PUBLIC_PRO_DEV_ENTITLEMENT: undefined }, () => assert.equal(resolveDevProEntitlement(true), false));
+});
+
+check('W5. core logging files never import Pro config/gates/provider', () => {
+  for (const [name, src] of CORE_LOGGING_SRCS) {
+    for (const path of BANNED_PRO_IMPORTS) {
+      assert.ok(!src.includes(path), `${name} must not import ${path}`);
+    }
+    assert.ok(!/\busePro\s*\(/.test(src), `${name} must not call usePro()`);
+  }
+});
+
+check('W6. the first caregiver invite flow never imports Pro config/gates/provider', () => {
+  const inviteSrcs: Array<[string, string]> = [
+    ['InviteCaregiverSheet.tsx', INVITE_SHEET_SRC],
+    ['inviteShareMessage.ts', INVITE_MSG_SRC],
+  ];
+  for (const [name, src] of inviteSrcs) {
+    for (const path of BANNED_PRO_IMPORTS) {
+      assert.ok(!src.includes(path), `${name} must not import ${path}`);
+    }
+    assert.ok(!src.includes('canAddExtraCaregivers'), `${name} must not reference the extra-caregiver gate`);
+    assert.ok(!/\busePro\s*\(/.test(src), `${name} must not call usePro()`);
+  }
+});
+
+check('W7. fake-door preview survives: preview mode resolves and the interest analytics still fire', () => {
+  withEnv({ EXPO_PUBLIC_PRO_ENABLED: 'false', EXPO_PUBLIC_PRO_PREVIEW_ENABLED: 'true' }, () =>
+    assert.equal(getProMode(), 'preview'),
+  );
+  // The fake-door surfaces gate on preview mode, still fire the interest events,
+  // and keep their calm "coming soon" copy — no paywall, no purchase.
+  assert.ok(INSIGHTS_SCREEN_SRC.includes("getProMode() === 'preview'"), 'Insights gates the preview on preview mode');
+  assert.ok(ACCOUNT_SHEET_SRC.includes("getProMode() === 'preview'"), 'AccountSheet gates the preview on preview mode');
+  assert.ok(UPGRADE_CARD_SRC.includes("track('upgrade_card_tapped'"), 'UpgradeCard fires upgrade_card_tapped');
+  assert.ok(/coming soon/i.test(UPGRADE_CARD_SRC), 'UpgradeCard keeps its coming-soon copy');
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('upgrade_card_tapped'"), 'ProPreviewCard fires upgrade_card_tapped');
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('export_tapped'"), 'ProPreviewCard fires export_tapped');
+});
+
+check('W8. analytics unchanged: no client SELECT, fake-door events kept, no purchase events added yet', () => {
+  assert.ok(ANALYTICS_SRC.includes('analytics_events'), 'analytics still targets analytics_events');
+  assert.ok(!/\.select\s*\(/.test(ANALYTICS_SRC), 'analytics must never .select() from analytics_events');
+  assert.ok(ANALYTICS_SRC.includes("'upgrade_card_tapped'"), 'upgrade_card_tapped stays in the event union');
+  assert.ok(ANALYTICS_SRC.includes("'export_tapped'"), 'export_tapped stays in the event union');
+  for (const notYet of [
+    'paywall_opened',
+    'purchase_started',
+    'purchase_completed',
+    'purchase_failed',
+    'restore_started',
+    'restore_completed',
+  ]) {
+    assert.ok(!ANALYTICS_SRC.includes(notYet), `purchase analytics (${notYet}) must not be added yet`);
+  }
+});
+
+check('W9. no RevenueCat / react-native-purchases SDK is wired yet (repo-wide)', () => {
+  assert.ok(!PKG_JSON_SRC.includes('react-native-purchases'), 'react-native-purchases must not be a dependency yet');
+  for (const [rel, src] of ALL_SRC_FILES) {
+    assert.ok(!src.includes('react-native-purchases'), `${rel} must not import the RevenueCat SDK yet`);
+  }
+});
+
+check('W10. Pro surfaces carry no external payment link / Stripe / web-checkout reference', () => {
+  const bannedPaymentTokens = [
+    /stripe/i,
+    /paypal/i,
+    /braintree/i,
+    /lemonsqueez/i,
+    /paddle\.com/i,
+    /checkout\./i,
+    /apps\.apple\.com/i,
+    /play\.google\.com/i,
+  ];
+  for (const [name, src] of PRO_SURFACE_SRCS) {
+    for (const banned of bannedPaymentTokens) {
+      assert.ok(!banned.test(src), `${name} must not reference ${banned}`);
+    }
+  }
+});
+
+check('W11. ProProvider is a Phase-1 skeleton: no SDK, no network, no purchase/restore', () => {
+  assert.ok(!/from ['"]react-native-purchases['"]/.test(PRO_PROVIDER_SRC), 'ProProvider must not import the RC SDK');
+  assert.ok(!/\bPurchases\.\w+\(/.test(PRO_PROVIDER_SRC), 'ProProvider must not call the RC Purchases SDK');
+  assert.ok(!PRO_PROVIDER_SRC.includes('@/lib/supabase'), 'ProProvider must not read Supabase in Phase 1');
+  assert.ok(!PRO_PROVIDER_SRC.includes('@/state/AuthProvider'), 'ProProvider must not depend on auth in Phase 1');
+  assert.ok(PRO_PROVIDER_SRC.includes('resolveDevProEntitlement'), 'isPro resolves via the dev override only');
+});
+
+check('W12. ProProvider is mounted under AuthGate in the tab shell', () => {
+  assert.ok(TABS_LAYOUT_SRC.includes('<ProProvider>'), 'ProProvider is mounted');
+  const gateIdx = TABS_LAYOUT_SRC.indexOf('<AuthGate>');
+  const proIdx = TABS_LAYOUT_SRC.indexOf('<ProProvider>');
+  const localIdx = TABS_LAYOUT_SRC.indexOf('<LocalEventProvider>');
+  assert.ok(gateIdx >= 0 && proIdx > gateIdx, 'ProProvider sits under AuthGate');
+  assert.ok(localIdx > proIdx, 'ProProvider wraps the event/logging providers');
 });
 
 runAsyncChecks()

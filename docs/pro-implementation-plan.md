@@ -1,8 +1,52 @@
 # Lullaby — Pro Implementation Plan (technical build ticket)
 
-Status: DRAFT (plan only — nothing in this doc is implemented) · Branch: `plan/pro-implementation`
+Status: PHASE 1 IN PROGRESS (foundation + gates landed; RevenueCat/paywall/export/migration still not built)
+· Branch: `feat/revenuecat-pro-mvp`
 Companion to `docs/pricing-strategy.md` (the monetization north-star), `docs/retention-test-plan.md`
 (the experiment that must clear before a live paywall), and `docs/beta-distribution-and-caregiver-qa.md`.
+
+---
+
+## Phase 1 implementation status (foundation + feature gates)
+
+**Landed** — the safe, non-paid foundation layer, all behind flags that default OFF:
+
+- `src/lib/proConfig.ts` — the single flag entry point. `isProEnabled()`
+  (`EXPO_PUBLIC_PRO_ENABLED`), `isProPreviewEnabled()` (re-exported from
+  `proPreview.ts`), and `getProMode()` → `'off' | 'preview' | 'enabled'`, with the
+  §11 precedence baked in: **real Pro supersedes the preview**. Plus a dev/QA-only
+  `EXPO_PUBLIC_PRO_DEV_ENTITLEMENT` override (`resolveDevProEntitlement`, gated on
+  `__DEV__` — never grants Pro in a shipped build).
+- `src/lib/proGates.ts` — the four pure gates: `canViewFullHistory`,
+  `canExportWeeklyRecap`, `canSharePediatricianSummary` (all `isPro`-only for now)
+  and `canAddExtraCaregivers` (a future gate, **open for now**). The **first
+  caregiver invite is never gated** — documented in the module and enforced by the
+  smoke test.
+- `src/state/ProProvider.tsx` — the entitlement seam (`usePro()`), mounted under
+  `AuthGate` in `src/app/(tabs)/_layout.tsx`. Exposes `isProEnabled`, `proMode`,
+  `isPro` (default **false**), `isLoading`, `error`, `refreshProStatus()`,
+  `openPaywall()` / `closePaywall()` / `isPaywallOpen`. No RevenueCat, no network,
+  no auth dependency, no data writes — it never blocks rendering.
+- Fake-door preview surfaces (`UpgradeCard`, `ProPreviewCard`) now gate on
+  `getProMode() === 'preview'`, so they still fire `upgrade_card_tapped` /
+  `export_tapped` when preview is on, and are suppressed once `PRO_ENABLED` is on.
+- `scripts/check-local-interactions.ts` §W — Pro-foundation invariants: flag
+  parsing + precedence, the four gates, dev-override safety, core-logging and
+  first-invite flows carry no Pro imports, fake-door still works, analytics has no
+  new purchase events / no client SELECT, and (repo-wide) no `react-native-purchases`
+  SDK or external payment link has landed.
+
+**Intentionally NOT built in Phase 1** (see §12 — still true):
+
+- No RevenueCat / `react-native-purchases` install, no purchases, no restore.
+- No real paywall UI. `openPaywall()` only flips a latch; nothing renders yet.
+- No weekly-recap export / pediatrician summary output.
+- No `pro_entitlements` migration and no Supabase entitlement read/write.
+- No purchase analytics, no pricing in the app, no AI/medical copy.
+
+`isPro` therefore resolves **free for everyone** in every real build; only a
+`__DEV__` build with the dev-entitlement flag set resolves Pro (for exercising
+gates before the real entitlement path exists).
 
 This is the concrete build plan that turns today's **fake-door** Pro surfaces into a real,
 entitlement-backed subscription. Today `UpgradeCard` and `ProPreviewCard` only fire interest

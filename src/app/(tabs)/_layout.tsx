@@ -19,6 +19,7 @@ import { LoggingProvider } from '@/features/logging/state/LoggingProvider';
 import { LoggingToast } from '@/features/logging/ui/LoggingToast';
 import { AuthProvider } from '@/state/AuthProvider';
 import { LocalEventProvider } from '@/state/LocalEventProvider';
+import { ProProvider } from '@/state/ProProvider';
 import { useTheme } from '@/state/ThemeProvider';
 import { surfaces } from '@/theme';
 
@@ -31,9 +32,14 @@ export default function TabsLayout() {
   return (
     <AuthProvider>
       <AuthGate>
-        {/* One shared event store for all tabs, so Tonight and Log see the same
-            events. Reassure simply ignores it. */}
-        <LocalEventProvider>
+        {/* Pro entitlement seam. Phase 1 foundation only — no RevenueCat, no
+            paywall, no network; usePro defaults to free. Mounted under AuthGate so
+            later phases can read the signed-in caregiver / baby for baby-scoped
+            entitlement. Adds no UI and no layout of its own. */}
+        <ProProvider>
+          {/* One shared event store for all tabs, so Tonight and Log see the same
+              events. Reassure simply ignores it. */}
+          <LocalEventProvider>
           {/* Logging v2 feature API (Feed/Sleep/Diaper/Pump). Inert while the
               loggingV2 flag is off — no I/O, no behavior change to the MVP. */}
             <LoggingProvider>
@@ -81,7 +87,8 @@ export default function TabsLayout() {
               <LoggingToast />
             </View>
           </LoggingProvider>
-        </LocalEventProvider>
+          </LocalEventProvider>
+        </ProProvider>
       </AuthGate>
     </AuthProvider>
   );

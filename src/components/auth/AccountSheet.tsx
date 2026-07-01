@@ -15,7 +15,7 @@ import { Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { UpgradeCard } from '@/components/UpgradeCard';
-import { isProPreviewEnabled } from '@/lib/proPreview';
+import { getProMode } from '@/lib/proConfig';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/state/AuthProvider';
 import { colors, fonts, radii, shadows } from '@/theme';
@@ -195,10 +195,11 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
             </>
           )}
 
-          {/* Non-paid Lullaby Pro preview — behind EXPO_PUBLIC_PRO_PREVIEW_ENABLED
-              (off by default) AND only for a signed-in user (never guest/local).
-              Records interest only; no payment, no navigation. */}
-          {isProPreviewEnabled() && signedIn ? <UpgradeCard source="account_sheet" /> : null}
+          {/* Non-paid Lullaby Pro preview — only in fake-door "preview" mode
+              (EXPO_PUBLIC_PRO_PREVIEW_ENABLED on, PRO_ENABLED off; off by default)
+              AND only for a signed-in user (never guest/local). Real Pro supersedes
+              it (§11). Records interest only; no payment, no navigation. */}
+          {getProMode() === 'preview' && signedIn ? <UpgradeCard source="account_sheet" /> : null}
         </View>
       </View>
 
