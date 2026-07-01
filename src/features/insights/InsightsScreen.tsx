@@ -18,7 +18,7 @@ import type { CareEvent } from '@/features/logging/domain/types';
 import { useLogging } from '@/features/logging/state/LoggingProvider';
 import { useAnalytics } from '@/lib/useAnalytics';
 import { fireMilestoneOnce, reached4DataDaysMilestoneKey } from '@/lib/analyticsMilestones';
-import { isProPreviewEnabled } from '@/lib/proPreview';
+import { getProMode } from '@/lib/proConfig';
 import { useAuth } from '@/state/AuthProvider';
 import { useLocalEvents } from '@/state/LocalEventProvider';
 import { useTheme } from '@/state/ThemeProvider';
@@ -276,11 +276,13 @@ export function InsightsScreen() {
           </View>
         ) : null}
 
-        {/* Non-paid Lullaby Pro preview — behind EXPO_PUBLIC_PRO_PREVIEW_ENABLED
-            (off by default), additive, never blocks logging. */}
-        {isProPreviewEnabled() && viewModel.dataDays >= 4 ? (
+        {/* Lullaby Pro card — shown once there's enough data (dataDays >= 4), in
+            either Pro mode: "preview" is the non-paid fake-door; "enabled" opens
+            the Phase 2 paywall. Hidden when Pro is off. Additive; never blocks
+            logging. */}
+        {getProMode() !== 'off' && viewModel.dataDays >= 4 ? (
           <View style={{ marginTop: 13 }}>
-            <ProPreviewCard />
+            <ProPreviewCard viewModel={viewModel} />
           </View>
         ) : null}
 

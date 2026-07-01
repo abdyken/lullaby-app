@@ -15,7 +15,7 @@ import { Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { UpgradeCard } from '@/components/UpgradeCard';
-import { isProPreviewEnabled } from '@/lib/proPreview';
+import { getProMode } from '@/lib/proConfig';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/state/AuthProvider';
 import { colors, fonts, radii, shadows } from '@/theme';
@@ -195,10 +195,10 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
             </>
           )}
 
-          {/* Non-paid Lullaby Pro preview — behind EXPO_PUBLIC_PRO_PREVIEW_ENABLED
-              (off by default) AND only for a signed-in user (never guest/local).
-              Records interest only; no payment, no navigation. */}
-          {isProPreviewEnabled() && signedIn ? <UpgradeCard source="account_sheet" /> : null}
+          {/* Lullaby Pro card — signed-in users only (never guest/local), in either
+              Pro mode: "preview" is the non-paid fake-door; "enabled" opens the
+              Phase 2 paywall. Hidden when Pro is off. */}
+          {getProMode() !== 'off' && signedIn ? <UpgradeCard source="account_sheet" /> : null}
         </View>
       </View>
 

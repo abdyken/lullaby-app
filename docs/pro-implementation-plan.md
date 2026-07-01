@@ -1,8 +1,245 @@
 # Lullaby — Pro Implementation Plan (technical build ticket)
 
-Status: DRAFT (plan only — nothing in this doc is implemented) · Branch: `plan/pro-implementation`
+Status: PHASE 4 IN PROGRESS (RevenueCat purchases + restore landed; Supabase pro_entitlements/webhook household backend still not built)
+· Branch: `feat/revenuecat-pro-mvp`
 Companion to `docs/pricing-strategy.md` (the monetization north-star), `docs/retention-test-plan.md`
 (the experiment that must clear before a live paywall), and `docs/beta-distribution-and-caregiver-qa.md`.
+
+---
+
+## Phase 1 implementation status (foundation + feature gates)
+
+**Landed** — the safe, non-paid foundation layer, all behind flags that default OFF:
+
+- `src/lib/proConfig.ts` — the single flag entry point. `isProEnabled()`
+  (`EXPO_PUBLIC_PRO_ENABLED`), `isProPreviewEnabled()` (re-exported from
+  `proPreview.ts`), and `getProMode()` → `'off' | 'preview' | 'enabled'`, with the
+  §11 precedence baked in: **real Pro supersedes the preview**. Plus a dev/QA-only
+  `EXPO_PUBLIC_PRO_DEV_ENTITLEMENT` override (`resolveDevProEntitlement`, gated on
+  `__DEV__` — never grants Pro in a shipped build).
+- `src/lib/proGates.ts` — the four pure gates: `canViewFullHistory`,
+  `canExportWeeklyRecap`, `canSharePediatricianSummary` (all `isPro`-only for now)
+  and `canAddExtraCaregivers` (a future gate, **open for now**). The **first
+  caregiver invite is never gated** — documented in the module and enforced by the
+  smoke test.
+- `src/state/ProProvider.tsx` — the entitlement seam (`usePro()`), mounted under
+  `AuthGate` in `src/app/(tabs)/_layout.tsx`. Exposes `isProEnabled`, `proMode`,
+  `isPro` (default **false**), `isLoading`, `error`, `refreshProStatus()`,
+  `openPaywall()` / `closePaywall()` / `isPaywallOpen`. No RevenueCat, no network,
+  no auth dependency, no data writes — it never blocks rendering.
+- Fake-door preview surfaces (`UpgradeCard`, `ProPreviewCard`) now gate on
+  `getProMode() === 'preview'`, so they still fire `upgrade_card_tapped` /
+  `export_tapped` when preview is on, and are suppressed once `PRO_ENABLED` is on.
+- `scripts/check-local-interactions.ts` §W — Pro-foundation invariants: flag
+  parsing + precedence, the four gates, dev-override safety, core-logging and
+  first-invite flows carry no Pro imports, fake-door still works, analytics has no
+  new purchase events / no client SELECT, and (repo-wide) no `react-native-purchases`
+  SDK or external payment link has landed.
+
+**Intentionally NOT built in Phase 1** (see §12 — still true):
+
+- No RevenueCat / `react-native-purchases` install, no purchases, no restore.
+- No real paywall UI. `openPaywall()` only flips a latch; nothing renders yet.
+- No weekly-recap export / pediatrician summary output.
+- No `pro_entitlements` migration and no Supabase entitlement read/write.
+- No purchase analytics, no pricing in the app, no AI/medical copy.
+
+`isPro` therefore resolves **free for everyone** in every real build; only a
+`__DEV__` build with the dev-entitlement flag set resolves Pro (for exercising
+gates before the real entitlement path exists).
+
+---
+
+## Phase 2 implementation status (paywall UI skeleton + real Pro entry points)
+
+**Landed** — a calm paywall surface and the entry points that open it, still with
+no purchase mechanism (this supersedes the Phase-1 "no paywall UI" note above):
+
+- `src/components/pro/PaywallSheet.tsx` — a bottom-sheet modal in the existing
+  Lullaby language (modelled on `LogSheet.tsx`, day palette, theme tokens). Title
+  "Lullaby Pro", subtitle, the three Pro benefits, the required safety copy
+  ("Not medical advice." / "Subscriptions will be managed through the App Store /
+  Play Store when enabled."), a **calm unavailable state** ("Subscriptions are not
+  configured in this build yet."), and a **disabled "Restore purchase" stub** with
+  a note that restore arrives when subscriptions are configured. **No prices, no
+  packages, no external payment links, no subscription SDK** — it claims nothing.
+- `src/components/pro/ProPaywallHost.tsx` — reads `usePro().isPaywallOpen` and
+  renders one shared `PaywallSheet`, closing via `closePaywall()`. Mounted once
+  under `ProProvider` in `src/app/(tabs)/_layout.tsx`; renders nothing until asked.
+- `UpgradeCard` / `ProPreviewCard` now branch on `getProMode()`:
+  - **preview** → unchanged fake-door (`upgrade_card_tapped` / `export_tapped`,
+    "coming soon").
+  - **enabled** → open the paywall via `usePro().openPaywall()`. UpgradeCard and
+    the "See what's included" CTA fire `paywall_opened`; the "Export this week" CTA
+    fires `pro_gate_seen` (`gate: 'export_weekly_recap'`) — real export is Phase 3,
+    so it routes to the paywall and never claims to export.
+- Call sites (`AccountSheet`, `InsightsScreen`) render the Pro card in **preview
+  OR enabled** (`getProMode() !== 'off'`); AccountSheet still requires a signed-in
+  user; Insights still requires `dataDays >= 4`. Off → no Pro card.
+- `src/lib/analytics.ts` — added `paywall_opened` and `pro_gate_seen` to the event
+  union (coarse `source`/`surface`/`gate`/`mode` props only). **No** purchase/
+  restore events.
+- `scripts/check-local-interactions.ts` §X — 8 Phase-2 checks (paywall copy +
+  no-price/no-link/no-SDK, host wiring, card wiring, the two new events, call-site
+  gating); §W7/§W8 rescoped for the new render condition and event union.
+
+**Intentionally NOT built in Phase 2** (still true — see §12):
+
+- No RevenueCat / `react-native-purchases`, no purchases, no working restore
+  (the restore control is a disabled stub).
+- No real weekly-recap export / pediatrician summary output — the CTA opens the
+  paywall.
+- No `pro_entitlements` migration, no Supabase entitlement read/write.
+- No prices in the app, no external payment links, no StoreKit / Play Billing,
+  no Stripe / web checkout.
+
+---
+
+## Phase 3 implementation status (real weekly export — the first live Pro feature)
+
+**Landed** — a real, keepable/shareable weekly recap, gated behind the Pro
+entitlement (exercised today via the dev-entitlement override before RevenueCat
+exists):
+
+- `src/features/insights/buildWeeklyExportText.ts` — a **pure, Node-testable**
+  text builder over the existing `InsightsViewModel`. Emits "Lullaby weekly
+  summary", the non-medical safety line ("This is a calm summary of what you
+  logged, not medical advice."), days logged, sleep average + weekly total, feeds/
+  day and diaper changes/day, with a **sparse-data fallback** ("Keep logging to
+  build a clearer weekly summary."). Strictly descriptive — no diagnosis,
+  prediction, or recommendation — and it emits **only aggregate numbers**: no baby
+  name, notes, volumes, diaper detail, raw ids, secrets, or payment links.
+- `src/features/insights/shareWeeklyExport.ts` — a calm wrapper over React
+  Native's `Share.share` that reuses the pure builder and **never throws** (a
+  dismissed sheet → `'dismissed'`, any error → `'failed'`).
+- `ProPreviewCard` now takes a `viewModel` prop and gates the export CTA on
+  `canExportWeeklyRecap(isPro)`:
+  - **preview** → unchanged fake-door (`export_tapped`, "coming soon").
+  - **enabled + free** → `pro_gate_seen` (`gate: 'weekly_export'`) +
+    `paywall_opened`, opens the paywall (no export).
+  - **enabled + Pro** → runs the real export: `export_started` → share →
+    `export_completed`, then a calm "Weekly export is ready to share." line.
+- `InsightsScreen` passes `viewModel` into `ProPreviewCard`; render gates
+  unchanged (`getProMode() !== 'off'` and `dataDays >= 4`).
+- `src/lib/analytics.ts` — added `export_started` + `export_completed` (coarse
+  `surface` prop only). **No** purchase/restore events.
+- `scripts/check-local-interactions.ts` §Y — 8 Phase-3 checks (builder copy +
+  no-sensitive-content + purity, share wrapper, ProPreviewCard gating, viewModel
+  wiring, the two new events); `buildWeeklyExportText.ts` + `shareWeeklyExport.ts`
+  added to the payment-token scan.
+
+**How to test Pro before RevenueCat:** set `EXPO_PUBLIC_PRO_ENABLED=true` **and**
+`EXPO_PUBLIC_PRO_DEV_ENTITLEMENT=true` in a `__DEV__` build → `usePro().isPro` is
+true → "Export this week" opens the OS share sheet with the generated recap.
+
+**Intentionally NOT built in Phase 3** (still true — see §12):
+
+- No RevenueCat / `react-native-purchases`, no purchases, no working restore
+  (still a disabled stub), no real pricing, no external payment links.
+- No `pro_entitlements` migration, no Supabase entitlement read/write — `isPro`
+  still resolves only from the dev override.
+- No pediatrician-summary export yet (the builder is the recap; the doctor
+  summary layout is a fast-follow), no history-depth gate yet.
+
+---
+
+## Phase 4 implementation status (RevenueCat purchases + restore)
+
+**Landed** — real StoreKit / Play Billing purchases through RevenueCat, with
+CustomerInfo as the **on-device source of truth** for `isPro` (the Supabase
+household backend is a later phase):
+
+- Installed **`react-native-purchases@10.4.0`** (NOT `react-native-purchases-ui` —
+  we keep our own `PaywallSheet`). No config plugin is required; a dev-client /
+  EAS rebuild picks up the native module via autolinking.
+- `src/lib/proConfig.ts` — `getRevenueCatApiKey(platform)`,
+  `getRevenueCatEntitlementId()` (default `pro`), `getRevenueCatOfferingId()`
+  (default `default`), `hasRevenueCatConfig(platform)`. Keys come from env only;
+  a missing key means "not configured" (never a crash).
+- `src/lib/revenueCat.ts` — the **only** module that imports the SDK. Configures
+  once per session with `appUserID = supabase user.id` (logs in on identity
+  change, logs out on sign-out so entitlement never leaks between accounts),
+  exposes `getRevenueCatCustomerInfo` / `getRevenueCatOffering` /
+  `purchaseRevenueCatPackage` / `restoreRevenueCatPurchases` /
+  `hasActiveRevenueCatEntitlement`, and `normalizeRevenueCatError` (coarse
+  `{ code, message, cancelled }` — a user cancel is calm). No Supabase, no URL.
+- `src/state/ProProvider.tsx` — now uses `useAuth()`; configures RevenueCat and
+  loads the offering + CustomerInfo **only when** Pro is enabled, signed-in, and a
+  platform key exists. Exposes `packages`, `paywallStatus`, `canPurchase`,
+  `isPurchasing`/`isRestoring`, `purchaseError`/`restoreError`, `purchasePackage`,
+  `restorePurchases`. Fires the purchase/restore analytics. The dev override still
+  unlocks `isPro`. Degrades calmly (unconfigured / signed-out / unavailable). It
+  never imports the SDK directly and writes no Supabase.
+- `src/components/pro/PaywallSheet.tsx` — renders real packages using the store's
+  own `priceString` (never hardcoded), a purchase CTA per package, a **real**
+  Restore purchase, and calm states (unconfigured / sign-in / loading / no
+  packages / already-active). Safety copy kept (not medical; store-managed billing;
+  cancel/manage in store settings). No `$`, no external link, no SDK import.
+- `src/lib/analytics.ts` — added `purchase_started` / `purchase_completed` /
+  `purchase_failed` / `restore_started` / `restore_completed` / `restore_failed`
+  (coarse `surface`/`packageType`/`entitlement`/`errorCode`/`cancelled` only).
+- Weekly export (Phase 3) unlocks automatically once `isPro` flips true after a
+  purchase / restore — no change needed to ProPreviewCard.
+- `scripts/check-local-interactions.ts` §Z (+ rescoped §W9/§W11/§X3/§X7/§Y8) —
+  RevenueCat installed but SDK-isolated to the service; keys from env, none
+  hardcoded; real purchase/restore surface; the six new events.
+
+**Intentionally NOT built in Phase 4** (household backend — next phase):
+
+- No Supabase `pro_entitlements` table / migration, no RevenueCat **webhook** /
+  Edge Function. Entitlement is device-local this phase, so a second caregiver on
+  the same baby does **not** yet inherit Pro until they purchase/restore
+  themselves. Cross-caregiver, reinstall-proof unlock lands with §4–§6.
+- No external payment links, no Stripe / web checkout, no hardcoded pricing.
+
+---
+
+## Phase 4 QA — env, dashboards, and sandbox test steps
+
+**Required env (build-time `EXPO_PUBLIC_*`):**
+
+```
+EXPO_PUBLIC_PRO_ENABLED=1
+EXPO_PUBLIC_PRO_PREVIEW_ENABLED=0
+EXPO_PUBLIC_REVENUECAT_IOS_API_KEY=<public iOS SDK key, appl_…>
+EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY=<public Android SDK key, goog_… — optional>
+EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID=pro
+EXPO_PUBLIC_REVENUECAT_OFFERING_ID=default
+# Dev-only bypass to exercise Pro without a purchase (never in a shipped build):
+EXPO_PUBLIC_PRO_DEV_ENTITLEMENT=1
+```
+
+**RevenueCat dashboard (app.revenuecat.com):**
+- Create the iOS app (and Android later); copy the **public** SDK keys into the
+  env above (never commit real keys).
+- Entitlement **`pro`**. Offering **`default`** with packages **Monthly** and
+  **Annual** attached to the store products below.
+
+**App Store Connect (iOS):**
+- Auto-renewable subscription products **`lullaby_pro_monthly`** and
+  **`lullaby_pro_yearly`** in one subscription group; prices are set in ASC and
+  read back through RevenueCat `priceString` (never hardcoded in the app).
+- A **sandbox tester** account (Users and Access → Sandbox).
+
+**Sandbox purchase test:**
+1. Build the dev client / TestFlight build with the env above and sign in.
+2. Open Insights (needs `dataDays >= 4`) → Lullaby Pro card → "See what's included"
+   → the paywall lists Monthly/Annual with store prices.
+3. Tap a package → complete the sandbox purchase → paywall shows "You're all set"
+   and "Export this week" now shares the real recap. `purchase_started` →
+   `purchase_completed` fire; cancelling fires `purchase_failed` with
+   `cancelled: true` and shows no scary error.
+
+**Restore purchase test:**
+1. Delete + reinstall (or a second device) and sign in with the same account.
+2. Open the paywall → **Restore purchase** → active entitlement re-grants Pro
+   (`restore_started` → `restore_completed`). With no purchase it shows
+   "No active subscription found." (`restore_failed`, `no_entitlement`).
+
+**Degrade-calmly checks:** no key → "not configured in this build yet"; signed-out
+→ "Sign in to subscribe"; logging + first caregiver invite unaffected throughout.
+
+---
 
 This is the concrete build plan that turns today's **fake-door** Pro surfaces into a real,
 entitlement-backed subscription. Today `UpgradeCard` and `ProPreviewCard` only fire interest
