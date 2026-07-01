@@ -40,6 +40,7 @@ import { baby as seedBaby, caregivers as seedCaregivers } from '@/data/mock';
 import type { Baby, Caregiver, CaregiverRole } from '@/data/models';
 import { calmAuthErrorMessage } from '@/lib/authErrors';
 import { getAuthRedirectUrl, startGoogleOAuth } from '@/lib/authLinking';
+import { authWarn } from '@/lib/authLogger';
 import { isGoogleSignInConfigured } from '@/lib/googleAuth';
 import { hapticSuccess } from '@/lib/haptics';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
@@ -243,6 +244,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       return;
     }
+    // A session resolved — clear any transient auth error left over from a
+    // cancelled/failed earlier attempt (e.g. a Google round-trip that the user
+    // retried). Sign-in actually landing must never leave a stale error note
+    // hanging behind the app surface.
+    if (mounted.current) setErrorMessage(null);
     const [babyId, profile] = await Promise.all([
       getLinkedBabyId(next.user.id),
       getCaregiverProfile(next.user.id),
@@ -539,7 +545,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // is a calm no-op; 'error'/timeout surface one calm, recoverable line.
       const outcome = await startGoogleOAuth(supabase);
       if (outcome.status === 'error' && mounted.current) {
-        if (__DEV__) console.warn(`[auth] signInWithGoogle: ${outcome.error}`);
+        // Suspicious-but-recoverable (init/exchange issue) — the user can retry, so
+        // a dev-only warn, not an error. The 'canceled' outcome stays silent.
+        authWarn(`signInWithGoogle: ${outcome.error}`);
         setErrorMessage('Could not sign in with Google just now. Please try again.');
       }
     } catch (e) {
