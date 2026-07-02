@@ -5365,6 +5365,8 @@ check('X4. every demo chip routes to its expected outcome', () => {
   assert.deepEqual(route('She hiccups after every feed'), { kind: 'topic', key: 'hiccups' });
   assert.deepEqual(route('A little spit-up after feeding'), { kind: 'topic', key: 'spitup' });
   assert.deepEqual(route('Lots of grunting and squirming'), { kind: 'topic', key: 'gas' });
+  // Gas & burping now owns burp/belch asks too.
+  assert.deepEqual(route('She burps a lot after feeds'), { kind: 'topic', key: 'gas' });
   // Crying & settling now owns "won't stop crying" and "won't settle".
   assert.deepEqual(route("She won't stop crying"), { kind: 'topic', key: 'crying' });
   assert.deepEqual(route("She won't settle at all"), { kind: 'topic', key: 'crying' });
@@ -5399,6 +5401,26 @@ check('X4b. crying / fussy / settling asks route to the bounded crying topic', (
   assert.deepEqual(route('crying and trouble breathing'), { kind: 'triage' });
   assert.deepEqual(route('crying and feels hot'), { kind: 'triage' });
   assert.deepEqual(route('crying and blue lips'), { kind: 'triage' });
+  // Truly unrelated asks still get the bounded decline.
+  assert.deepEqual(route('which stroller should I buy'), { kind: 'oos' });
+});
+
+check('X4c. burping / belching / wind-after-feeds asks route to the bounded gas topic', () => {
+  for (const ask of [
+    "she's burping",
+    'baby is burping a lot',
+    'burping after feeds',
+    'needs to burp',
+    'belching',
+    'belching after a feed',
+    'lots of wind after feeds',
+  ]) {
+    assert.deepEqual(route(ask), { kind: 'topic', key: 'gas' }, `"${ask}" → gas`);
+  }
+  // Red flags STILL override the gas topic — triage always wins.
+  assert.deepEqual(route('burping and trouble breathing'), { kind: 'triage' });
+  assert.deepEqual(route('burping and blue lips'), { kind: 'triage' });
+  assert.deepEqual(route('burping and hard to wake'), { kind: 'triage' });
   // Truly unrelated asks still get the bounded decline.
   assert.deepEqual(route('which stroller should I buy'), { kind: 'oos' });
 });
@@ -5862,12 +5884,17 @@ check('X17c. voice fallback states are explicit and unavailable voice focuses th
     'breastfeed',
     'diaper',
     'gas',
+    'burp',
+    'burping',
+    'belching',
     'sleep',
     'awake',
   ]) {
     assert.ok(REASSURE_VOICE_CONTEXTUAL_STRINGS.includes(term), `voice context includes "${term}"`);
   }
   assert.equal(normalizeVoiceTranscript('hick ups'), 'hiccups');
+  assert.equal(normalizeVoiceTranscript('burping'), 'burp');
+  assert.equal(normalizeVoiceTranscript('burping after feeding'), 'burp after feed');
   assert.equal(normalizeVoiceTranscript('hic up'), 'hiccup');
   assert.equal(normalizeVoiceTranscript('spit out'), 'spit up');
   assert.equal(normalizeVoiceTranscript('spit app'), 'spit up');

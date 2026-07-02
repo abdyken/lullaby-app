@@ -94,7 +94,7 @@ export const KB: Record<ReassureTopicKey, ReassureTopic> = {
   },
   gas: {
     key: 'gas',
-    title: 'Gas',
+    title: 'Gas & burping',
     tag: 'Comfort',
     line: 'Wriggles, grunts, and passing gas are part of a brand-new gut finding its rhythm.',
     normal:
