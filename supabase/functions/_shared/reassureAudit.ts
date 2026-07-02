@@ -16,6 +16,10 @@ export type ReassureAuditOutcome =
   | 'oos'
   | 'redflag_input'
   | 'no_api_key'
+  // server kill-switch off (REASSURE_NIGHT_READ_ENABLED != '1') — no model call,
+  // no token spend; the client gets the local fallback. Stored as free text in
+  // the unconstrained `outcome` column, so this needs no migration.
+  | 'disabled'
   // model was called but the answer was discarded → deterministic fallback
   | 'guardrail_block'
   | 'refusal'

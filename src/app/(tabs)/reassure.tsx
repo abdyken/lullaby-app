@@ -29,6 +29,7 @@ import {
 } from 'react-native';
 
 import { Screen } from '@/components/Screen';
+import { AiConsentCard } from '@/features/reassure/components/AiConsentCard';
 import { AnswerCard, type TriageAction } from '@/features/reassure/components/AnswerCard';
 import { AskCard } from '@/features/reassure/components/AskCard';
 import { ReassureHero } from '@/features/reassure/components/ReassureHero';
@@ -119,7 +120,7 @@ export default function ReassureScreen() {
     () => buildReassureRecap(recapSource.events, recapSource.now),
     [recapSource],
   );
-  const nightRead = useNightRead(recap);
+  const { read: nightRead, needsConsent, grantConsent, declineConsent } = useNightRead(recap);
   const currentRecapHeading = recapHeading(recap);
 
   const scrollToAnswer = useCallback(
@@ -397,6 +398,12 @@ export default function ReassureScreen() {
       {/* tonight recap, grounded in the saved logs */}
       <Kicker text={currentRecapHeading} color={palette.inkFaint} />
       <RecapCard surfaceMode={mode} recap={recap} readOverride={nightRead} />
+
+      {/* one-time AI consent notice — only for AI-eligible parents who have not
+          yet decided. The recap above is already fully rendered without AI. */}
+      {needsConsent ? (
+        <AiConsentCard surfaceMode={mode} onGrant={grantConsent} onDecline={declineConsent} />
+      ) : null}
 
       {/* common tonight */}
       <Kicker text="Common tonight" color={palette.inkFaint} />

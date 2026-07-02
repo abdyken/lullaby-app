@@ -62,6 +62,14 @@ All safety lives in code around the model:
 | Manifest #13 — system-prompt sign-off | Topic Polish client wiring | Clinician approves `TOPIC_POLISH_SYSTEM_PROMPT` |
 | Manifest #10 — consent line | Topic Polish client wiring (raw parent text leaves the device) | Consent copy added to the disclaimer + shipped |
 | `canUseLlmNightRead` (Pro) | The LLM night read only | Purchase. Free users always get the local descriptive read — safety is never paywalled |
+| **AI night-read consent** (local, `lullaby.reassure.aiNightReadConsent.v1`) | The client from EVER calling `reassure-night-read` | The parent explicitly taps "Turn on AI read" in the one-time `AiConsentCard`. Undecided or declined → the client never invokes the function; the local read stays. The consent state is private: never sent to analytics, Supabase, the LLM, or a log line |
+| **Server kill-switch** `REASSURE_NIGHT_READ_ENABLED` (edge env) | Any Anthropic call, server-side | Set to exactly `"1"`. Missing / any other value → the function returns the local fallback (`source:'fallback'`, `outcome='disabled'`) **without constructing the Anthropic client or spending a token**. Off by default while medical content is draft |
+
+**Three gates must ALL hold for a real AI night read:** Pro/dev entitlement
+(`canUseLlmNightRead`), explicit local consent, and the server kill-switch on.
+The first two are client-side (no consent → no request at all); the third is
+server-side (a request arrives but no model is called). Local Reassure and the
+code-computed recap always work with none of them.
 
 Topic Polish stays dark until **both** #10 and #13 clear; smoke §X22 fails the
 build if any `src/` file references `reassure-topic-polish`.
@@ -97,7 +105,15 @@ length (never the full text), and every row expires via `expires_at`
    ```sh
    supabase secrets set ANTHROPIC_API_KEY=<key>
    supabase secrets set REASSURE_MODEL=claude-haiku-4-5-20251001
+   # Server kill-switch — OMIT (or leave unset) to keep the model OFF. The
+   # function then returns the local fallback with outcome='disabled' and
+   # spends no tokens. Set to exactly "1" only once the content is approved:
+   # supabase secrets set REASSURE_NIGHT_READ_ENABLED=1
    ```
+   > While the medical content is draft, deploy with the kill-switch **unset**.
+   > The function is safe to deploy in this state: every call audits
+   > `outcome='disabled'` and returns `source:'fallback'`, so the client keeps
+   > the local read and Anthropic is never called.
 2. **Migrations** — ✅ **applied 2026-07-02** to `xhyziuvgglsrdaakpmui`
    (via the Supabase MCP `apply_migration`; from a clean CLI checkout use
    `supabase db push` instead):
@@ -154,8 +170,14 @@ does not break Reassure.
   # or fully disable it:
   supabase functions delete reassure-night-read   # client falls back to local read
   ```
-- **Disable the model without redeploying** — unset the key; the function then
-  audits `outcome='no_api_key'` and returns the local fallback:
+- **Disable the model without redeploying (preferred kill-switch)** — flip the
+  server env off; the function then audits `outcome='disabled'` and returns the
+  local fallback without calling Anthropic (no token spend):
+  ```sh
+  supabase secrets unset REASSURE_NIGHT_READ_ENABLED   # or set it to any value ≠ "1"
+  ```
+- **Or unset the key** — the function then audits `outcome='no_api_key'` and
+  returns the local fallback:
   ```sh
   supabase secrets unset ANTHROPIC_API_KEY
   ```
@@ -194,3 +216,10 @@ does not break Reassure.
   has zero client references.
 - X23 — audit: minimized parent text, `usage` captured, zero client policies,
   90-day TTL columns present.
+- X24 — AI night-read consent + server kill-switch: only "granted" consent lets
+  the client call the function (Pro gate still applies); the local read/recap
+  always render and the consent notice is one-time; consent copy is honest
+  (works without AI, no diagnosis/treatment claim); the kill-switch disabled
+  branch precedes any Anthropic construction/call (`outcome='disabled'`, no
+  token spend); consent state never leaks to phone/analytics/LLM, and topic
+  polish / parent-answer stay dark.

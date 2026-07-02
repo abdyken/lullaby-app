@@ -7,8 +7,16 @@
  * mode silently keeps the local text (returns null).
  *
  * Runs only when ALL hold: Supabase configured + signed in + a baby linked +
- * the Pro gate open (canUseLlmNightRead). Free users always get the local
- * descriptive read — this gates polish, not safety.
+ * the Pro gate open (canUseLlmNightRead) + the parent has EXPLICITLY consented
+ * to AI processing (useAiNightReadConsent). Free users — and Pro users who have
+ * not consented — always get the local descriptive read: this gates polish, not
+ * safety. Without consent the client NEVER calls the edge function; instead the
+ * screen shows the one-time consent notice (needsConsent).
+ *
+ * The server kill-switch (REASSURE_NIGHT_READ_ENABLED) is enforced ON THE SERVER
+ * — a disabled function returns the local fallback without ever calling
+ * Anthropic. The client cannot see it and does not need to; consent + Pro are
+ * the two client-side gates.
  *
  * Flow: AsyncStorage cache (per baby per night) → edge function with a hard
  * 3s abort → cache + show. The edge function re-computes tallies server-side
@@ -18,12 +26,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
 
+import { consentAllowsAiNightRead } from '@/features/reassure/domain/aiConsent';
 import type { ReassureNightRecap } from '@/features/reassure/domain/types';
 import { canUseLlmNightRead } from '@/lib/proGates';
 import { supabase } from '@/lib/supabase';
 import { useAnalytics } from '@/lib/useAnalytics';
 import { useAuth } from '@/state/AuthProvider';
 import { usePro } from '@/state/ProProvider';
+
+import { useAiNightReadConsent } from './useAiNightReadConsent';
 
 const CACHE_PREFIX = 'lullaby/reassure/night-read/v1';
 const FETCH_TIMEOUT_MS = 3_000;
@@ -62,9 +73,26 @@ async function fetchNightRead(babyId: string, nightKey: string): Promise<string 
   }
 }
 
-export function useNightRead(recap: ReassureNightRecap): string | null {
+export type NightReadState = {
+  /** The AI-phrased read to overlay on the local recap, or null to keep local. */
+  read: string | null;
+  /**
+   * True only when the parent is AI-eligible (Pro/dev + signed in + a baby +
+   * this night has data) but has NOT yet decided on consent — the signal that
+   * drives the one-time consent notice. False once they grant or decline, and
+   * false for anyone who isn't AI-eligible in the first place.
+   */
+  needsConsent: boolean;
+  /** Record consent and allow the client to attempt the AI read. */
+  grantConsent: () => void;
+  /** Record a decline; the local read stays and the notice does not return. */
+  declineConsent: () => void;
+};
+
+export function useNightRead(recap: ReassureNightRecap): NightReadState {
   const { session, baby } = useAuth();
   const { isPro } = usePro();
+  const consent = useAiNightReadConsent();
   const track = useAnalytics();
   // Keyed by cache key so a read for one night/baby can never leak into
   // another — and so no synchronous setState is needed to "reset" (the return
@@ -75,13 +103,17 @@ export function useNightRead(recap: ReassureNightRecap): string | null {
   const signedIn = session != null;
   const nightKey = nightKeyFor(recap.window.startMs);
   const cacheKey = babyId == null ? null : `${CACHE_PREFIX}:${babyId}:${nightKey}`;
-  const eligible =
+  // AI-eligibility EXCLUDING consent — the Pro/dev gate + a night worth reading.
+  const aiEligible =
     recap.window.label !== 'today' &&
     supabase != null &&
     signedIn &&
     babyId != null &&
     canUseLlmNightRead(isPro) &&
     !recap.isEmpty;
+  // The client may only CALL the edge function once consent is explicitly given.
+  const consentGranted = consentAllowsAiNightRead(consent.status);
+  const eligible = aiEligible && consentGranted;
 
   useEffect(() => {
     if (!eligible || babyId == null || cacheKey == null) return;
@@ -111,5 +143,11 @@ export function useNightRead(recap: ReassureNightRecap): string | null {
     };
   }, [babyId, cacheKey, eligible, nightKey, track]);
 
-  return eligible && read !== null && read.key === cacheKey ? read.text : null;
+  return {
+    read: eligible && read !== null && read.key === cacheKey ? read.text : null,
+    // Ask exactly once: eligible-for-AI, consent loaded, and still undecided.
+    needsConsent: aiEligible && consent.ready && consent.status === null,
+    grantConsent: consent.grant,
+    declineConsent: consent.decline,
+  };
 }
