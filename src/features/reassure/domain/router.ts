@@ -41,7 +41,9 @@ export function route(text: string): RouteResult {
   // 2) Curated topics (demo order and demo regexes, verbatim).
   if (/hiccup/.test(t)) return { kind: 'topic', key: 'hiccups' };
   if (/spit|posset|throw up|throwing up|vomit/.test(t)) return { kind: 'topic', key: 'spitup' };
-  if (/gas|grunt|squirm|wriggl|fart|wind|colic|tummy/.test(t)) return { kind: 'topic', key: 'gas' };
+  // Gas & burping — burp/belch/wind-after-feeds are a common newborn gas/comfort
+  // ask (burp/belch added here so "she's burping" lands on the gas card, not oos).
+  if (/gas|grunt|squirm|wriggl|fart|wind|colic|tummy|burp|belch/.test(t)) return { kind: 'topic', key: 'gas' };
   // Crying & settling — a core newborn-night worry. Owns settle/fuss (moved out
   // of the sleep regex below) so "won't settle" and "fussy tonight" land here.
   if (/cry|fuss|scream|sooth|settle|inconsolable|upset/.test(t)) {

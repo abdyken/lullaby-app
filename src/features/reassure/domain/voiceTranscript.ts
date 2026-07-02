@@ -37,6 +37,12 @@ export const REASSURE_VOICE_REQUIRED_CONTEXTUAL_STRINGS = [
   'fussy',
   'soothe',
   'screaming',
+  'burp',
+  'burping',
+  'belch',
+  'belching',
+  'burping after feeds',
+  'needs to burp',
   "won't settle",
   'hard to wake',
   'feels hot',
@@ -70,6 +76,11 @@ const VOICE_NORMALIZATION_REPLACEMENTS: [RegExp, string][] = [
   [/\bwont\s+settle\b/g, "won't settle"],
   [/\bwon t\s+settle\b/g, "won't settle"],
   [/\bnot\s+waking\b/g, 'hard to wake'],
+  // Gas/burping — collapse the "-ing" form so it reads consistently in the ask
+  // text. Routing already matches on the "burp" substring; the specific
+  // phrase rule must precede the bare one so it wins.
+  [/\bburping\s+after\s+feeding\b/g, 'burp after feed'],
+  [/\bburping\b/g, 'burp'],
 ];
 
 export function normalizeVoiceTranscript(text: string): string {

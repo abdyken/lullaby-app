@@ -61,7 +61,7 @@ export const KB: Record<ReassureTopicKey, ReassureTopic> = {
   },
   gas: {
     key: 'gas',
-    title: 'Gas',
+    title: 'Gas & burping',
     tag: 'Comfort',
     line: 'Wriggles, grunts, and passing gas are part of a brand-new gut finding its rhythm.',
     normal:
@@ -132,6 +132,7 @@ export const EXAMPLE_CHIPS: ExampleChip[] = [
   { label: 'Hiccups after feeds', ask: 'She hiccups after every feed', flagged: false },
   { label: 'Spit-up after a feed', ask: 'A little spit-up after feeding', flagged: false },
   { label: 'Grunting & squirming', ask: 'Lots of grunting and squirming', flagged: false },
+  { label: 'Burping after feeds', ask: 'She burps a lot after feeds', flagged: false },
   { label: "Won't stop crying", ask: "She won't stop crying", flagged: false },
   { label: "Won't settle", ask: "She won't settle at all", flagged: false },
   { label: 'She feels hot', ask: 'She feels really hot', flagged: true },
