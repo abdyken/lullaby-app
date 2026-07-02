@@ -16,6 +16,7 @@ import Svg, { Path } from 'react-native-svg';
 
 import { AnswerBlocks } from '@/features/reassure/components/AnswerBlocks';
 import { usePediatricianPhone } from '@/features/reassure/application/usePediatricianPhone';
+import { clinicalContentVisible } from '@/features/reassure/domain/contentGate';
 import { telUrlFor } from '@/features/reassure/domain/pediatricianContact';
 import {
   GUIDES,
@@ -27,6 +28,18 @@ import {
 } from '@/features/reassure/content/kb';
 import type { RouteResult } from '@/features/reassure/domain/types';
 import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
+
+/* Draft-content release gate: while REASSURE_CONTENT.status is 'draft', the
+ * clinical KB blocks are dev-only (see domain/contentGate.ts). Triage and the
+ * non-medical guides render regardless — escalation is never hidden. */
+const showClinical = clinicalContentVisible(__DEV__);
+
+/* Draft-gate copy — local UX copy (not medical), shown in place of the
+ * clinical KB blocks in public builds until clinician sign-off. */
+const REVIEW_PENDING_LINE =
+  'Our guidance on this topic is still being reviewed, so it isn’t shown in the app yet.';
+const REVIEW_PENDING_BODY =
+  'Your pediatrician or nurse line is the best place for questions like this. If anything feels urgent, call your doctor right away.';
 
 /* UX copy (not medical) — still listed in docs/reassure-content-review.md. */
 const EMERGENCY_INFO =
@@ -116,7 +129,9 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
           : OOS_COPY.tag;
   const line =
     result.kind === 'topic'
-      ? KB[result.key].line
+      ? showClinical
+        ? KB[result.key].line
+        : REVIEW_PENDING_LINE
       : result.kind === 'guide'
         ? GUIDES[result.key].line
         : result.kind === 'triage'
@@ -195,7 +210,7 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
           {line}
         </Text>
 
-        {result.kind === 'topic' ? (
+        {result.kind === 'topic' && showClinical ? (
           <>
             <AnswerBlocks topic={KB[result.key]} surfaceMode={surfaceMode} />
             <View
@@ -216,6 +231,26 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
               </Text>
             </View>
           </>
+        ) : null}
+
+        {/* draft gate — a calm pediatrician pointer in place of the clinical blocks */}
+        {result.kind === 'topic' && !showClinical ? (
+          <View
+            style={{
+              backgroundColor: surfaceMode === 'night' ? 'rgba(255,255,255,0.06)' : colors.surfaceSoft,
+              borderRadius: radii.small,
+              padding: 13,
+            }}>
+            <Text
+              style={{
+                fontFamily: fonts.bodyBold,
+                fontSize: 12.5,
+                lineHeight: 19,
+                color: palette.inkSoft,
+              }}>
+              {REVIEW_PENDING_BODY}
+            </Text>
+          </View>
         ) : null}
 
         {result.kind === 'oos' ? (
