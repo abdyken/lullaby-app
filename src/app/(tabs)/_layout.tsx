@@ -25,18 +25,33 @@ import { ProPaywallHost } from '@/components/pro/ProPaywallHost';
 import { LoggingProvider, useLogging } from '@/features/logging/state/LoggingProvider';
 import { LoggingToast } from '@/features/logging/ui/LoggingToast';
 import { logStartupStep } from '@/lib/startupDiagnostics';
-import { LocalEventProvider } from '@/state/LocalEventProvider';
+import { useAuth } from '@/state/AuthProvider';
+import { LocalEventProvider, useLocalEvents } from '@/state/LocalEventProvider';
 import { ProProvider } from '@/state/ProProvider';
 import { useTheme } from '@/state/ThemeProvider';
 import { surfaces } from '@/theme';
 
 function AppShellStartupGate({ children }: { children: ReactNode }) {
-  const { enabled, hydrated } = useLogging();
-  const ready = !enabled || hydrated;
+  const { status, baby } = useAuth();
+  const { isHydrated: eventsHydrated, syncMode } = useLocalEvents();
+  const { enabled, hydrated: loggingHydrated } = useLogging();
+  const identityReady = status === 'local-only' || status === 'ready';
+  const loggingReady = !enabled || loggingHydrated;
+  const ready = identityReady && eventsHydrated && loggingReady;
 
   useEffect(() => {
-    if (ready) logStartupStep('app shell ready', { loggingV2: enabled });
-  }, [ready, enabled]);
+    if (ready) {
+      logStartupStep('app shell ready', {
+        reason: 'startup-hydration-complete',
+        authStatus: status,
+        babyLoaded: baby != null,
+        eventsHydrated,
+        eventsMode: syncMode,
+        loggingV2: enabled,
+        loggingHydrated,
+      });
+    }
+  }, [ready, status, baby, eventsHydrated, syncMode, enabled, loggingHydrated]);
 
   if (!ready) {
     return <AuthTransition />;

@@ -23,7 +23,11 @@ import { KB, TOPIC_ORDER } from '@/features/reassure/content/kb';
 import type { ReassureTopicKey } from '@/features/reassure/domain/types';
 import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+const isFabric = Boolean(
+  (globalThis as typeof globalThis & { nativeFabricUIManager?: unknown }).nativeFabricUIManager,
+);
+
+if (Platform.OS === 'android' && !isFabric && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 

@@ -74,6 +74,33 @@ export type AuthStatus =
   | 'needs-setup'
   | 'ready';
 
+type AuthStatusReason =
+  | 'initial'
+  | 'initial-session'
+  | 'initial-no-session'
+  | 'auth-change'
+  | 'no-session'
+  | 'local-preference'
+  | 'local-bootstrap'
+  | 'continue-locally'
+  | 'account-entry'
+  | 'email-sign-in'
+  | 'email-sign-up'
+  | 'email-confirmation-required'
+  | 'sign-in-failed'
+  | 'sign-up-failed'
+  | 'apple-sign-in'
+  | 'apple-cancelled'
+  | 'apple-failed'
+  | 'apple-missing-token'
+  | 'google-oauth'
+  | 'google-oauth-ended'
+  | 'google-failed'
+  | 'setup-complete'
+  | 'invite-accepted'
+  | 'missing-linked-baby'
+  | 'provisioning-complete';
+
 /** Fields the baby-setup step collects (color is derived from the role pick). */
 export type SetupFields = {
   displayName: string;
@@ -232,16 +259,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    logStartupStep('auth status', { status }, { once: false });
-  }, [status]);
-
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
     };
+  }, []);
+
+  const statusRef = useRef<AuthStatus>('loading');
+  useEffect(() => {
+    logStartupStep('auth status', { status: 'loading', reason: 'initial' }, { once: false });
+  }, []);
+
+  const setAuthStatus = useCallback((next: AuthStatus, reason: AuthStatusReason) => {
+    if (!mounted.current || statusRef.current === next) return;
+    statusRef.current = next;
+    setStatus(next);
+    logStartupStep('auth status', { status: next, reason }, { once: false });
   }, []);
 
   // Cached "the guest chose to continue locally" preference, hydrated from
@@ -257,21 +292,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // newer run supersedes it, so a slower earlier run can never overwrite the
   // status a newer one produced.
   const evaluateSeqRef = useRef(0);
+  const provisioningRef = useRef<{ userId: string; promise: Promise<void> } | null>(null);
+  const provisionedUserIdRef = useRef<string | null>(null);
 
   // Map a session to a provisioning status. Safe to call repeatedly.
-  const evaluate = useCallback(async (next: Session | null) => {
-    const seq = (evaluateSeqRef.current += 1);
-    const isCurrent = () => mounted.current && evaluateSeqRef.current === seq;
+  const evaluate = useCallback(async (next: Session | null, reason: AuthStatusReason = 'auth-change', force = false) => {
     if (mounted.current) setSession(next);
     if (!next) {
-      if (isCurrent()) {
+      evaluateSeqRef.current += 1;
+      provisioningRef.current = null;
+      provisionedUserIdRef.current = null;
+      if (mounted.current) {
         setCaregiver(null);
         setBaby(null);
         setCaregivers([]);
-        setStatus('signed-out');
+        setAuthStatus('signed-out', reason === 'initial-no-session' ? 'initial-no-session' : 'no-session');
       }
       return;
     }
+
+    const userId = next.user.id;
+    if (
+      !force &&
+      provisionedUserIdRef.current === userId &&
+      (statusRef.current === 'ready' || statusRef.current === 'needs-setup')
+    ) {
+      return;
+    }
+
+    if (!force && provisioningRef.current?.userId === userId) {
+      await provisioningRef.current.promise;
+      return;
+    }
+
+    const seq = (evaluateSeqRef.current += 1);
+    const isCurrent = () => mounted.current && evaluateSeqRef.current === seq;
     // A session resolved — enter the branded post-auth sync IMMEDIATELY, before the
     // provisioning reads, so AuthGate shows the transition (never onboarding, the
     // account surface, or a stale signed-out screen) while the linked baby + profile
@@ -279,37 +334,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // earlier attempt so a landing sign-in never leaves a stale note behind the app.
     if (isCurrent()) {
       setErrorMessage(null);
-      setStatus('postAuthSync');
-      logStartupStep('auth provisioning start');
+      setAuthStatus('postAuthSync', reason);
+      logStartupStep('auth provisioning start', { reason });
     }
-    const [babyId, profile] = await Promise.all([
-      getLinkedBabyId(next.user.id),
-      getCaregiverProfile(next.user.id),
-    ]);
-    if (!isCurrent()) return;
-    logStartupStep('auth profile and baby link ready', {
-      hasBaby: babyId != null,
-      hasProfile: profile != null,
-    });
-    setCaregiver(profile);
-    if (!babyId) {
-      setBaby(null);
-      setCaregivers([]);
-      setStatus('needs-setup');
-      return;
-    }
-    // Ready: load the real baby + linked caregivers for the UI. Soft — a missing
-    // read just leaves a calm fallback; it never blocks entering the app.
-    const [babyRow, linked] = await Promise.all([getBaby(babyId), getBabyCaregivers(babyId)]);
-    if (!isCurrent()) return;
-    setBaby(babyRow);
-    setCaregivers(linked);
-    setStatus('ready');
-    logStartupStep('auth baby ready', {
-      hasBaby: babyRow != null,
-      caregiverCount: linked.length,
-    });
-  }, []);
+    const promise = (async () => {
+      try {
+        const [babyId, profile] = await Promise.all([
+          getLinkedBabyId(userId),
+          getCaregiverProfile(userId),
+        ]);
+        if (!isCurrent()) return;
+        logStartupStep('auth profile and baby link ready', {
+          hasBaby: babyId != null,
+          hasProfile: profile != null,
+          reason,
+        });
+        setCaregiver(profile);
+        if (!babyId) {
+          provisionedUserIdRef.current = userId;
+          setBaby(null);
+          setCaregivers([]);
+          setAuthStatus('needs-setup', 'missing-linked-baby');
+          return;
+        }
+        // Ready: load the real baby + linked caregivers for the UI. Soft — a missing
+        // read just leaves a calm fallback; it never blocks entering the app.
+        const [babyRow, linked] = await Promise.all([getBaby(babyId), getBabyCaregivers(babyId)]);
+        if (!isCurrent()) return;
+        provisionedUserIdRef.current = userId;
+        setBaby(babyRow);
+        setCaregivers(linked);
+        setAuthStatus('ready', 'provisioning-complete');
+        logStartupStep('auth baby ready', {
+          hasBaby: babyRow != null,
+          caregiverCount: linked.length,
+          reason: 'provisioning-complete',
+        });
+      } finally {
+        if (provisioningRef.current?.userId === userId && evaluateSeqRef.current === seq) {
+          provisioningRef.current = null;
+        }
+      }
+    })();
+    provisioningRef.current = { userId, promise };
+    await promise;
+  }, [setAuthStatus]);
 
   // Fill the active baby/caregiver from the onboarding-persisted local baby (or
   // the demo seed as a fallback) so a "continue locally" guest in a *configured*
@@ -343,16 +412,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // owns the path and the flag is irrelevant. Centralizing this keeps the
   // bootstrap and the auth-change listener from diverging on the null case.
   const applySession = useCallback(
-    async (next: Session | null) => {
+    async (next: Session | null, reason: AuthStatusReason = 'auth-change') => {
       if (!next && prefersLocalRef.current) {
+        evaluateSeqRef.current += 1;
+        provisioningRef.current = null;
+        provisionedUserIdRef.current = null;
         if (mounted.current) setSession(null);
         await hydrateLocalIdentity();
-        if (mounted.current) setStatus('local-only');
+        if (mounted.current) setAuthStatus('local-only', 'local-preference');
         return;
       }
-      await evaluate(next);
+      await evaluate(next, reason);
     },
-    [evaluate, hydrateLocalIdentity],
+    [evaluate, hydrateLocalIdentity, setAuthStatus],
   );
 
   useEffect(() => {
@@ -374,13 +446,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         hasSession: current != null,
         prefersLocal: prefersLocalRef.current,
       });
-      await applySession(current);
+      await applySession(current, current ? 'initial-session' : 'initial-no-session');
       if (!active) return;
       // Re-evaluate on any later auth change. Defer out of the callback (Supabase
       // warns against awaiting client calls directly inside onAuthStateChange).
       unsub = onSupabaseAuthChange((next) => {
         setTimeout(() => {
-          void applySession(next);
+          void applySession(next, 'auth-change');
         }, 0);
       });
     })();
@@ -456,7 +528,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       prefersLocalRef.current = storedPref === 'true';
       await hydrateLocalIdentity();
       if (!active || !mounted.current) return;
-      setStatus(resolveNoSessionStatus(prefersLocalRef.current));
+      const nextStatus = resolveNoSessionStatus(prefersLocalRef.current);
+      setAuthStatus(nextStatus, nextStatus === 'local-only' ? 'local-bootstrap' : 'initial-no-session');
       logStartupStep('auth local identity ready', {
         prefersLocal: prefersLocalRef.current,
       });
@@ -464,13 +537,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, [configured, hydrateLocalIdentity]);
+  }, [configured, hydrateLocalIdentity, setAuthStatus]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     if (!supabase) return;
     setBusy(true);
     setErrorMessage(null);
     setPendingMessage(null);
+    setAuthStatus('authenticating', 'email-sign-in');
     try {
       const { error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
@@ -480,21 +554,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Raw GoTrue messages are terse/technical, so map them to calm copy.
       if (error && mounted.current) {
         setErrorMessage(calmAuthErrorMessage(error, 'Could not sign in just now. Please try again.'));
+        setAuthStatus('signed-out', 'sign-in-failed');
       }
     } catch (e) {
       if (mounted.current) {
         setErrorMessage(calmAuthErrorMessage(e, 'Could not sign in just now. Please try again.'));
+        setAuthStatus('signed-out', 'sign-in-failed');
       }
     } finally {
       if (mounted.current) setBusy(false);
     }
-  }, []);
+  }, [setAuthStatus]);
 
   const signUp = useCallback(async (email: string, password: string) => {
     if (!supabase) return;
     setBusy(true);
     setErrorMessage(null);
     setPendingMessage(null);
+    setAuthStatus('authenticating', 'email-sign-up');
     try {
       const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
       if (error) {
@@ -502,23 +579,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setErrorMessage(
             calmAuthErrorMessage(error, 'Could not create your account just now. Please try again.'),
           );
+          setAuthStatus('signed-out', 'sign-up-failed');
         }
         return;
       }
       // No session means the project requires email confirmation first.
       if (!data.session && mounted.current) {
         setPendingMessage('Account created. Tap the link in the email we just sent, then sign in.');
+        setAuthStatus('signed-out', 'email-confirmation-required');
       }
     } catch (e) {
       if (mounted.current) {
         setErrorMessage(
           calmAuthErrorMessage(e, 'Could not create your account just now. Please try again.'),
         );
+        setAuthStatus('signed-out', 'sign-up-failed');
       }
     } finally {
       if (mounted.current) setBusy(false);
     }
-  }, []);
+  }, [setAuthStatus]);
 
   // Native Apple sign-in (iOS). The system sheet returns a short-lived identity
   // token (a signed JWT); Supabase verifies it and mints a session via
@@ -535,6 +615,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setBusy(true);
     setErrorMessage(null);
     setPendingMessage(null);
+    setAuthStatus('authenticating', 'apple-sign-in');
     try {
       const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
@@ -547,6 +628,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Apple authenticated but returned no token — rare; treat as a soft retry.
         if (mounted.current) {
           setErrorMessage('Could not sign in with Apple just now. Please try again.');
+          setAuthStatus('signed-out', 'apple-missing-token');
         }
         return;
       }
@@ -558,19 +640,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setErrorMessage(
           calmAuthErrorMessage(error, 'Could not sign in with Apple just now. Please try again.'),
         );
+        setAuthStatus('signed-out', 'apple-failed');
       }
     } catch (e) {
       // The parent dismissed the system sheet — not a failure, stay quiet.
-      if (isAppleCancel(e)) return;
+      if (isAppleCancel(e)) {
+        if (mounted.current) setAuthStatus('signed-out', 'apple-cancelled');
+        return;
+      }
       if (mounted.current) {
         setErrorMessage(
           calmAuthErrorMessage(e, 'Could not sign in with Apple just now. Please try again.'),
         );
+        setAuthStatus('signed-out', 'apple-failed');
       }
     } finally {
       if (mounted.current) setBusy(false);
     }
-  }, []);
+  }, [setAuthStatus]);
 
   // Google sign-in (iOS + Android) via the system browser. We deliberately use the
   // OAuth/browser flow rather than a native sign-in module: it needs no extra
@@ -593,7 +680,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // resolving. Success lands via onAuthStateChange → applySession (→ postAuthSync
     // → ready/needs-setup); a non-success outcome is released back to the account
     // surface below.
-    setStatus('authenticating');
+    setAuthStatus('authenticating', 'google-oauth');
     try {
       // startGoogleOAuth always resolves now (its non-interactive steps are
       // timed out), so the `finally` below always clears `busy` — no more stuck
@@ -612,19 +699,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // keyed on "not success" (not a cancel branch), so a dismissal stays a silent
       // no-op with no error set.
       if (outcome.status !== 'success' && mounted.current) {
-        setStatus('signed-out');
+        setAuthStatus('signed-out', 'google-oauth-ended');
       }
     } catch (e) {
       if (mounted.current) {
         setErrorMessage(
           calmAuthErrorMessage(e, 'Could not sign in with Google just now. Please try again.'),
         );
-        setStatus('signed-out');
+        setAuthStatus('signed-out', 'google-failed');
       }
     } finally {
       if (mounted.current) setBusy(false);
     }
-  }, []);
+  }, [setAuthStatus]);
 
   // Send a password-reset email. Supabase intentionally returns success even for
   // an unknown address (anti-enumeration), so the calling screen shows the same
@@ -684,7 +771,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // it so a future setup never re-prefills stale data. Best-effort (never
         // blocks the transition into the app).
         void clearOnboardingDraft();
-        await evaluate(session); // → ready
+        await evaluate(session, 'setup-complete', true); // → ready
       } catch (e) {
         if (mounted.current) {
           setErrorMessage(messageFrom(e, 'Could not finish setup. Please try again.'));
@@ -718,7 +805,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Joined a shared baby — the local onboarding draft is now irrelevant; drop
         // it so it can't prefill a future setup. Best-effort.
         void clearOnboardingDraft();
-        await evaluate(session); // → ready (now linked to the shared baby)
+        await evaluate(session, 'invite-accepted', true); // → ready (now linked to the shared baby)
       } catch (e) {
         if (mounted.current) {
           setErrorMessage(messageFrom(e, 'Could not join with that code. Please try again.'));
@@ -772,9 +859,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await hydrateLocalIdentity();
     if (mounted.current) {
       setErrorMessage(null);
-      setStatus('local-only');
+      setAuthStatus('local-only', 'continue-locally');
     }
-  }, [hydrateLocalIdentity]);
+  }, [hydrateLocalIdentity, setAuthStatus]);
 
   // "Create account or sign in" from the in-app account surface — the inverse of
   // continueLocally(). Clear the sticky local-first preference (ref first, then
@@ -793,9 +880,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     if (mounted.current) {
       setErrorMessage(null);
-      setStatus('signed-out');
+      setAuthStatus('signed-out', 'account-entry');
     }
-  }, [configured]);
+  }, [configured, setAuthStatus]);
 
   // Sign out — drop the Supabase session and return to 'signed-out'. Hygiene:
   //  - Auth session/storage IS cleared: supabase.auth.signOut() calls the
