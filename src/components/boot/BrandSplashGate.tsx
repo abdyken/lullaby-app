@@ -1,7 +1,6 @@
 import LottieView, { type AnimationObject } from 'lottie-react-native';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
-  AccessibilityInfo,
   Animated,
   Easing,
   Image,
@@ -9,6 +8,7 @@ import {
   View,
 } from 'react-native';
 
+import { useReduceMotion } from '@/lib/useReduceMotion';
 import { BRAND_LAUNCH } from '@/theme/brandLaunch';
 
 const staticLogoSource = require('../../../assets/images/lullaby-logo-mark.png');
@@ -30,31 +30,6 @@ function getLullabyLogoDrawAnimationSource(): AnimationObject | null {
   }
 
   return logoDrawAnimationContext(logoDrawAnimationKey) as AnimationObject;
-}
-
-function useReduceMotion() {
-  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    let active = true;
-
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then((enabled) => {
-        if (active) setReduceMotion(enabled);
-      })
-      .catch(() => {
-        if (active) setReduceMotion(false);
-      });
-
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
-
-    return () => {
-      active = false;
-      subscription.remove();
-    };
-  }, []);
-
-  return reduceMotion;
 }
 
 export function BrandSplashGate({ children }: BrandSplashGateProps) {
