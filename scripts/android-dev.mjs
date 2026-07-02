@@ -4,11 +4,6 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-// Default the local-dev feature flag unless the caller already set it.
-if (!process.env.EXPO_PUBLIC_LOGGING_V2) {
-  process.env.EXPO_PUBLIC_LOGGING_V2 = '1';
-}
-
 const root = process.cwd();
 const androidDir = path.join(root, 'android');
 const gradlew = path.join(androidDir, process.platform === 'win32' ? 'gradlew.bat' : 'gradlew');

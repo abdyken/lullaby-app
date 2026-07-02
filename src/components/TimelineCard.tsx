@@ -5,7 +5,7 @@
  * route to the Log tab later). Rows come from the shared mock store. Includes a
  * warm empty state so the card is never a blank list.
  */
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
 import { TimelineItem } from '@/components/TimelineItem';
 import type { TimelineEntry } from '@/data/mock';
@@ -15,11 +15,13 @@ type Props = {
   entries: TimelineEntry[];
   /** accent for the "See all" affordance — calm sleep accent by default */
   accentColor?: string;
+  /** Open the lightweight note/spit-up sheet. */
+  onAddNote?: () => void;
   /** surface palette — 'day' (default) or 'night' */
   surfaceMode?: SurfaceMode;
 };
 
-export function TimelineCard({ entries, accentColor = colors.sleep, surfaceMode = 'day' }: Props) {
+export function TimelineCard({ entries, accentColor = colors.sleep, onAddNote, surfaceMode = 'day' }: Props) {
   const palette = surfaces[surfaceMode];
   return (
     <View
@@ -43,8 +45,18 @@ export function TimelineCard({ entries, accentColor = colors.sleep, surfaceMode 
         <Text style={{ fontFamily: fonts.displayMedium, fontSize: 14.5, color: palette.ink }}>
           Tonight
         </Text>
-        {/* visual-only for now — Log routing comes later */}
-        <Text style={{ fontFamily: fonts.bodyBold, fontSize: 11.5, color: accentColor }}>See all</Text>
+        {onAddNote ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Add note"
+            onPress={onAddNote}
+            hitSlop={8}
+            style={({ pressed }) => ({ opacity: pressed ? 0.55 : 1 })}>
+            <Text style={{ fontFamily: fonts.bodyBold, fontSize: 11.5, color: accentColor }}>Add note</Text>
+          </Pressable>
+        ) : (
+          <Text style={{ fontFamily: fonts.bodyBold, fontSize: 11.5, color: accentColor }}>See all</Text>
+        )}
       </View>
 
       {entries.length > 0 ? (

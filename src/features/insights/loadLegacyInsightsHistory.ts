@@ -7,12 +7,11 @@ import type { CareEvent } from '../logging/domain/types';
 /**
  * Adapt the production night history (legacy `LogEvent[]`, the only path with
  * real Supabase sync) into the `CareEvent[]` shape the Insights selectors expect,
- * via the existing, already-tested `LegacyLoggingMapper`. This is what makes
- * Insights (and the weekly recap) work in a default production build, where the
- * V2 logging flag is off and `loadInsightsHistory` returns [].
+ * via the existing, already-tested `LegacyLoggingMapper`. This remains useful
+ * for compatibility tests and any explicit legacy fixture migration.
  *
  * The 7-day windowing happens inside `buildInsightsViewModel`, so the full event
- * list is passed straight through (notes are dropped by the mapper).
+ * list is passed straight through. Notes map through; Insights ignores them.
  */
 export function loadLegacyInsightsHistory(events: LogEvent[]): CareEvent[] {
   return mapLegacyEvents(events);

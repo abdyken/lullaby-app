@@ -12,6 +12,7 @@ import {
   isBottleFeed,
   isBreastFeed,
   isDiaperEvent,
+  isNoteEvent,
   isPumpEvent,
   isSleepEvent,
   type BreastSide,
@@ -111,6 +112,11 @@ function historyLabel(event: CareEvent, now: number): string {
     const total = pumpTotalVolumeMl(event.details);
     if (total > 0) return `Pump · ${total} ml`;
     return `Pump · ${compactDurationLabel(sessionElapsedMs(event, now))}`;
+  }
+
+  if (isNoteEvent(event)) {
+    if (event.details.noteType === 'spit_up') return 'Spit-up';
+    return event.details.label ? `Note · ${event.details.label}` : 'Note';
   }
 
   return 'Logged';

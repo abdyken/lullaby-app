@@ -40,9 +40,9 @@ export type ReassureNightRecap = {
   window: NightWindow;
   feedCount: number;
   diaperCount: number;
-  /** notes whose meta.label is the Spit-up preset (see recap.ts) */
+  /** note events whose noteType is spit_up */
   spitUpCount: number;
-  /** notes that are not spit-ups */
+  /** note events that are not spit-ups */
   otherNoteCount: number;
   /** longest sleep intersecting the window, in whole minutes */
   longestSleepMin?: number;

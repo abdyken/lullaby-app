@@ -5,22 +5,19 @@
  * rephrase the read text — Pro-gated, with recapReadText as the instant,
  * always-available fallback.)
  *
- * Reads the legacy LogEvent model (the live default store). When the
- * logging-v2 flag flips on, a CareEvent selector will be needed here — v2 has
- * no 'note' type yet, so spit-up counting needs a v2 design first (tracked in
- * SUMMARY.md / plan §11).
+ * Reads canonical CareEvents. Legacy note rows are mapped into this shape by
+ * the logging compatibility layer before they reach Reassure.
  *
  * PURE LEAF: type-only imports from app modules (tsx smoke-runner rule).
  */
 
-import type { LogEvent } from '@/data/models';
+import type { CareEvent } from '@/features/logging/domain/types';
 import { nightWindowFor } from './nightWindow';
 import type { ReassureNightRecap } from './types';
 
 /**
- * The Note preset label that counts as a spit-up. The Tonight note sheet
- * imports this SAME constant for its chip (src/app/(tabs)/index.tsx), so the
- * writer and this counter can never drift — guarded by a smoke source-scan.
+ * UI label for the note preset. The recap itself counts canonical
+ * `details.noteType === 'spit_up'`, so tally logic never depends on this text.
  */
 export const SPITUP_NOTE_LABEL = 'Spit-up';
 
@@ -31,7 +28,11 @@ function inWindow(iso: string, startMs: number, endMs: number): boolean {
   return t >= startMs && t <= endMs;
 }
 
-export function buildReassureRecap(events: LogEvent[], now: number): ReassureNightRecap {
+function eventAnchor(event: CareEvent): string {
+  return event.startedAt ?? event.occurredAt;
+}
+
+export function buildReassureRecap(events: CareEvent[], now: number): ReassureNightRecap {
   const window = nightWindowFor(now);
   const { startMs, endMs } = window;
 
@@ -45,24 +46,24 @@ export function buildReassureRecap(events: LogEvent[], now: number): ReassureNig
   for (const event of events) {
     switch (event.type) {
       case 'feed':
-        if (inWindow(event.startAt, startMs, endMs)) feedCount += 1;
+        if (inWindow(eventAnchor(event), startMs, endMs)) feedCount += 1;
         break;
       case 'diaper':
-        if (inWindow(event.startAt, startMs, endMs)) diaperCount += 1;
+        if (inWindow(event.occurredAt, startMs, endMs)) diaperCount += 1;
         break;
       case 'note':
-        if (inWindow(event.startAt, startMs, endMs)) {
-          if (event.meta.label === SPITUP_NOTE_LABEL) spitUpCount += 1;
+        if (inWindow(event.occurredAt, startMs, endMs)) {
+          if (event.details.noteType === 'spit_up') spitUpCount += 1;
           else otherNoteCount += 1;
         }
         break;
       case 'sleep': {
         // Sleeps count when they OVERLAP the window (a sleep that began before
         // 18:00 but ran into the night still belongs to the night).
-        const sleepStart = Date.parse(event.startAt);
-        const sleepEnd = event.endAt == null ? endMs : Date.parse(event.endAt);
+        const sleepStart = Date.parse(event.startedAt ?? event.occurredAt);
+        const sleepEnd = event.endedAt == null ? endMs : Date.parse(event.endedAt);
         if (sleepStart <= endMs && sleepEnd >= startMs) {
-          if (event.endAt == null) sleepRunning = true;
+          if (event.status === 'active' && event.endedAt == null) sleepRunning = true;
           const overlapDuration = sleepEnd - sleepStart;
           if (overlapDuration > longestSleepMs) longestSleepMs = overlapDuration;
         }

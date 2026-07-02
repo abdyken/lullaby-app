@@ -21,18 +21,18 @@ import { FirstLogCoach, TonightCalibrating } from '@/components/FirstLogCoach';
 import { HandoffCard } from '@/components/HandoffCard';
 import { LogSheet, type SheetOption } from '@/components/LogSheet';
 import { SPITUP_NOTE_LABEL } from '@/features/reassure/domain/recap';
-import { isLoggingV2Enabled } from '@/features/logging';
 import { DiaperSheet } from '@/features/logging/diaper/DiaperSheet';
 import { FeedSheet } from '@/features/logging/feed/FeedSheet';
 import { PumpSheet } from '@/features/logging/pump/PumpSheet';
 import { SleepSheet } from '@/features/logging/sleep/SleepSheet';
+import { useLogging } from '@/features/logging/state/LoggingProvider';
 import { useV2TodayView } from '@/features/logging/state/useV2TodayView';
 import { OrbHero } from '@/components/OrbHero';
 import { QuickLogRow } from '@/components/QuickLogRow';
 import { Screen } from '@/components/Screen';
 import { TimelineCard } from '@/components/TimelineCard';
 import { TonightStatus } from '@/components/TonightStatus';
-import { buildHandoffSummary, buildQuickLogMeta, type PreviewState } from '@/data/currentState';
+import { buildHandoffSummary, type PreviewState } from '@/data/currentState';
 import { LOCAL_CURSOR_CONTEXT } from '@/data/handoffCursor';
 import type { Baby } from '@/data/models';
 import { useAnalytics } from '@/lib/useAnalytics';
@@ -70,8 +70,8 @@ function ageInWeeks(birthDate: string): number {
 /** Calm fallback while a Supabase baby row is briefly unavailable. */
 const FALLBACK_BABY: Baby = { ...seedBaby, name: 'Your baby' };
 
-/** Which detail sheet is open (null = none). Sleep never uses a sheet. */
-type SheetKind = 'feed' | 'diaper' | 'note' | 'pump';
+/** Which detail sheet is open (null = none). Core flows use their v2 sheets. */
+type SheetKind = 'note';
 
 type SheetConfig = {
   title: string;
@@ -84,32 +84,6 @@ type SheetConfig = {
 };
 
 const SHEETS: Record<SheetKind, SheetConfig> = {
-  feed: {
-    title: 'Log a feed',
-    subtitle: 'Just now',
-    options: [
-      { key: 'bottle', label: 'Bottle' },
-      { key: 'L', label: 'Left' },
-      { key: 'R', label: 'Right' },
-    ],
-    defaultKey: 'L',
-    saveLabel: 'Save feed',
-    accentColor: colors.feed,
-    accentTint: colors.feedTint,
-  },
-  diaper: {
-    title: 'Log a diaper',
-    subtitle: 'Just now',
-    options: [
-      { key: 'wet', label: 'Wet' },
-      { key: 'dirty', label: 'Dirty' },
-      { key: 'both', label: 'Mixed' },
-    ],
-    defaultKey: 'wet',
-    saveLabel: 'Save diaper',
-    accentColor: colors.diaper,
-    accentTint: colors.diaperTint,
-  },
   note: {
     title: 'Add a note',
     subtitle: 'Just now',
@@ -126,19 +100,6 @@ const SHEETS: Record<SheetKind, SheetConfig> = {
     accentColor: colors.sleep,
     accentTint: colors.sleepTint,
   },
-  pump: {
-    title: 'Log a pump',
-    subtitle: 'Just now',
-    options: [
-      { key: 'L', label: 'Left' },
-      { key: 'R', label: 'Right' },
-      { key: 'both', label: 'Both' },
-    ],
-    defaultKey: 'both',
-    saveLabel: 'Save pump',
-    accentColor: colors.pump,
-    accentTint: colors.pumpTint,
-  },
 };
 
 export default function TonightScreen() {
@@ -149,14 +110,9 @@ export default function TonightScreen() {
     tonightTimeline,
     syncMode,
     syncStatus,
-    handleSleepTap,
-    saveFeed,
-    saveDiaper,
-    saveNote,
-    savePump,
-    handlePrimaryAction,
     resetNonce,
   } = useLocalEvents();
+  const logging = useLogging();
   const { baby: activeBaby, caregivers: activeCaregivers, caregiver: ownCaregiver } = useAuth();
 
   // Identity comes from the active baby/caregiver the AuthProvider owns: the
@@ -210,18 +166,9 @@ export default function TonightScreen() {
   const { mode: surfaceMode, isTransitioning, toggleThemeFromPoint } = useTheme();
 
   const [sheet, setSheet] = useState<SheetKind | null>(null);
-  // Logging v2 Feed sheet (breast session + bottle). Behind the loggingV2 flag;
-  // the legacy LogSheet feed path stays the default while the flag is off.
-  const loggingV2 = isLoggingV2Enabled();
   const [feedV2Open, setFeedV2Open] = useState(false);
-  // Logging v2 Sleep sheet (start/stop active session). Behind the same flag; the
-  // legacy orb/Quick-Log sleep path (handleSleepTap) stays default while off.
   const [sleepV2Open, setSleepV2Open] = useState(false);
-  // Logging v2 Diaper sheet (instant two-tap log incl. "dry"). Behind the same
-  // flag; the legacy LogSheet diaper path stays default while off.
   const [diaperV2Open, setDiaperV2Open] = useState(false);
-  // Logging v2 Pump sheet (side + timer + optional volume draft). Behind the same
-  // flag; the legacy LogSheet pump path stays default while off.
   const [pumpV2Open, setPumpV2Open] = useState(false);
   // Account surface lives behind the baby header (blueprint settings home),
   // reachable in EVERY build — signed-in caregiver, "continue locally" guest, and
@@ -236,23 +183,20 @@ export default function TonightScreen() {
   const liveNow = useHomeNowMs();
   const displayNow = isTransitioning ? (frozenNow ?? liveNow) : liveNow;
 
-  // Feed / Diaper open a sheet (logging happens on Save); Sleep stays immediate.
-  // With loggingV2 on, Feed opens the new purpose-built FeedSheet instead.
+  // Core flows open the canonical v2 sheets. Logging happens inside each sheet's
+  // bound use-case; opening/dismissing a sheet never creates an event.
   const handleSelect = (kind: PreviewState) => {
     if (kind === 'sleep') {
-      if (loggingV2) setSleepV2Open(true);
-      else handleSleepTap();
+      setSleepV2Open(true);
       return;
     }
-    if (kind === 'feed' && loggingV2) {
+    if (kind === 'feed') {
       setFeedV2Open(true);
       return;
     }
-    if (kind === 'diaper' && loggingV2) {
+    if (kind === 'diaper') {
       setDiaperV2Open(true);
-      return;
     }
-    setSheet(kind);
   };
 
   const handleThemeToggle = (pageX?: number, pageY?: number) => {
@@ -264,38 +208,33 @@ export default function TonightScreen() {
 
   // Only Save creates the event + toast; dismissing the sheet logs nothing.
   const handleSheetSave = (key: string) => {
-    if (sheet === 'feed') saveFeed(key === 'bottle' ? {} : { side: key as 'L' | 'R' });
-    else if (sheet === 'diaper') saveDiaper({ kind: key as 'wet' | 'dirty' | 'both' });
-    else if (sheet === 'note') saveNote({ label: key });
-    else if (sheet === 'pump') savePump({ side: key as 'L' | 'R' | 'both' });
+    if (sheet === 'note') {
+      void logging.saveNote({
+        label: key,
+        noteType: key === SPITUP_NOTE_LABEL ? 'spit_up' : 'general',
+      });
+    }
     setSheet(null);
   };
 
-  // Descriptive secondary lines for the quick-log cards, derived from live events.
-  // Uses the frozen clock so labels don't shift during a theme transition.
-  const quickLogMeta = buildQuickLogMeta(events, displayNow);
-
-  // Logging v2 — the Today view read from the v2 store (orb, timeline, quick-log
-  // cards, status strip). Null when the flag is off, so the legacy useLocalEvents
-  // values below are used unchanged (the production path is byte-for-byte the
-  // same). When on, the Sleep Hero, the Sleep card, and the Sleep sheet all act on
-  // the SAME v2 session — the single source of truth for Sleep (plan Phase 6.5).
+  // Today view from the canonical logging store. Startup waits for hydration in
+  // the tab layout; the legacy fallback only protects against impossible partial
+  // renders during development.
   const v2View = useV2TodayView({ now: displayNow, caregivers });
-  const waitingForV2Hydration = loggingV2 && v2View === null;
-  const v2 = loggingV2 ? v2View : null;
+  const waitingForV2Hydration = v2View === null;
+  const v2 = v2View;
   const heroOrb = v2 ? v2.orb : orb;
   const heroActiveTile = v2 ? v2.activeTile : activeTile;
-  const heroPrimaryAction = v2 ? v2.onPrimaryAction : handlePrimaryAction;
+  const heroPrimaryAction = v2 ? v2.onPrimaryAction : undefined;
   const timelineEntries = v2 ? v2.timeline : tonightTimeline;
-  const cardMeta = v2 ? v2.quickLogMeta : quickLogMeta;
+  const cardMeta = v2?.quickLogMeta ?? { feed: 'Tap to log', sleep: 'Awake · no sleep yet', diaper: 'Tap to log', pump: 'Log pump' };
   // TonightStatus derives from `events` when no items are passed (legacy path).
   const statusItems = v2 ? v2.tonightStatus : undefined;
 
-  // "Has the parent logged anything real yet?" — read from the flag-correct store
-  // (the v2 timeline when loggingV2 is on, else the legacy events). Drives the
-  // brand-new-night Calibrating line + first-log coach. The app-shell startup gate
-  // holds the tab navigator until v2 hydration is ready, so the first tab paint is
-  // the real Home screen instead of a tab shell wrapped around a loader.
+  // "Has the parent logged anything real yet?" — read from the canonical Today
+  // timeline. The app-shell startup gate holds the tab navigator until logging
+  // hydration is ready, so the first tab paint is the real Home screen instead of
+  // a tab shell wrapped around a loader.
   const hasRealEvents = v2 ? v2.timeline.length > 0 : events.length > 0;
 
   // The screen body is parameterised by the committed surface mode so all child
@@ -352,14 +291,14 @@ export default function TonightScreen() {
         <QuickLogRow
           selected={heroActiveTile}
           onSelect={handleSelect}
-          onPump={() => (loggingV2 ? setPumpV2Open(true) : setSheet('pump'))}
+          onPump={() => setPumpV2Open(true)}
           meta={cardMeta}
           surfaceMode={bodyMode}
         />
       </View>
 
       <View style={{ marginTop: 13 }}>
-        <TimelineCard entries={timelineEntries} surfaceMode={bodyMode} />
+        <TimelineCard entries={timelineEntries} surfaceMode={bodyMode} onAddNote={() => setSheet('note')} />
       </View>
 
       {/* P0 partner/handoff card — local-only, below the timeline so it never

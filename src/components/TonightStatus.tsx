@@ -20,7 +20,7 @@ type Props = {
   /** Frozen clock — passed so the "X ago" values don't shift mid theme-reveal. */
   now?: number;
   /**
-   * Precomputed status columns. When provided (e.g. the loggingV2 path), these
+   * Precomputed status columns. When provided by the canonical logging path, these
    * are rendered instead of deriving from `events`, so the strip can read the v2
    * store. Omitted → derived from `events` exactly as before.
    */

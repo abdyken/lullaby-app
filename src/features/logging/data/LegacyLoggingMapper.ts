@@ -2,9 +2,8 @@
  * Logging v2 — legacy mapper (plan §2.4, §13 PR1 "legacy mapper skeleton").
  *
  * Bridges the existing flat `LogEvent` (src/data/models.ts) to the new
- * discriminated `CareEvent` so the v2 timeline can READ existing data before any
- * row is rewritten (plan §2.4 order: define old format → mapper → test on a copy
- * → switch timeline reads → only then stop writing the old format). It is
+ * discriminated `CareEvent` so the canonical timeline can READ existing data
+ * before any row is rewritten. It is
  * deliberately non-destructive: old rows stay valid; mapping is lossy only where
  * the old model never captured the field (see notes per type).
  *
@@ -21,9 +20,14 @@ import type {
   CareEventBase,
   DiaperEvent,
   DiaperKind,
+  NoteEvent,
+  NoteType,
   PumpEvent,
   SleepEvent,
 } from '../domain/types';
+
+/** Legacy note preset copied into old rows. New recap code counts `noteType`, not this label. */
+const LEGACY_SPITUP_NOTE_LABEL = 'Spit-up';
 
 /** Options for resolving fields the legacy model never stored. */
 export interface LegacyMapOptions {
@@ -54,7 +58,7 @@ function mapBase(event: LogEvent, familyId: string): CareEventBase {
     familyId,
     childId: event.babyId,
     createdByUserId: event.caregiverId,
-    type: event.type === 'note' ? 'feed' : event.type, // note never reaches here (guarded below)
+    type: event.type,
     status: 'completed',
     occurredAt: event.startAt,
     startedAt: null,
@@ -157,16 +161,34 @@ function mapPump(event: LogEvent, base: CareEventBase): PumpEvent {
   };
 }
 
+function noteTypeFromLegacyMeta(meta: LogEventMeta | undefined): NoteType {
+  return meta?.label === LEGACY_SPITUP_NOTE_LABEL ? 'spit_up' : 'general';
+}
+
+function mapNote(event: LogEvent, base: CareEventBase): NoteEvent {
+  const label = event.meta?.label;
+  const note = event.meta?.note;
+  return {
+    ...base,
+    type: 'note',
+    childId: event.babyId,
+    status: 'completed',
+    details: {
+      noteType: noteTypeFromLegacyMeta(event.meta),
+      ...(label ? { label } : {}),
+      ...(note ? { note } : {}),
+    },
+  };
+}
+
 /**
- * Convert one legacy `LogEvent` to a `CareEvent`, or `null` for `note` events,
- * which are out of scope for the four core flows and stay on the legacy model.
+ * Convert one legacy `LogEvent` to a canonical `CareEvent`. Legacy note rows are
+ * preserved as note events, with the old Spit-up preset mapped to `noteType`.
  */
 export function legacyEventToCareEvent(
   event: LogEvent,
   options: LegacyMapOptions = {},
-): CareEvent | null {
-  if (event.type === 'note') return null;
-
+): CareEvent {
   const familyId = options.resolveFamilyId?.(event.babyId) ?? event.babyId;
   const base = mapBase(event, familyId);
 
@@ -179,16 +201,16 @@ export function legacyEventToCareEvent(
       return mapDiaper(event, base);
     case 'pump':
       return mapPump(event, base);
+    case 'note':
+      return mapNote(event, base);
     default:
-      return null;
+      return mapNote(event, base);
   }
 }
 
-/** Map a list of legacy events, dropping the ones (notes) that have no v2 equivalent. */
+/** Map a list of legacy events into canonical events, preserving stable ids. */
 export function mapLegacyEvents(events: LogEvent[], options: LegacyMapOptions = {}): CareEvent[] {
-  return events
-    .map((event) => legacyEventToCareEvent(event, options))
-    .filter((event): event is CareEvent => event !== null);
+  return events.map((event) => legacyEventToCareEvent(event, options));
 }
 
 /* --------------------------- reverse (skeleton) --------------------------- */
@@ -215,6 +237,11 @@ export function careEventToLegacyEvent(event: CareEvent): LogEvent {
   } else if (event.type === 'pump') {
     if (event.details.side === 'left') meta.side = 'L';
     else if (event.details.side === 'right') meta.side = 'R';
+  } else if (event.type === 'note') {
+    meta.label =
+      event.details.label ??
+      (event.details.noteType === 'spit_up' ? LEGACY_SPITUP_NOTE_LABEL : undefined);
+    meta.note = event.details.note;
   }
 
   return {
