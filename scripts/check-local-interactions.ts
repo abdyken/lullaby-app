@@ -6621,6 +6621,113 @@ check('PC7. local storage parse handles empty/corrupt values calmly', () => {
   assert.ok(hasDialablePhone('+1 555'));
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// RE. Release env hygiene — .env.example safe beta defaults (docs/release-env.md)
+//
+// Beta posture: Pro is OFF unless a build explicitly enables it AND provides
+// real RevenueCat keys. These checks pin the example env file to safe-by-default
+// values, keep server secrets out of it, and re-assert that "enabled with
+// missing keys" resolves to the unconfigured state rather than a live paywall.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ENV_EXAMPLE_SRC = readFileSync(new URL('../.env.example', import.meta.url), 'utf8');
+
+/** The value of `NAME=value` in .env.example, or null when the line is absent. */
+function envExampleValue(name: string): string | null {
+  const match = ENV_EXAMPLE_SRC.match(new RegExp(`^${name}=(.*)$`, 'm'));
+  return match ? match[1].trim() : null;
+}
+
+check('RE1. .env.example documents the full EXPO_PUBLIC env surface', () => {
+  const required = [
+    'EXPO_PUBLIC_SUPABASE_URL',
+    'EXPO_PUBLIC_SUPABASE_ANON_KEY',
+    'EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID',
+    'EXPO_PUBLIC_FORCE_ONBOARDING',
+    'EXPO_PUBLIC_PRO_ENABLED',
+    'EXPO_PUBLIC_PRO_PREVIEW_ENABLED',
+    'EXPO_PUBLIC_PRO_DEV_ENTITLEMENT',
+    'EXPO_PUBLIC_REVENUECAT_IOS_API_KEY',
+    'EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY',
+    'EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID',
+    'EXPO_PUBLIC_REVENUECAT_OFFERING_ID',
+    'EXPO_PUBLIC_THEME_REVEAL_DURATION_MS',
+    'EXPO_PUBLIC_APP_INSTALL_URL',
+  ];
+  for (const name of required) {
+    assert.ok(envExampleValue(name) !== null, `.env.example must document ${name}=`);
+  }
+});
+
+check('RE2. .env.example ships safe beta defaults: onboarding + all Pro flags off', () => {
+  assert.equal(envExampleValue('EXPO_PUBLIC_FORCE_ONBOARDING'), 'false');
+  assert.equal(envExampleValue('EXPO_PUBLIC_PRO_ENABLED'), '0');
+  assert.equal(envExampleValue('EXPO_PUBLIC_PRO_PREVIEW_ENABLED'), '0');
+  assert.equal(envExampleValue('EXPO_PUBLIC_PRO_DEV_ENTITLEMENT'), '0');
+});
+
+check('RE3. .env.example keeps RevenueCat keys empty and ids on the code defaults', () => {
+  assert.equal(envExampleValue('EXPO_PUBLIC_REVENUECAT_IOS_API_KEY'), '');
+  assert.equal(envExampleValue('EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY'), '');
+  assert.ok(!/appl_[A-Za-z0-9]/.test(ENV_EXAMPLE_SRC), 'no real iOS SDK key in the example');
+  assert.ok(!/goog_[A-Za-z0-9]/.test(ENV_EXAMPLE_SRC), 'no real Android SDK key in the example');
+  assert.equal(envExampleValue('EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID'), 'pro');
+  assert.equal(envExampleValue('EXPO_PUBLIC_REVENUECAT_OFFERING_ID'), 'default');
+});
+
+check('RE4. .env.example never assigns a server secret (comments may name them)', () => {
+  for (const secret of [
+    'ANTHROPIC_API_KEY',
+    'REASSURE_MODEL',
+    'REASSURE_NIGHT_READ_ENABLED',
+    'SUPABASE_SERVICE_ROLE_KEY',
+  ]) {
+    const assigned = new RegExp(`^\\s*(EXPO_PUBLIC_)?${secret}\\s*=`, 'm');
+    assert.ok(!assigned.test(ENV_EXAMPLE_SRC), `${secret} must never be assigned in .env.example`);
+  }
+});
+
+check('RE5. Pro enabled with missing RevenueCat keys is the unconfigured state, not beta-ready', () => {
+  withEnv(
+    {
+      EXPO_PUBLIC_PRO_ENABLED: '1',
+      EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: undefined,
+      EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY: undefined,
+    },
+    () => {
+      assert.equal(getProMode(), 'enabled');
+      assert.equal(getRevenueCatApiKey('ios'), null);
+      assert.equal(getRevenueCatApiKey('android'), null);
+      assert.equal(hasRevenueCatConfig('ios'), false);
+      assert.equal(hasRevenueCatConfig('android'), false);
+    },
+  );
+  // Whitespace-only keys count as missing too (trimmedEnv).
+  withEnv({ EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: '   ' }, () =>
+    assert.equal(getRevenueCatApiKey('ios'), null),
+  );
+  // ProProvider maps the missing-config case to the 'unconfigured' paywall status.
+  assert.ok(
+    /!hasRevenueCatConfig\(platform\)\s*\?\s*'unconfigured'/.test(PRO_PROVIDER_SRC),
+    "ProProvider resolves missing RevenueCat config to paywallStatus 'unconfigured'",
+  );
+});
+
+check('RE6. dev entitlement stays __DEV__-gated through resolveDevProEntitlement', () => {
+  withEnv({ EXPO_PUBLIC_PRO_DEV_ENTITLEMENT: '1' }, () => {
+    assert.equal(resolveDevProEntitlement(true), true);
+    assert.equal(resolveDevProEntitlement(false), false, 'a shipped build always ignores the override');
+  });
+  assert.ok(
+    PRO_CONFIG_SRC.includes('return isDev && isProDevEntitlementEnabled();'),
+    'proConfig keeps the isDev && flag shape',
+  );
+  assert.ok(
+    PRO_PROVIDER_SRC.includes('resolveDevProEntitlement(__DEV__)'),
+    'ProProvider passes the real __DEV__',
+  );
+});
+
 runAsyncChecks()
   .then(() => {
     console.log(`\nAll ${passed} checks passed ✅`);
