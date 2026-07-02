@@ -244,6 +244,7 @@ import {
   canAddExtraCaregivers,
   canExportWeeklyRecap,
   canSharePediatricianSummary,
+  canUseLlmNightRead,
   canViewFullHistory,
 } from '../src/lib/proGates';
 // Pro Phase 3 — the PURE weekly-export text builder (imports only a type, so it is
@@ -5223,8 +5224,63 @@ check('X11. sleeps overlapping the window count; a running sleep is flagged', ()
   assert.equal(running.isEmpty, false);
 });
 
+// Shared AI-layer modules (Deno-side, import-free by design so Node can
+// require() them) — the smoke runner exercises the ACTUAL values and guardrail
+// both edge functions deploy with. Same pattern as the §X17 content mirror.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const RX_LLM = require('../supabase/functions/_shared/reassureLlm') as {
+  REASSURE_DEFAULT_MODEL: string;
+  REASSURE_TEMPERATURE: number;
+  LLM_TIMEOUT_MS: number;
+  LLM_MAX_RETRIES: number;
+  NIGHT_READ_MAX_TOKENS: number;
+  TOPIC_POLISH_MAX_TOKENS: number;
+  NIGHT_READ_MAX_CHARS: number;
+  TOPIC_POLISH_MAX_CHARS: number;
+  JUDGEMENT_VOCAB: readonly string[];
+  judgementVocabRegex: () => RegExp;
+  validateLlmOutput: (
+    raw: string,
+    key: string,
+    opts: { maxChars: number; sourceText?: string },
+  ) => { ok: true; value: string } | { ok: false; reason: 'parse' | 'length' | 'vocab' };
+  classifyLlmError: (error: unknown) => 'timeout' | 'api_error';
+};
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const RX_AUDIT = require('../supabase/functions/_shared/reassureAudit') as {
+  AUDIT_PARENT_TEXT_MAX_CHARS: number;
+  minimizeParentTextForAudit: (text: string) => { preview: string; length: number };
+  usageOf: (response: unknown) => Record<string, unknown>;
+};
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const RX_CORE = require('../supabase/functions/reassure-night-read/nightReadCore') as {
+  SPITUP_NOTE_LABEL: string;
+  windowFor: (
+    nightKey: string,
+    tzOffsetMinutes: number,
+    nowMs: number,
+  ) => { startMs: number; endMs: number };
+  computeTallies: (
+    rows: unknown[],
+    startMs: number,
+    endMs: number,
+  ) => {
+    feeds: number;
+    diapers: number;
+    spitUps: number;
+    longestSleepMin: number | null;
+    sleepRunning: boolean;
+  };
+  ageBandFromBirthDate: (birthDate: string | null, nowMs: number) => string;
+  buildPromptFacts: (tallies: unknown, ageBand: string) => string;
+};
+
 check('X12. recapReadText stays strictly descriptive — no judgement vocabulary', () => {
-  const banned = /\b(normal|abnormal|healthy|fine|typical|okay|ok)\b/i;
+  // The register guard now lives in the SHARED vocabulary the edge functions'
+  // output guardrail uses — one list for local copy and LLM output alike.
+  for (const word of ['normal', 'abnormal', 'healthy', 'fine', 'typical', 'okay', 'ok']) {
+    assert.ok(RX_LLM.JUDGEMENT_VOCAB.includes(word), `shared vocab covers "${word}"`);
+  }
   const samples = [
     buildReassureRecap([], RX_NOW),
     buildReassureRecap(
@@ -5242,7 +5298,8 @@ check('X12. recapReadText stays strictly descriptive — no judgement vocabulary
   for (const recap of samples) {
     const text = recapReadText(recap);
     assert.ok(text.length > 0, 'read text is non-empty');
-    assert.ok(!banned.test(text), `descriptive register only, got: "${text}"`);
+    // fresh regex per sample — the shared regex carries the 'g' flag
+    assert.ok(!RX_LLM.judgementVocabRegex().test(text), `descriptive register only, got: "${text}"`);
   }
 });
 
@@ -5337,6 +5394,250 @@ check('X17. the edge-function content mirror has not drifted from the app module
     normalizeAsk("She WON’T wake"),
     'normalization identical on both sides',
   );
+});
+
+// ---------------------------------------------------------------------------
+// §X (cont.) — the Reassure AI layer (docs/reassure-ai-layer-spec.md).
+// X18–X23: the shared output guardrail, the night-read core, pinned model
+// config, code-decides-before-model source order, the client contract, and
+// audit privacy. The LLM itself is never called here — everything around it
+// is exercised for real, and the call site's structure is source-scanned.
+// ---------------------------------------------------------------------------
+
+const RX_EDGE_SRCS: Record<string, string> = Object.fromEntries(
+  ['reassure-night-read', 'reassure-topic-polish'].map((fn) => [
+    fn,
+    readFileSync(new URL(`../supabase/functions/${fn}/index.ts`, import.meta.url), 'utf8'),
+  ]),
+);
+
+check('X18. shared output guardrail: parse → length cap → judgement-vocab gate', () => {
+  // Happy path: valid JSON, bounded, descriptive → the read passes through.
+  assert.deepEqual(
+    RX_LLM.validateLlmOutput(
+      JSON.stringify({ read: 'You logged 3 feeds and 2 diaper changes. Longest sleep was 90 minutes.' }),
+      'read',
+      { maxChars: RX_LLM.NIGHT_READ_MAX_CHARS },
+    ),
+    { ok: true, value: 'You logged 3 feeds and 2 diaper changes. Longest sleep was 90 minutes.' },
+  );
+  // Parse failures → fallback: prose, truncation, wrong key/type, blank.
+  for (const bad of ['not json at all', '{"read": 42}', '{"other": "text"}', '{"read": "  "}', '{"read":']) {
+    const verdict = RX_LLM.validateLlmOutput(bad, 'read', { maxChars: 360 });
+    assert.ok(!verdict.ok && verdict.reason === 'parse', `parse-fails: ${bad}`);
+  }
+  // Runaway output is capped.
+  const runaway = RX_LLM.validateLlmOutput(JSON.stringify({ read: 'a'.repeat(400) }), 'read', {
+    maxChars: 360,
+  });
+  assert.ok(!runaway.ok && runaway.reason === 'length', 'over-length output is discarded');
+  // Judgement vocabulary the model introduces is a blocked medical claim —
+  // the night read has no source text, so ANY judgement word trips it.
+  for (const text of [
+    'That is a totally normal night.',
+    'Nothing concerning here at all.',
+    'Baby seems fine and healthy tonight.',
+  ]) {
+    const verdict = RX_LLM.validateLlmOutput(JSON.stringify({ read: text }), 'read', {
+      maxChars: 360,
+    });
+    assert.ok(!verdict.ok && verdict.reason === 'vocab', `vocab-blocks: ${text}`);
+  }
+  // …but vocabulary already present in the clinician-owned KB line is NOT a
+  // new claim (topic polish rephrases lines that legitimately say "normal").
+  const sourceLine = KB.hiccups.line;
+  assert.ok(/\bnormal\b/i.test(sourceLine), 'fixture: the hiccups line itself says "normal"');
+  const rephrase = RX_LLM.validateLlmOutput(
+    JSON.stringify({ line: 'Little hiccups are a normal newborn reflex — very common.' }),
+    'line',
+    { maxChars: 300, sourceText: sourceLine },
+  );
+  assert.ok(rephrase.ok, 'source-present vocab passes the semantic-preservation check');
+  const smuggled = RX_LLM.validateLlmOutput(
+    JSON.stringify({ line: 'Hiccups are normal and totally safe.' }),
+    'line',
+    { maxChars: 300, sourceText: sourceLine },
+  );
+  assert.ok(
+    !smuggled.ok && smuggled.reason === 'vocab',
+    'introduced vocab ("safe") is blocked even alongside sourced words',
+  );
+  // Thrown SDK errors classify into distinct audit outcomes.
+  assert.equal(
+    RX_LLM.classifyLlmError({ name: 'APIConnectionTimeoutError', message: 'Request timed out.' }),
+    'timeout',
+  );
+  assert.equal(RX_LLM.classifyLlmError(new Error('overloaded_error')), 'api_error');
+});
+
+check('X19. night-read core: tallies → prompt facts, computed in code, red-flag-clean', () => {
+  const now = Date.UTC(2026, 5, 30, 2, 0); // 2am UTC, tz offset 0
+  const { startMs, endMs } = RX_CORE.windowFor('2026-06-29', 0, now);
+  assert.equal(startMs, Date.UTC(2026, 5, 29, 18, 0), 'window opens at local 18:00');
+  assert.equal(endMs, now, 'a live window is clamped to now');
+
+  const iso = (h: number, day = 29) => new Date(Date.UTC(2026, 5, day, h, 0)).toISOString();
+  const tallies = RX_CORE.computeTallies(
+    [
+      { type: 'feed', start_at: iso(20), end_at: null, meta: null },
+      { type: 'feed', start_at: iso(23), end_at: null, meta: null },
+      { type: 'feed', start_at: iso(12), end_at: null, meta: null }, // before the window
+      { type: 'diaper', start_at: iso(22), end_at: null, meta: null },
+      { type: 'note', start_at: iso(21), end_at: null, meta: { label: RX_CORE.SPITUP_NOTE_LABEL } },
+      { type: 'note', start_at: iso(21), end_at: null, meta: { label: 'Fussy' } },
+      { type: 'sleep', start_at: iso(17), end_at: iso(19), meta: null }, // overlaps the open
+    ],
+    startMs,
+    endMs,
+  );
+  assert.deepEqual(tallies, {
+    feeds: 2,
+    diapers: 1,
+    spitUps: 1,
+    longestSleepMin: 120,
+    sleepRunning: false,
+  });
+
+  const facts = RX_CORE.buildPromptFacts(tallies, RX_CORE.ageBandFromBirthDate('2026-06-10', now));
+  assert.ok(facts.includes('Age band: 0-4 weeks.'), 'coarse age band only — no birth date');
+  assert.ok(facts.includes('Feeds logged: 2.'));
+  assert.ok(facts.includes('Longest sleep logged: 120 minutes.'));
+  // Belt-and-suspenders invariant: pure-tally prompts never trip triage.
+  assert.ok(!matchesRedFlag(normalizeAsk(facts)), 'prompt facts are red-flag-clean');
+  // …and the guardrail's vocab gate would pass them straight through.
+  assert.ok(!RX_LLM.judgementVocabRegex().test(facts), 'prompt facts carry no judgement vocab');
+
+  const running = RX_CORE.computeTallies(
+    [{ type: 'sleep', start_at: iso(23), end_at: null, meta: null }],
+    startMs,
+    endMs,
+  );
+  assert.equal(running.sleepRunning, true);
+  assert.ok(RX_CORE.buildPromptFacts(running, 'unknown age').includes('A sleep is currently running.'));
+});
+
+check('X20. LLM config pinned: Haiku default, temp 0.3, per-job caps, 8s, 0 retries', () => {
+  assert.equal(RX_LLM.REASSURE_DEFAULT_MODEL, 'claude-haiku-4-5-20251001');
+  assert.equal(RX_LLM.REASSURE_TEMPERATURE, 0.3);
+  assert.equal(RX_LLM.LLM_TIMEOUT_MS, 8_000);
+  assert.equal(RX_LLM.LLM_MAX_RETRIES, 0);
+  assert.ok(RX_LLM.NIGHT_READ_MAX_TOKENS <= 200, 'night read caps at ≤ 200 output tokens');
+  assert.ok(RX_LLM.TOPIC_POLISH_MAX_TOKENS <= 120, 'topic polish caps at ≤ 120 output tokens');
+  assert.ok(RX_LLM.NIGHT_READ_MAX_CHARS <= 400 && RX_LLM.TOPIC_POLISH_MAX_CHARS <= 400);
+  // Both functions must consume the shared config — local literals drift.
+  for (const [name, src] of Object.entries(RX_EDGE_SRCS)) {
+    assert.ok(src.includes("from '../_shared/reassureLlm.ts'"), `${name} imports the shared LLM config`);
+    assert.ok(src.includes('?? REASSURE_DEFAULT_MODEL'), `${name} defaults REASSURE_MODEL to the shared constant`);
+    assert.ok(src.includes('temperature: REASSURE_TEMPERATURE'), `${name} sets the shared temperature`);
+    assert.ok(src.includes('maxRetries: LLM_MAX_RETRIES'), `${name} disables retries`);
+    assert.ok(src.includes('{ timeout: LLM_TIMEOUT_MS }'), `${name} sets the 8s server-side timeout`);
+    assert.ok(src.includes("stop_reason === 'refusal'"), `${name} handles the refusal stop reason`);
+    assert.ok(!/max_tokens:\s*\d/.test(src), `${name} has no hard-coded max_tokens literal`);
+  }
+  assert.ok(RX_EDGE_SRCS['reassure-night-read'].includes('max_tokens: NIGHT_READ_MAX_TOKENS'));
+  assert.ok(RX_EDGE_SRCS['reassure-topic-polish'].includes('max_tokens: TOPIC_POLISH_MAX_TOKENS'));
+});
+
+check('X21. edge source order: code decides BEFORE the model; audits via the shared writer', () => {
+  const night = RX_EDGE_SRCS['reassure-night-read'];
+  const nightModelIx = night.indexOf('anthropic.messages.create');
+  assert.ok(nightModelIx > -1, 'night read calls the model');
+  assert.ok(
+    night.indexOf("from('reassure_night_reads')") < nightModelIx,
+    'cache lookup precedes the model call — the PK is the once-per-night rate limit',
+  );
+  // call sites, not the import lines at the top of the file
+  assert.ok(night.indexOf('computeTallies((') < nightModelIx, 'tallies are computed in code first');
+  assert.ok(
+    night.indexOf('matchesRedFlag(normalizeAsk(') > -1 &&
+      night.indexOf('matchesRedFlag(normalizeAsk(') < nightModelIx,
+    'the red-flag scan precedes the model',
+  );
+  assert.ok(nightModelIx < night.indexOf('validateLlmOutput(block'), 'the output guardrail follows the call');
+
+  const polish = RX_EDGE_SRCS['reassure-topic-polish'];
+  const polishModelIx = polish.indexOf('anthropic.messages.create');
+  assert.ok(polishModelIx > -1, 'topic polish calls the model');
+  assert.ok(
+    polish.indexOf('matchesRedFlag(normalizeAsk(') > -1 &&
+      polish.indexOf('matchesRedFlag(normalizeAsk(') < polishModelIx,
+    'triage scan precedes the model',
+  );
+  assert.ok(polish.indexOf("kind: 'triage'") < polishModelIx, 'red flag → triage, NO model call');
+  assert.ok(polish.indexOf("kind: 'oos'") < polishModelIx, 'unknown topic → oos, NO model call');
+  assert.ok(
+    polish.indexOf('let line = topic.line') < polishModelIx,
+    'the verbatim KB line is pre-seeded — refusal/parse/guardrail failures return it unchanged',
+  );
+  assert.ok(polish.includes('sourceText: topic.line'), 'the guardrail exempts only KB-sourced vocab');
+
+  for (const [name, src] of Object.entries(RX_EDGE_SRCS)) {
+    assert.ok(src.includes('insertReassureAudit'), `${name} audits via the shared writer`);
+    assert.ok(!src.includes("from('reassure_audit')"), `${name} never hand-rolls the audit insert`);
+    assert.ok(src.includes("'fallback'"), `${name} falls back deterministically`);
+  }
+});
+
+check('X22. client contract: local read first, 3s ceiling, Pro-gated; topic polish stays DARK', () => {
+  // Non-Pro users render the local read — the gate is pure and closed.
+  assert.equal(canUseLlmNightRead(false), false);
+  assert.equal(canUseLlmNightRead(true), true);
+  const hookSrc = readFileSync(
+    new URL('../src/features/reassure/application/nightRead.ts', import.meta.url),
+    'utf8',
+  );
+  assert.ok(hookSrc.includes('FETCH_TIMEOUT_MS = 3_000'), 'hard 3s client ceiling');
+  assert.ok(hookSrc.includes('Promise.race'), 'the LLM read races the ceiling — UI never blocks');
+  assert.ok(hookSrc.includes('canUseLlmNightRead(isPro)'), 'the LLM read is Pro-gated');
+  const cardSrc = readFileSync(
+    new URL('../src/features/reassure/components/RecapCard.tsx', import.meta.url),
+    'utf8',
+  );
+  assert.ok(
+    cardSrc.includes('readOverride ?? recapReadText(recap)'),
+    'the local descriptive read always renders first; the LLM read only replaces it',
+  );
+  // Topic polish must stay unwired until consent + clinician sign-off land
+  // (manifest #10/#13): no client file may reference the function.
+  const srcRoot = new URL('../src/', import.meta.url);
+  const offenders = (readdirSync(srcRoot, { recursive: true, encoding: 'utf8' }) as string[])
+    .filter((rel) => /\.(ts|tsx)$/.test(rel))
+    .filter((rel) => readFileSync(new URL(rel, srcRoot), 'utf8').includes('reassure-topic-polish'));
+  assert.deepEqual(offenders, [], 'no src/ file references reassure-topic-polish (gated dark)');
+});
+
+check('X23. audit privacy: minimized parent text, token usage, retention TTL, zero policies', () => {
+  // §6 — the Job 2 audit stores a short preview + length, never the raw text.
+  const long =
+    'my baby hiccups after every feed and I am worried sick about it, should I do something tonight?';
+  const minimized = RX_AUDIT.minimizeParentTextForAudit(long);
+  assert.equal(minimized.preview.length, RX_AUDIT.AUDIT_PARENT_TEXT_MAX_CHARS);
+  assert.equal(minimized.length, long.length);
+  assert.ok(RX_AUDIT.AUDIT_PARENT_TEXT_MAX_CHARS < 280, 'preview is shorter than accepted input');
+  assert.ok(
+    RX_EDGE_SRCS['reassure-topic-polish'].includes('parentText: minimizeParentTextForAudit(parentText)'),
+    'the topic-polish audit request minimizes the raw text',
+  );
+  // §8 — token usage is captured on every model call, for both jobs.
+  assert.deepEqual(RX_AUDIT.usageOf({ usage: { input_tokens: 5, output_tokens: 7 } }), {
+    input_tokens: 5,
+    output_tokens: 7,
+  });
+  assert.deepEqual(RX_AUDIT.usageOf({}), {}, 'missing usage degrades to an empty block');
+  for (const [name, src] of Object.entries(RX_EDGE_SRCS)) {
+    assert.ok(src.includes('usageOf(response)'), `${name} records token usage`);
+  }
+  // Migration: service-role only, TTL defined, and the audit columns exist.
+  const auditSql = readFileSync(
+    new URL('../supabase/migrations/20260702090002_create_reassure_audit.sql', import.meta.url),
+    'utf8',
+  );
+  assert.ok(!auditSql.includes('create policy'), 'reassure_audit has ZERO client policies');
+  assert.ok(auditSql.includes('enable row level security'), 'RLS enabled (deny-all for clients)');
+  for (const col of ['outcome', 'usage', 'expires_at']) {
+    assert.ok(new RegExp(`^\\s{2}${col}\\s`, 'm').test(auditSql), `reassure_audit has "${col}"`);
+  }
+  assert.ok(auditSql.includes("interval '90 days'"), 'the retention TTL is defined');
 });
 
 runAsyncChecks()
