@@ -5361,13 +5361,46 @@ check('X3. triage overrides topic — red flag + topic trigger in one ask', () =
   assert.deepEqual(route('a little vomit after a feed'), { kind: 'topic', key: 'spitup' });
 });
 
-check('X4. all six demo chips route to their expected outcome', () => {
+check('X4. every demo chip routes to its expected outcome', () => {
   assert.deepEqual(route('She hiccups after every feed'), { kind: 'topic', key: 'hiccups' });
   assert.deepEqual(route('A little spit-up after feeding'), { kind: 'topic', key: 'spitup' });
   assert.deepEqual(route('Lots of grunting and squirming'), { kind: 'topic', key: 'gas' });
-  assert.deepEqual(route("She won't settle at all"), { kind: 'topic', key: 'sleep' });
+  // Crying & settling now owns "won't stop crying" and "won't settle".
+  assert.deepEqual(route("She won't stop crying"), { kind: 'topic', key: 'crying' });
+  assert.deepEqual(route("She won't settle at all"), { kind: 'topic', key: 'crying' });
   assert.deepEqual(route('She feels really hot'), { kind: 'triage' });
   assert.deepEqual(route("She's hard to wake"), { kind: 'triage' });
+  // Every chip in the fixture routes to a bounded outcome (never throws/empty).
+  for (const chip of EXAMPLE_CHIPS) {
+    const result = route(chip.ask);
+    assert.ok(['topic', 'triage', 'oos'].includes(result.kind), `chip "${chip.label}" is bounded`);
+    if (chip.flagged) assert.deepEqual(result, { kind: 'triage' }, `flagged chip "${chip.label}" triages`);
+  }
+});
+
+check('X4b. crying / fussy / settling asks route to the bounded crying topic', () => {
+  for (const ask of [
+    "she's crying, is this okay",
+    'she is crying',
+    'baby is crying',
+    "she won't stop crying",
+    'crying at night',
+    'fussy tonight',
+    'very fussy',
+    'upset and crying',
+    'screaming',
+    "won't settle",
+    "can't soothe her",
+  ]) {
+    assert.deepEqual(route(ask), { kind: 'topic', key: 'crying' }, `"${ask}" → crying`);
+  }
+  // Red flags STILL override the crying topic — triage always wins.
+  assert.deepEqual(route('crying and hard to wake'), { kind: 'triage' });
+  assert.deepEqual(route('crying and trouble breathing'), { kind: 'triage' });
+  assert.deepEqual(route('crying and feels hot'), { kind: 'triage' });
+  assert.deepEqual(route('crying and blue lips'), { kind: 'triage' });
+  // Truly unrelated asks still get the bounded decline.
+  assert.deepEqual(route('which stroller should I buy'), { kind: 'oos' });
 });
 
 check('X5. every KB topic is routable by its own title and listed in TOPIC_ORDER', () => {
