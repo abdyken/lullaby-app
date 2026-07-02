@@ -281,6 +281,13 @@ import {
   currentContextWindowFor,
   nightWindowFor,
 } from '../src/features/reassure/domain/nightWindow';
+// AI night-read consent — pure, RN-free helpers (device I/O + hook live in
+// application/, which import react-native and can't load here).
+import {
+  AI_NIGHT_READ_CONSENT_KEY,
+  consentAllowsAiNightRead,
+  parseAiConsent,
+} from '../src/features/reassure/domain/aiConsent';
 import {
   SPITUP_NOTE_LABEL,
   buildReassureRecap,
@@ -6329,6 +6336,184 @@ check('X23. audit privacy: minimized parent text, token usage, retention TTL, ze
     assert.ok(new RegExp(`^\\s{2}${col}\\s`, 'm').test(auditSql), `reassure_audit has "${col}"`);
   }
   assert.ok(auditSql.includes("interval '90 days'"), 'the retention TTL is defined');
+});
+
+// ---------------------------------------------------------------------------
+// X24: AI night-read consent (client) + the server kill-switch. The AI read is
+// only ever ATTEMPTED when Pro/dev + explicit consent (client) + the server
+// kill-switch is on; the local read and recap always render without any of it.
+// ---------------------------------------------------------------------------
+const RX_CONSENT_DOMAIN_SRC = readFileSync(
+  new URL('../src/features/reassure/domain/aiConsent.ts', import.meta.url),
+  'utf8',
+);
+const RX_CONSENT_STORE_SRC = readFileSync(
+  new URL('../src/features/reassure/application/aiConsentStore.ts', import.meta.url),
+  'utf8',
+);
+const RX_CONSENT_HOOK_SRC = readFileSync(
+  new URL('../src/features/reassure/application/useAiNightReadConsent.ts', import.meta.url),
+  'utf8',
+);
+const RX_CONSENT_CARD_SRC = readFileSync(
+  new URL('../src/features/reassure/components/AiConsentCard.tsx', import.meta.url),
+  'utf8',
+);
+const RX_NIGHTREAD_HOOK_SRC = readFileSync(
+  new URL('../src/features/reassure/application/nightRead.ts', import.meta.url),
+  'utf8',
+);
+const RX_REASSURE_SCREEN_SRC = readFileSync(
+  new URL('../src/app/(tabs)/reassure.tsx', import.meta.url),
+  'utf8',
+);
+const RX_AUDIT_SHARED_SRC = readFileSync(
+  new URL('../supabase/functions/_shared/reassureAudit.ts', import.meta.url),
+  'utf8',
+);
+
+check('X24a. consent gate: only "granted" lets the client attempt the AI read', () => {
+  // The pure decision: granted → allowed; declined / undecided → never.
+  assert.equal(consentAllowsAiNightRead('granted'), true);
+  assert.equal(consentAllowsAiNightRead('declined'), false);
+  assert.equal(consentAllowsAiNightRead(null), false);
+  // Parse is total and trusts nothing it can't recognize (corrupt → undecided).
+  assert.equal(parseAiConsent('granted'), 'granted');
+  assert.equal(parseAiConsent('declined'), 'declined');
+  for (const bad of [null, undefined, '', '  ', 'yes', 'true', '1', 'GRANTED']) {
+    assert.equal(parseAiConsent(bad), null, `"${String(bad)}" is not a decision`);
+  }
+  assert.ok(AI_NIGHT_READ_CONSENT_KEY.startsWith('lullaby.'), 'stored under a local namespaced key');
+
+  // The client hook makes consent a HARD precondition for the edge call: the
+  // effect that fetches is gated on `eligible`, and `eligible` requires both the
+  // Pro gate AND consent. No consent → no invoke.
+  assert.ok(
+    RX_NIGHTREAD_HOOK_SRC.includes('consentAllowsAiNightRead('),
+    'the hook consults the consent gate',
+  );
+  assert.ok(
+    RX_NIGHTREAD_HOOK_SRC.includes('canUseLlmNightRead(isPro)'),
+    'the Pro/dev gate still applies (consent does not bypass it)',
+  );
+  const eligibleIx = RX_NIGHTREAD_HOOK_SRC.indexOf('const eligible =');
+  const guardIx = RX_NIGHTREAD_HOOK_SRC.indexOf('if (!eligible');
+  // The only site that calls the edge function is inside the guarded effect.
+  const fetchCallIx = RX_NIGHTREAD_HOOK_SRC.indexOf('await fetchNightRead(babyId');
+  assert.ok(eligibleIx > -1 && guardIx > -1 && fetchCallIx > -1, 'hook shape intact');
+  assert.ok(
+    RX_NIGHTREAD_HOOK_SRC.includes('const eligible = aiEligible && consentGranted'),
+    'the edge call requires Pro-eligibility AND explicit consent',
+  );
+  assert.ok(
+    guardIx < fetchCallIx,
+    'the eligible-guard short-circuits before the effect ever calls fetchNightRead',
+  );
+});
+
+check('X24b. local read + recap always render; consent notice is one-time only', () => {
+  // The recap card renders unconditionally, and its local read is the base — the
+  // LLM read only ever overrides it (this is the X22 contract, re-asserted here
+  // from the consent angle: nothing about consent can hide the local read).
+  assert.ok(
+    RX_REASSURE_SCREEN_SRC.includes('<RecapCard surfaceMode={mode} recap={recap} readOverride={nightRead} />'),
+    'the local recap/read renders regardless of consent',
+  );
+  // The consent card is shown ONLY when needsConsent — which the hook sets only
+  // for AI-eligible parents who have not yet decided (so it never re-nags).
+  assert.ok(
+    RX_REASSURE_SCREEN_SRC.includes('needsConsent ?') &&
+      RX_REASSURE_SCREEN_SRC.includes('<AiConsentCard'),
+    'the consent card is conditional on needsConsent',
+  );
+  assert.ok(
+    RX_NIGHTREAD_HOOK_SRC.includes('needsConsent: aiEligible && consent.ready && consent.status === null'),
+    'the notice is owed once: eligible, loaded, still undecided',
+  );
+});
+
+check('X24c. consent copy is honest: local works without AI, no diagnosis/treatment claim', () => {
+  assert.ok(
+    /works fully without this/i.test(RX_CONSENT_CARD_SRC) && /without AI/i.test(RX_CONSENT_CARD_SRC),
+    'copy states Reassure works without AI',
+  );
+  assert.ok(/not medical advice/i.test(RX_CONSENT_CARD_SRC), 'copy states it is not medical advice');
+  assert.ok(/never a diagnosis/i.test(RX_CONSENT_CARD_SRC), 'copy disclaims diagnosis');
+  // It explains the minimized data that leaves the device, and what never does.
+  assert.ok(/minimized/i.test(RX_CONSENT_CARD_SRC), 'copy says the summary is minimized');
+  assert.ok(
+    /never sent/i.test(RX_CONSENT_CARD_SRC),
+    'copy names what never leaves the device (notes / typed text / phone)',
+  );
+  // It must not CLAIM to diagnose, treat, or cure.
+  assert.ok(
+    !/\b(diagnose|treat|treats|treating|treatment|cure|cures)\b/i.test(RX_CONSENT_CARD_SRC),
+    'consent copy makes no diagnosis/treatment claim',
+  );
+});
+
+check('X24d. server kill-switch: disabled → NO Anthropic call path, no token spend', () => {
+  const night = RX_EDGE_SRCS['reassure-night-read'];
+  const envIx = night.indexOf("Deno.env.get('REASSURE_NIGHT_READ_ENABLED')");
+  const guardIx = night.indexOf('if (!nightReadEnabled)');
+  const clientIx = night.indexOf('new Anthropic(');
+  const modelIx = night.indexOf('anthropic.messages.create');
+  assert.ok(envIx > -1, 'the function reads the kill-switch env var');
+  assert.ok(
+    night.includes("=== '1'"),
+    'the kill-switch is on ONLY for the exact value "1" (off by default)',
+  );
+  assert.ok(guardIx > -1 && guardIx < clientIx && guardIx < modelIx, 'the disabled branch precedes any Anthropic construction/call');
+  assert.ok(night.includes("outcome = 'disabled'"), 'a disabled run audits outcome=disabled');
+  // The disabled branch returns the fallback shape the client already expects.
+  assert.ok(night.includes("source: 'fallback'"), 'disabled returns the local fallback shape');
+  // The audit outcome union carries the new disabled state (unconstrained text
+  // column → no migration needed).
+  assert.ok(RX_AUDIT_SHARED_SRC.includes("| 'disabled'"), 'the audit outcome union includes disabled');
+});
+
+check('X24e. consent never leaks: no phone, no analytics, no LLM in the consent path', () => {
+  for (const [name, src] of [
+    ['domain', RX_CONSENT_DOMAIN_SRC],
+    ['store', RX_CONSENT_STORE_SRC],
+    ['hook', RX_CONSENT_HOOK_SRC],
+    ['card', RX_CONSENT_CARD_SRC],
+  ] as const) {
+    // The pediatrician phone must never touch the AI consent path. (The prose
+    // privacy notes may NAME it to promise it stays out; what must be absent is
+    // any real import/symbol that would actually handle the number.)
+    assert.ok(
+      !src.includes('pediatricianContact') &&
+        !src.includes('pediatricianStore') &&
+        !src.includes('telUrlFor') &&
+        !src.includes('PEDIATRICIAN_PHONE_KEY'),
+      `${name} never imports or uses the pediatrician phone`,
+    );
+    // Consent state is private: never posted to analytics or the LLM.
+    assert.ok(
+      !src.includes('useAnalytics') && !src.includes('trackEvent') && !src.includes('lib/analytics'),
+      `${name} wires no analytics for the consent state`,
+    );
+    assert.ok(!src.includes('anthropic') && !src.includes('functions.invoke'), `${name} reaches no backend/LLM`);
+    // Neither the DARK topic-polish nor the un-built parent-answer is wired here.
+    assert.ok(
+      !src.includes('reassure-topic-polish') && !src.includes('reassure-parent-answer'),
+      `${name} keeps topic-polish / parent-answer dark`,
+    );
+  }
+  // The night-read payload carries only the three code-computed fields — never
+  // consent state, the phone, or raw parent text.
+  const bodyMatch = RX_NIGHTREAD_HOOK_SRC.match(/body:\s*\{[\s\S]*?\}/);
+  assert.ok(bodyMatch, 'the invoke body is present');
+  const body = bodyMatch![0];
+  assert.ok(
+    body.includes('babyId') && body.includes('nightKey') && body.includes('tzOffsetMinutes'),
+    'the payload sends only babyId + nightKey + tzOffsetMinutes',
+  );
+  assert.ok(
+    !/consent|phone|pediatrician|askText|rawText/i.test(body),
+    'the payload carries no consent state, phone, or raw parent text',
+  );
 });
 
 // §PC — the Reassure triage "Call pediatrician" phone action (local + private).

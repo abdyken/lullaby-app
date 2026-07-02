@@ -67,6 +67,11 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
   const model = Deno.env.get('REASSURE_MODEL') ?? REASSURE_DEFAULT_MODEL;
+  // Server-side kill-switch: the model is called ONLY when this is exactly '1'.
+  // Missing / any other value → skip Anthropic entirely (no token spend) and
+  // return the local fallback. This is the operator's honest off-by-default
+  // control while the medical content is still draft / pending clinician review.
+  const nightReadEnabled = Deno.env.get('REASSURE_NIGHT_READ_ENABLED') === '1';
 
   // 1. Verify the JWT — a user-scoped client so every later read is under RLS.
   const authHeader = req.headers.get('Authorization') ?? '';
@@ -165,7 +170,12 @@ Deno.serve(async (req) => {
   let stopReason: string | null = null;
   let llmResponse: unknown = null;
   let usage: Record<string, unknown> = {};
-  if (anthropicKey) {
+  if (!nightReadEnabled) {
+    // Kill-switch off: do NOT construct the client, do NOT call Anthropic. No
+    // token spend, no crash — just audit the disabled outcome and fall back.
+    llmResponse = { error: 'REASSURE_NIGHT_READ_ENABLED is not set to "1"' };
+    outcome = 'disabled';
+  } else if (anthropicKey) {
     try {
       const anthropic = new Anthropic({ apiKey: anthropicKey, maxRetries: LLM_MAX_RETRIES });
       const response = await anthropic.messages.create(
