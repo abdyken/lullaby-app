@@ -251,6 +251,21 @@ import {
 // source-scanned only, never imported here.
 import { buildWeeklyExportText } from '../src/features/insights/buildWeeklyExportText';
 import type { InsightsViewModel } from '../src/features/insights/types';
+// Reassure v2 — the pure triage router / red-flag guardrail / night-window
+// recap leaves. All are react-native-free by design (source-scanned in §X).
+import { REDFLAGS, matchesRedFlag } from '../src/features/reassure/domain/redflags';
+import { normalizeAsk, route } from '../src/features/reassure/domain/router';
+import {
+  NIGHT_RECAP_END_HOUR,
+  NIGHT_RECAP_START_HOUR,
+  nightWindowFor,
+} from '../src/features/reassure/domain/nightWindow';
+import {
+  SPITUP_NOTE_LABEL,
+  buildReassureRecap,
+  recapReadText,
+} from '../src/features/reassure/domain/recap';
+import { KB, REASSURE_CONTENT, TOPIC_ORDER } from '../src/features/reassure/content/kb';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
 const NOW = Date.parse('2026-06-17T00:00:00.000Z');
@@ -4485,6 +4500,18 @@ const INSIGHTS_SCREEN_SRC = readFileSync(
 );
 const TABS_LAYOUT_SRC = readFileSync(new URL('../src/app/(tabs)/_layout.tsx', import.meta.url), 'utf8');
 const PKG_JSON_SRC = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
+const AUTH_TRANSITION_SRC = readFileSync(
+  new URL('../src/components/auth/AuthTransition.tsx', import.meta.url),
+  'utf8',
+);
+const RESOLVE_REPOSITORY_SRC = readFileSync(
+  new URL('../src/sync/resolveRepository.ts', import.meta.url),
+  'utf8',
+);
+const STARTUP_DIAGNOSTICS_SRC = readFileSync(
+  new URL('../src/lib/startupDiagnostics.ts', import.meta.url),
+  'utf8',
+);
 
 // Core-logging leaves that must stay free of any Pro dependency.
 const CORE_LOGGING_SRCS: Array<[string, string]> = [
@@ -4561,6 +4588,60 @@ const BANNED_PRO_IMPORTS = [
   '@/lib/revenueCat',
   'react-native-purchases',
 ];
+
+check('ST1. the app-shell startup gate owns v2 hydration before the tab navigator mounts', () => {
+  const gateFn = TABS_LAYOUT_SRC.indexOf('function AppShellStartupGate');
+  const gateUse = TABS_LAYOUT_SRC.indexOf('<AppShellStartupGate>');
+  const tabs = TABS_LAYOUT_SRC.indexOf('<Tabs');
+  assert.ok(gateFn !== -1, 'Tabs layout must define the app-shell startup gate');
+  assert.ok(gateUse !== -1 && tabs !== -1 && gateUse < tabs, 'the startup gate must wrap Tabs');
+  const gateBody = TABS_LAYOUT_SRC.slice(gateFn, TABS_LAYOUT_SRC.indexOf('export default function TabsLayout'));
+  assert.ok(gateBody.includes('useLogging()'), 'the gate must read logging hydration from useLogging');
+  assert.ok(gateBody.includes('return <AuthTransition />'), 'the gate owns the full-screen loading screen');
+});
+
+check('ST2. Home no longer renders a nested AuthLoading inside the tab shell', () => {
+  assert.ok(!TONIGHT_SRC.includes('import { AuthLoading }'), 'Tonight must not import AuthLoading');
+  assert.ok(
+    !/waitingForV2Hydration\s*\?\s*<AuthLoading/.test(TONIGHT_SRC),
+    'Tonight must not swap its Screen body to AuthLoading while tabs are mounted',
+  );
+});
+
+check('ST3. startup loading copy is stable across auth loading states', () => {
+  assert.ok(
+    AUTH_TRANSITION_SRC.includes("AUTH_TRANSITION_MESSAGE = 'Preparing Lullaby...'"),
+    'AuthTransition must define the single default startup copy',
+  );
+  assert.ok(
+    !AUTH_GATE_SRC.includes('Preparing your account'),
+    'AuthGate must not override startup copy for postAuthSync/loading and cause text bouncing',
+  );
+});
+
+check('ST4. repository startup reuses known auth + baby ids instead of re-fetching them', () => {
+  assert.ok(RESOLVE_REPOSITORY_SRC.includes('type RepositoryBootstrap'), 'resolveRepository accepts bootstrap ids');
+  assert.ok(RESOLVE_REPOSITORY_SRC.includes('input.userId === undefined'), 'userId input controls session re-read');
+  assert.ok(RESOLVE_REPOSITORY_SRC.includes('input.babyId === undefined'), 'babyId input controls linked-baby re-read');
+  assert.ok(
+    LOCAL_EVENT_PROVIDER_SRC.includes('resolveRepository({') &&
+      LOCAL_EVENT_PROVIDER_SRC.includes('userId: authUserId') &&
+      LOCAL_EVENT_PROVIDER_SRC.includes('babyId: authBabyId'),
+    'LocalEventProvider must pass the already-known auth/baby ids into resolveRepository',
+  );
+});
+
+check('ST5. startup diagnostics are dev-only and routed through one helper', () => {
+  assert.ok(STARTUP_DIAGNOSTICS_SRC.includes('if (!__DEV__) return'), 'startup logs must be dev-only');
+  assert.ok(AUTH_PROVIDER_SRC.includes('logStartupStep'), 'AuthProvider should emit startup milestones');
+  assert.ok(TABS_LAYOUT_SRC.includes('logStartupStep'), 'Tabs layout should log app-shell readiness');
+  assert.ok(
+    LOCAL_EVENT_PROVIDER_SRC.includes('logStartupStep') && CORE_LOGGING_SRCS.some(([name, src]) =>
+      name === 'features/logging/state/LoggingProvider.tsx' && src.includes('logStartupStep'),
+    ),
+    'event and logging providers should log their hydrate milestones',
+  );
+});
 
 check('W1. proConfig reads EXPO_PUBLIC_PRO_ENABLED and treats "true"/"1" as enabled', () => {
   assert.ok(PRO_CONFIG_SRC.includes('EXPO_PUBLIC_PRO_ENABLED'), 'proConfig references the master flag');
@@ -4993,6 +5074,269 @@ check('Z7. analytics union has the six purchase/restore events (coarse props onl
   ]) {
     assert.ok(ANALYTICS_SRC.includes("'" + event + "'"), event + ' present in the union');
   }
+});
+
+// ---------------------------------------------------------------------------
+// §X. Reassure v2 — triage-first router, night window, recap, content guards.
+// The safety property under test: TRIAGE ALWAYS WINS and cannot silently
+// regress (X3 behavioral + X13 source-order guard).
+// ---------------------------------------------------------------------------
+
+check('X1. red-flag phrases route to triage', () => {
+  assert.deepEqual(route('She feels really hot'), { kind: 'triage' });
+  assert.deepEqual(route('I think she has a fever'), { kind: 'triage' });
+  assert.deepEqual(route('no wet diaper since lunch'), { kind: 'triage' });
+});
+
+check('X2. typographic apostrophes are normalized before matching', () => {
+  assert.equal(normalizeAsk('She won’t wake'), "she won't wake");
+  assert.deepEqual(route('She’s hard to wake'), { kind: 'triage' });
+  assert.deepEqual(route('She won’t wake up'), { kind: 'triage' });
+});
+
+check('X3. triage overrides topic — red flag + topic trigger in one ask', () => {
+  // 'green vomit' is a red flag even though 'vomit' would match the spit-up topic
+  assert.deepEqual(route('green vomit after a feed'), { kind: 'triage' });
+  // 'gasping' is a red flag even though it contains the gas topic trigger
+  assert.deepEqual(route('gasping between feeds'), { kind: 'triage' });
+  // sanity: the topic triggers still work when no red flag is present
+  assert.deepEqual(route('a little vomit after a feed'), { kind: 'topic', key: 'spitup' });
+});
+
+check('X4. all six demo chips route to their expected outcome', () => {
+  assert.deepEqual(route('She hiccups after every feed'), { kind: 'topic', key: 'hiccups' });
+  assert.deepEqual(route('A little spit-up after feeding'), { kind: 'topic', key: 'spitup' });
+  assert.deepEqual(route('Lots of grunting and squirming'), { kind: 'topic', key: 'gas' });
+  assert.deepEqual(route("She won't settle at all"), { kind: 'topic', key: 'sleep' });
+  assert.deepEqual(route('She feels really hot'), { kind: 'triage' });
+  assert.deepEqual(route("She's hard to wake"), { kind: 'triage' });
+});
+
+check('X5. every KB topic is routable by its own title and listed in TOPIC_ORDER', () => {
+  for (const key of TOPIC_ORDER) {
+    const result = route(KB[key].title);
+    assert.deepEqual(result, { kind: 'topic', key }, `KB title "${KB[key].title}" routes to ${key}`);
+  }
+  assert.equal(TOPIC_ORDER.length, Object.keys(KB).length, 'TOPIC_ORDER covers every KB topic');
+});
+
+check('X6. out-of-scope asks get the bounded decline (incl. empty input)', () => {
+  assert.deepEqual(route('what stroller should I buy'), { kind: 'oos' });
+  assert.deepEqual(route(''), { kind: 'oos' });
+  assert.deepEqual(route('   '), { kind: 'oos' });
+});
+
+check('X7. matchesRedFlag expects normalized input and REDFLAGS is lowercase-only', () => {
+  for (const flag of REDFLAGS) {
+    assert.equal(flag, flag.toLowerCase(), `red flag "${flag}" is lowercase`);
+    assert.ok(!/[‘’]/.test(flag), `red flag "${flag}" uses straight apostrophes`);
+  }
+  assert.ok(matchesRedFlag("she won't wake"), 'matches on normalized text');
+});
+
+check('X8. night window: live-night, 2am, and morning-recap cases + boundaries', () => {
+  const at = (h: number, min = 0) => new Date(2026, 5, 30, h, min).getTime(); // June 30 2026, local
+  // 19:00 → tonight, from today 18:00
+  let w = nightWindowFor(at(19));
+  assert.equal(w.label, 'tonight');
+  assert.equal(w.startMs, new Date(2026, 5, 30, NIGHT_RECAP_START_HOUR).getTime());
+  assert.equal(w.endMs, at(19));
+  // 02:00 → tonight, from YESTERDAY 18:00
+  w = nightWindowFor(at(2));
+  assert.equal(w.label, 'tonight');
+  assert.equal(w.startMs, new Date(2026, 5, 29, NIGHT_RECAP_START_HOUR).getTime());
+  // 14:00 → closed last-night window [yesterday 18:00, today 10:00]
+  w = nightWindowFor(at(14));
+  assert.equal(w.label, 'last-night');
+  assert.equal(w.startMs, new Date(2026, 5, 29, NIGHT_RECAP_START_HOUR).getTime());
+  assert.equal(w.endMs, new Date(2026, 5, 30, NIGHT_RECAP_END_HOUR).getTime());
+  // boundaries
+  assert.equal(nightWindowFor(at(17, 59)).label, 'last-night');
+  assert.equal(nightWindowFor(at(18, 0)).label, 'tonight');
+  assert.equal(nightWindowFor(at(9, 59)).label, 'tonight');
+  assert.equal(nightWindowFor(at(10, 0)).label, 'last-night');
+});
+
+// Recap fixtures — a deterministic 2am "tonight" scenario.
+const RX_NOW = new Date(2026, 5, 30, 2, 0).getTime();
+const rxIso = (h: number, dayOffset = 0, min = 0) =>
+  new Date(2026, 5, 29 + dayOffset, h, min).toISOString();
+let rxSeq = 0;
+const rxEvent = (
+  type: LogEventType,
+  startAt: string,
+  overrides: Partial<LogEvent> = {},
+): LogEvent => ({
+  id: `rx-${(rxSeq += 1)}`,
+  babyId: 'rx-baby',
+  caregiverId: 'rx-cg',
+  type,
+  startAt,
+  endAt: null,
+  meta: {},
+  createdAt: startAt,
+  ...overrides,
+});
+
+check('X9. recap counts spit-up notes separately from other notes', () => {
+  const recap = buildReassureRecap(
+    [
+      rxEvent('note', rxIso(22), { meta: { label: SPITUP_NOTE_LABEL } }),
+      rxEvent('note', rxIso(23), { meta: { label: SPITUP_NOTE_LABEL } }),
+      rxEvent('note', rxIso(21), { meta: { label: 'Fussy' } }),
+      rxEvent('feed', rxIso(20)),
+    ],
+    RX_NOW,
+  );
+  assert.equal(recap.spitUpCount, 2);
+  assert.equal(recap.otherNoteCount, 1);
+  assert.equal(recap.feedCount, 1);
+  assert.equal(recap.isEmpty, false);
+});
+
+check('X10. events outside the night window are excluded', () => {
+  const recap = buildReassureRecap(
+    [
+      rxEvent('feed', rxIso(12)), // yesterday noon — before 18:00 open
+      rxEvent('diaper', rxIso(15)), // yesterday afternoon
+      rxEvent('feed', rxIso(19)), // in window
+      rxEvent('feed', rxIso(3, 1)), // "today" 3am but AFTER now (02:00) — excluded
+    ],
+    RX_NOW,
+  );
+  assert.equal(recap.feedCount, 1);
+  assert.equal(recap.diaperCount, 0);
+});
+
+check('X11. sleeps overlapping the window count; a running sleep is flagged', () => {
+  const overlapping = buildReassureRecap(
+    // began 17:30 (before the window opened) and ended 19:10 inside it
+    [rxEvent('sleep', rxIso(17, 0, 30), { endAt: rxIso(19, 0, 10) })],
+    RX_NOW,
+  );
+  assert.equal(overlapping.isEmpty, false);
+  assert.equal(overlapping.longestSleepMin, 100);
+  assert.equal(overlapping.sleepRunning, false);
+
+  const running = buildReassureRecap([rxEvent('sleep', rxIso(23))], RX_NOW);
+  assert.equal(running.sleepRunning, true);
+  assert.equal(running.isEmpty, false);
+});
+
+check('X12. recapReadText stays strictly descriptive — no judgement vocabulary', () => {
+  const banned = /\b(normal|abnormal|healthy|fine|typical|okay|ok)\b/i;
+  const samples = [
+    buildReassureRecap([], RX_NOW),
+    buildReassureRecap(
+      [
+        rxEvent('feed', rxIso(20)),
+        rxEvent('feed', rxIso(23)),
+        rxEvent('diaper', rxIso(22)),
+        rxEvent('note', rxIso(22, 0, 30), { meta: { label: SPITUP_NOTE_LABEL } }),
+        rxEvent('sleep', rxIso(21), { endAt: rxIso(21, 0, 40) }),
+      ],
+      RX_NOW,
+    ),
+    buildReassureRecap([rxEvent('sleep', rxIso(23))], RX_NOW),
+  ];
+  for (const recap of samples) {
+    const text = recapReadText(recap);
+    assert.ok(text.length > 0, 'read text is non-empty');
+    assert.ok(!banned.test(text), `descriptive register only, got: "${text}"`);
+  }
+});
+
+// Source-scan guards — structural invariants on the reassure feature files.
+const RX_ROUTER_SRC = readFileSync(
+  new URL('../src/features/reassure/domain/router.ts', import.meta.url),
+  'utf8',
+);
+const RX_DOMAIN_SRCS: Record<string, string> = Object.fromEntries(
+  [
+    'domain/types.ts',
+    'domain/redflags.ts',
+    'domain/router.ts',
+    'domain/nightWindow.ts',
+    'domain/recap.ts',
+    'content/kb.ts',
+  ].map((rel) => [
+    rel,
+    readFileSync(new URL(`../src/features/reassure/${rel}`, import.meta.url), 'utf8'),
+  ]),
+);
+
+check('X13. router source: the red-flag check precedes the first topic regex', () => {
+  const triageIx = RX_ROUTER_SRC.indexOf('matchesRedFlag(t)');
+  const firstTopicIx = RX_ROUTER_SRC.indexOf('/hiccup/');
+  assert.ok(triageIx > -1, 'router calls matchesRedFlag');
+  assert.ok(firstTopicIx > -1, 'router has the topic regexes');
+  assert.ok(triageIx < firstTopicIx, 'triage check comes FIRST — triage always wins');
+});
+
+check('X14. reassure domain/content are pure leaves (no RN, no Pro, no speech, no LLM)', () => {
+  for (const [rel, src] of Object.entries(RX_DOMAIN_SRCS)) {
+    assert.ok(!/from 'react/.test(src), `${rel} does not import react/react-native`);
+    assert.ok(!src.includes('expo-'), `${rel} does not import expo modules`);
+    assert.ok(!src.includes('proGates') && !src.includes('proConfig') && !src.includes('ProProvider'),
+      `${rel} never touches Pro gating — safety is structurally unpaywallable`);
+    assert.ok(!/from '(@anthropic-ai|@supabase|@\/lib\/supabase)/.test(src),
+      `${rel} never imports the LLM or backend clients`);
+    // Only type-only imports may reach outside the feature folder.
+    for (const line of src.split('\n')) {
+      if (/^import .*from '@\//.test(line)) {
+        assert.ok(line.startsWith('import type'), `${rel}: '@/' imports must be type-only (${line.trim()})`);
+      }
+    }
+  }
+  for (const rel of ['domain/redflags.ts'] as const) {
+    assert.ok(!/from '@\//.test(RX_DOMAIN_SRCS[rel]), `${rel} has zero app imports (Deno-mirrorable)`);
+  }
+});
+
+check('X16. the Tonight note sheet offers the Spit-up preset via the shared constant', () => {
+  const tonightSrc = readFileSync(new URL('../src/app/(tabs)/index.tsx', import.meta.url), 'utf8');
+  assert.ok(
+    tonightSrc.includes('SPITUP_NOTE_LABEL'),
+    'index.tsx uses SPITUP_NOTE_LABEL (never a drifting string literal)',
+  );
+  assert.ok(
+    tonightSrc.includes("from '@/features/reassure/domain/recap'"),
+    'the constant is imported from the recap domain, the single source of truth',
+  );
+});
+
+check('X15. clinician-review metadata is present, well-formed, and honest', () => {
+  assert.ok(REASSURE_CONTENT.version.length > 0, 'content is versioned');
+  assert.ok(['draft', 'approved'].includes(REASSURE_CONTENT.status), 'status is draft|approved');
+  if (REASSURE_CONTENT.status === 'approved') {
+    assert.ok(REASSURE_CONTENT.reviewedBy && REASSURE_CONTENT.reviewedAt, 'approved content names its reviewer');
+  }
+  // Placeholder tagging must survive until a clinician signs off.
+  if (REASSURE_CONTENT.status === 'draft') {
+    assert.ok(RX_DOMAIN_SRCS['content/kb.ts'].includes('PLACEHOLDER'), 'kb.ts carries the placeholder tag');
+    assert.ok(RX_DOMAIN_SRCS['domain/redflags.ts'].includes('PLACEHOLDER'), 'redflags.ts carries the placeholder tag');
+  }
+});
+
+check('X17. the edge-function content mirror has not drifted from the app modules', () => {
+  // The Supabase functions can't import across the tree (Deno needs .ts
+  // extensions and knows nothing about '@/'), so they carry a hand-mirrored
+  // copy of the triage list + KB. This deep-equal is the drift tripwire: it
+  // imports BOTH copies and compares VALUES, not text.
+  //
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const mirror = require('../supabase/functions/_shared/reassureContent') as {
+    REDFLAGS: readonly string[];
+    KB: unknown;
+    normalizeAsk: (text: string) => string;
+  };
+  assert.deepEqual([...mirror.REDFLAGS], [...REDFLAGS], 'REDFLAGS identical on both sides');
+  assert.deepEqual(mirror.KB, KB, 'KB identical on both sides');
+  assert.equal(
+    mirror.normalizeAsk("She WON’T wake"),
+    normalizeAsk("She WON’T wake"),
+    'normalization identical on both sides',
+  );
 });
 
 runAsyncChecks()

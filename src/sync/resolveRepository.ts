@@ -18,22 +18,31 @@ import { getSupabaseSession } from './session';
 import { createSupabaseRepository } from './supabaseRepository';
 import type { EventRepository } from './types';
 
+export type RepositoryBootstrap = {
+  userId?: string | null;
+  babyId?: string | null;
+};
+
 /**
  * Resolve the active EventRepository. Returns the local repository whenever real
  * sync isn't fully available; otherwise a Supabase repository scoped to the
  * caregiver's first linked baby.
  */
-export async function resolveRepository(): Promise<EventRepository> {
+export async function resolveRepository(input: RepositoryBootstrap = {}): Promise<EventRepository> {
   if (!isSupabaseConfigured || !supabase) return localRepository;
 
-  const session = await getSupabaseSession();
-  if (!session) return localRepository;
+  const userId =
+    input.userId === undefined
+      ? (await getSupabaseSession())?.user.id ?? null
+      : input.userId;
+  if (!userId) return localRepository;
 
-  const babyId = await getLinkedBabyId(session.user.id);
+  const babyId =
+    input.babyId === undefined ? await getLinkedBabyId(userId) : input.babyId;
   if (!babyId) return localRepository;
 
   return createSupabaseRepository(supabase, {
     babyId,
-    caregiverId: session.user.id,
+    caregiverId: userId,
   });
 }

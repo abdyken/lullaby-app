@@ -14,18 +14,36 @@
  * onboarding runs once, then the seeded demo tabs render.
  */
 import { Tabs } from 'expo-router';
+import { useEffect, type ReactNode } from 'react';
 import { View } from 'react-native';
 
 import { AppToast } from '@/components/AppToast';
 import { AuthGate } from '@/components/auth/AuthGate';
+import { AuthTransition } from '@/components/auth/AuthTransition';
 import { LullabyTabBar } from '@/components/LullabyTabBar';
 import { ProPaywallHost } from '@/components/pro/ProPaywallHost';
-import { LoggingProvider } from '@/features/logging/state/LoggingProvider';
+import { LoggingProvider, useLogging } from '@/features/logging/state/LoggingProvider';
 import { LoggingToast } from '@/features/logging/ui/LoggingToast';
+import { logStartupStep } from '@/lib/startupDiagnostics';
 import { LocalEventProvider } from '@/state/LocalEventProvider';
 import { ProProvider } from '@/state/ProProvider';
 import { useTheme } from '@/state/ThemeProvider';
 import { surfaces } from '@/theme';
+
+function AppShellStartupGate({ children }: { children: ReactNode }) {
+  const { enabled, hydrated } = useLogging();
+  const ready = !enabled || hydrated;
+
+  useEffect(() => {
+    if (ready) logStartupStep('app shell ready', { loggingV2: enabled });
+  }, [ready, enabled]);
+
+  if (!ready) {
+    return <AuthTransition />;
+  }
+
+  return <>{children}</>;
+}
 
 export default function TabsLayout() {
   // Background behind the navigator follows the committed theme so no stray light
@@ -45,49 +63,51 @@ export default function TabsLayout() {
           {/* Logging v2 feature API (Feed/Sleep/Diaper/Pump). Inert while the
               loggingV2 flag is off — no I/O, no behavior change to the MVP. */}
           <LoggingProvider>
-            {/* flex:1 wrapper so app-level toasts can float above the floating tab bar. */}
-            <View style={{ flex: 1, backgroundColor: background }}>
-              <Tabs
-                tabBar={(props) => <LullabyTabBar {...props} />}
-                detachInactiveScreens={false}
-                screenOptions={{
-                  headerShown: false,
-                  lazy: false,
-                  // Instant page switch — NO cross-fade. A bottom-tabs
-                  // `animation: 'fade'` renders the outgoing AND incoming screens at
-                  // the same time with interpolated opacity, so full-bleed screen
-                  // content visibly overlaps (ghosting) and the two semi-transparent
-                  // opaque screens composite into a muddy dark rectangle mid-switch.
-                  // 'none' (the navigator default) + `lazy: false` +
-                  // `detachInactiveScreens={false}` keeps all screens mounted
-                  // and just toggles which is visible, so pages switch cleanly with
-                  // no flash, ghosting, fallback frame, or first-open dependency.
-                  // The tab-bar pill keeps its own (separate) Reanimated slide.
-                  animation: 'none',
-                  sceneStyle: { backgroundColor: background },
-                  // Fully transparent + chrome-free ON PURPOSE: the visible bar is
-                  // entirely the custom pill.
-                  // Keep this transparent with no border/elevation/shadow so the RN
-                  // tab-bar container can never paint chrome that changes separately
-                  // from (or draws over) the custom pill.
-                  tabBarStyle: {
-                    backgroundColor: 'transparent',
-                    borderTopWidth: 0,
-                    borderTopColor: 'transparent',
-                    elevation: 0,
-                    shadowOpacity: 0,
-                  },
-                }}>
-                <Tabs.Screen name="index" options={{ title: 'Tonight' }} />
-                <Tabs.Screen name="insights" options={{ title: 'Insights' }} />
-                <Tabs.Screen name="log" options={{ title: 'History' }} />
-                <Tabs.Screen name="reassure" options={{ title: 'Reassure' }} />
-              </Tabs>
-              <AppToast />
-              {/* Logging v2 "saved · Undo" toast — inert unless the flag is on and a
-                  v2 mutation just landed; never collides with the legacy AppToast. */}
-              <LoggingToast />
-            </View>
+            <AppShellStartupGate>
+              {/* flex:1 wrapper so app-level toasts can float above the floating tab bar. */}
+              <View style={{ flex: 1, backgroundColor: background }}>
+                <Tabs
+                  tabBar={(props) => <LullabyTabBar {...props} />}
+                  detachInactiveScreens={false}
+                  screenOptions={{
+                    headerShown: false,
+                    lazy: false,
+                    // Instant page switch — NO cross-fade. A bottom-tabs
+                    // `animation: 'fade'` renders the outgoing AND incoming screens at
+                    // the same time with interpolated opacity, so full-bleed screen
+                    // content visibly overlaps (ghosting) and the two semi-transparent
+                    // opaque screens composite into a muddy dark rectangle mid-switch.
+                    // 'none' (the navigator default) + `lazy: false` +
+                    // `detachInactiveScreens={false}` keeps all screens mounted
+                    // and just toggles which is visible, so pages switch cleanly with
+                    // no flash, ghosting, fallback frame, or first-open dependency.
+                    // The tab-bar pill keeps its own (separate) Reanimated slide.
+                    animation: 'none',
+                    sceneStyle: { backgroundColor: background },
+                    // Fully transparent + chrome-free ON PURPOSE: the visible bar is
+                    // entirely the custom pill.
+                    // Keep this transparent with no border/elevation/shadow so the RN
+                    // tab-bar container can never paint chrome that changes separately
+                    // from (or draws over) the custom pill.
+                    tabBarStyle: {
+                      backgroundColor: 'transparent',
+                      borderTopWidth: 0,
+                      borderTopColor: 'transparent',
+                      elevation: 0,
+                      shadowOpacity: 0,
+                    },
+                  }}>
+                  <Tabs.Screen name="index" options={{ title: 'Tonight' }} />
+                  <Tabs.Screen name="insights" options={{ title: 'Insights' }} />
+                  <Tabs.Screen name="log" options={{ title: 'History' }} />
+                  <Tabs.Screen name="reassure" options={{ title: 'Reassure' }} />
+                </Tabs>
+                <AppToast />
+                {/* Logging v2 "saved · Undo" toast — inert unless the flag is on and a
+                    v2 mutation just landed; never collides with the legacy AppToast. */}
+                <LoggingToast />
+              </View>
+            </AppShellStartupGate>
           </LoggingProvider>
         </LocalEventProvider>
         {/* Single shared paywall any Pro surface opens via usePro().openPaywall().

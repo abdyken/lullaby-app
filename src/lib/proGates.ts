@@ -29,6 +29,16 @@ export function canSharePediatricianSummary(isPro: boolean): boolean {
 }
 
 /**
+ * The LLM-phrased Reassure night read (Phase 2). Pro-only — this gates POLISH,
+ * never safety: the triage router, curated answers, and the code-computed
+ * recap/tallies stay free for everyone (Reassure's domain/content modules are
+ * forbidden from importing this file — enforced in the smoke test §X).
+ */
+export function canUseLlmNightRead(isPro: boolean): boolean {
+  return isPro;
+}
+
+/**
  * Add EXTRA caregivers (the 3rd+, e.g. a read-only grandparent) — a FUTURE gate.
  *
  * Open for now (returns true regardless of `isPro`) so Phase 1 changes nothing

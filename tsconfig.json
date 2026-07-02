@@ -17,5 +17,9 @@
     ".expo/types/**/*.ts",
     "expo-env.d.ts",
     "nativewind-env.d.ts"
-  ]
+  ],
+  // Edge functions are Deno (Deno.serve, npm: specifiers) — the app's tsc must
+  // not typecheck them. The shared content mirror stays drift-guarded by the
+  // smoke runner (§X17), which imports it directly.
+  "exclude": ["node_modules", "supabase/functions"]
 }

@@ -16,11 +16,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 
 import { AccountSheet } from '@/components/auth/AccountSheet';
-import { AuthLoading } from '@/components/auth/AuthLoading';
 import { BabyHeader } from '@/components/BabyHeader';
 import { FirstLogCoach, TonightCalibrating } from '@/components/FirstLogCoach';
 import { HandoffCard } from '@/components/HandoffCard';
 import { LogSheet, type SheetOption } from '@/components/LogSheet';
+import { SPITUP_NOTE_LABEL } from '@/features/reassure/domain/recap';
 import { isLoggingV2Enabled } from '@/features/logging';
 import { DiaperSheet } from '@/features/logging/diaper/DiaperSheet';
 import { FeedSheet } from '@/features/logging/feed/FeedSheet';
@@ -117,6 +117,9 @@ const SHEETS: Record<SheetKind, SheetConfig> = {
       { key: 'Fussy', label: 'Fussy' },
       { key: 'Cried', label: 'Cried' },
       { key: 'Settled', label: 'Settled' },
+      // Reassure counts these notes in its night recap — same constant on both
+      // sides so the writer and the counter can never drift (smoke §X guard).
+      { key: SPITUP_NOTE_LABEL, label: 'Spit-up' },
     ],
     defaultKey: 'Settled',
     saveLabel: 'Save note',
@@ -290,9 +293,9 @@ export default function TonightScreen() {
 
   // "Has the parent logged anything real yet?" — read from the flag-correct store
   // (the v2 timeline when loggingV2 is on, else the legacy events). Drives the
-  // brand-new-night Calibrating line + first-log coach. Inside renderBody we are
-  // always past v2 hydration (the screen holds AuthLoading until then), so this is
-  // stable and never reads a half-hydrated store.
+  // brand-new-night Calibrating line + first-log coach. The app-shell startup gate
+  // holds the tab navigator until v2 hydration is ready, so the first tab paint is
+  // the real Home screen instead of a tab shell wrapped around a loader.
   const hasRealEvents = v2 ? v2.timeline.length > 0 : events.length > 0;
 
   // The screen body is parameterised by the committed surface mode so all child
@@ -382,7 +385,7 @@ export default function TonightScreen() {
   return (
     <>
       <Screen surfaceMode={surfaceMode} scrollEnabled={!isTransitioning}>
-        {waitingForV2Hydration ? <AuthLoading /> : renderBody(surfaceMode)}
+        {renderBody(surfaceMode)}
       </Screen>
 
       {!waitingForV2Hydration && sheet !== null && (

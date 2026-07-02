@@ -31,6 +31,7 @@ import {
 
 import { baby as seedBaby, caregivers as seedCaregivers } from '@/data/mock';
 import { hapticSave, hapticUndo } from '@/lib/haptics';
+import { logStartupStep } from '@/lib/startupDiagnostics';
 import { useAuth } from '@/state/AuthProvider';
 
 import { isLoggingV2Enabled } from '../config/featureFlags';
@@ -230,10 +231,22 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!enabled || !scope) return;
     let cancelled = false;
+    logStartupStep('logging v2 hydrate start', {
+      childReady: scope.childId.length > 0,
+      caregiverReady: scope.userId.length > 0,
+    });
 
     (async () => {
       const next = await hydrateLoggingState(repo, scope, clock);
-      if (!cancelled) setState(next);
+      if (!cancelled) {
+        setState(next);
+        logStartupStep('logging v2 hydrate ready', {
+          todayEvents: next.todayEvents.length,
+          activeSleep: next.activeSleep != null,
+          activeFeed: next.activeBreastFeed != null,
+          activePump: next.activePump != null,
+        });
+      }
     })();
 
     const unsubscribe = subscribeForeground(() => {

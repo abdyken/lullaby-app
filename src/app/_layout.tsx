@@ -25,6 +25,7 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { BrandSplashGate } from '@/components/boot/BrandSplashGate';
+import { logStartupStep } from '@/lib/startupDiagnostics';
 import { AuthProvider } from '@/state/AuthProvider';
 import { ThemeProvider, useTheme } from '@/state/ThemeProvider';
 import { surfaces } from '@/theme';
@@ -62,8 +63,18 @@ function RootShell({ fontsReady }: { fontsReady: boolean }) {
   const ready = fontsReady && hydrated;
 
   useEffect(() => {
+    if (fontsReady) logStartupStep('fonts ready');
+  }, [fontsReady]);
+
+  useEffect(() => {
+    if (hydrated) logStartupStep('theme ready', { mode });
+  }, [hydrated, mode]);
+
+  useEffect(() => {
     if (ready) {
-      SplashScreen.hideAsync().catch(() => {});
+      SplashScreen.hideAsync()
+        .then(() => logStartupStep('native splash hidden'))
+        .catch(() => {});
     }
   }, [ready]);
 
