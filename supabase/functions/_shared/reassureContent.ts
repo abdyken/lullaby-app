@@ -58,7 +58,7 @@ export function matchesRedFlag(normalizedText: string): boolean {
   return REDFLAGS.some((flag) => normalizedText.includes(flag));
 }
 
-export type ReassureTopicKey = 'hiccups' | 'spitup' | 'gas' | 'crying' | 'sleep';
+export type ReassureTopicKey = 'hiccups' | 'spitup' | 'gas' | 'crying' | 'sleep' | 'feeding' | 'diaper';
 
 export type ReassureTopic = {
   key: ReassureTopicKey;
@@ -122,6 +122,28 @@ export const KB: Record<ReassureTopicKey, ReassureTopic> = {
       'Short, irregular sleeps, waking to feed, noisy or twitchy sleep, and day/night confusion in the first weeks.',
     call: 'Baby is very hard to wake, has breathing pauses that worry you, or seems unusually limp or floppy.',
     helps: 'A calm, dark wind-down and the same short routine each night — with safe-sleep basics every time.',
+  },
+  feeding: {
+    key: 'feeding',
+    title: 'Feeding',
+    tag: 'Common',
+    line: 'Newborn feeding is frequent and irregular — many babies feed 8–12 times a day, with cluster feeds some evenings.',
+    normal:
+      'Feeding every 1–3 hours, longer cluster-feeding stretches in the evening, and steady weight gain with regular wet and dirty diapers — the reassuring signs a newborn is getting enough.',
+    call: 'Far fewer wet diapers than usual, a baby too sleepy to wake for feeds, no weight gain, or feeds that are consistently painful or distressing.',
+    helps:
+      'Watch the baby, not the clock — offer a feed at early hunger cues, keep a rough eye on diaper counts, and check in with your pediatrician or a lactation supporter if feeding hurts or feels off.',
+  },
+  diaper: {
+    key: 'diaper',
+    title: 'Diapers',
+    tag: 'Common',
+    line: 'Diaper output is one of the clearest windows into how a newborn is doing.',
+    normal:
+      'Several wet diapers a day once feeding is established, and stools that shift from dark meconium to soft yellow, green, or tan — colour and frequency vary a lot in the early weeks.',
+    call: 'No wet diaper for many hours, very dark or bloody stool, hard dry pellets, or a sudden drop in output.',
+    helps:
+      'Change promptly, note roughly how many wet and dirty diapers you see, and use those counts as a simple daily check that feeding is going well.',
   },
 };
 
