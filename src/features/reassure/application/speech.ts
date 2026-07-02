@@ -9,8 +9,15 @@
  *
  * Transcription runs through the platform speech service (iOS Speech
  * framework / Android SpeechRecognizer), pinned to en-US to match the
- * English-only router vocabulary.
+ * English-only router vocabulary. Reassure also biases the recognizer toward
+ * its curated local topics and safety phrases; routing still happens in code.
  */
+
+import {
+  REASSURE_VOICE_CONTEXTUAL_STRINGS,
+  REASSURE_VOICE_MAX_ALTERNATIVES,
+  type VoiceTranscriptCandidate,
+} from '@/features/reassure/domain/voiceTranscript';
 
 type PermissionResponse = { granted: boolean };
 
@@ -18,16 +25,28 @@ type SpeechEventSubscription = { remove(): void };
 
 type SpeechResultEvent = {
   isFinal?: boolean;
-  results?: { transcript?: string }[];
+  results?: { transcript?: string; confidence?: number }[];
 };
 
 type SpeechErrorEvent = { error?: string; message?: string };
+type SpeechVolumeEvent = { value?: number };
 
 type SpeechNativeModule = {
   start(options: {
     lang: string;
     interimResults: boolean;
     continuous: boolean;
+    maxAlternatives: number;
+    contextualStrings: string[];
+    androidIntentOptions: {
+      EXTRA_LANGUAGE_MODEL: 'web_search';
+      EXTRA_MASK_OFFENSIVE_WORDS: false;
+      EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: number;
+    };
+    volumeChangeEventOptions: {
+      enabled: boolean;
+      intervalMillis: number;
+    };
   }): void;
   stop(): void;
   abort(): void;
@@ -36,6 +55,7 @@ type SpeechNativeModule = {
   addListener(event: 'result', handler: (ev: SpeechResultEvent) => void): SpeechEventSubscription;
   addListener(event: 'end', handler: () => void): SpeechEventSubscription;
   addListener(event: 'error', handler: (ev: SpeechErrorEvent) => void): SpeechEventSubscription;
+  addListener(event: 'volumechange', handler: (ev: SpeechVolumeEvent) => void): SpeechEventSubscription;
 };
 
 let cached: SpeechNativeModule | null | undefined;
@@ -80,10 +100,11 @@ export async function requestSpeechPermission(): Promise<'granted' | 'denied'> {
 }
 
 export type SpeechSessionCallbacks = {
-  onInterim: (transcript: string) => void;
-  onFinal: (transcript: string) => void;
+  onInterim: (candidates: VoiceTranscriptCandidate[]) => void;
+  onFinal: (candidates: VoiceTranscriptCandidate[]) => void;
   onEnd: () => void;
   onError: (code: string) => void;
+  onVolumeChange?: (volume: number) => void;
 };
 
 export type SpeechSession = { abort(): void; stop(): void };
@@ -108,13 +129,21 @@ export function startListening(callbacks: SpeechSessionCallbacks): SpeechSession
     subscriptions = [];
   };
 
+  const candidatesFrom = (ev: SpeechResultEvent): VoiceTranscriptCandidate[] =>
+    (ev.results ?? [])
+      .map((result) => ({
+        transcript: result.transcript ?? '',
+        confidence: result.confidence,
+      }))
+      .filter((result) => result.transcript.trim().length > 0);
+
   try {
     subscriptions.push(
       mod.addListener('result', (ev: SpeechResultEvent) => {
-        const transcript = ev.results?.[0]?.transcript ?? '';
-        if (transcript.length === 0) return;
-        if (ev.isFinal) callbacks.onFinal(transcript);
-        else callbacks.onInterim(transcript);
+        const candidates = candidatesFrom(ev);
+        if (candidates.length === 0) return;
+        if (ev.isFinal) callbacks.onFinal(candidates);
+        else callbacks.onInterim(candidates);
       }),
       mod.addListener('end', () => {
         cleanup();
@@ -125,7 +154,33 @@ export function startListening(callbacks: SpeechSessionCallbacks): SpeechSession
         callbacks.onError(ev.error ?? 'unknown');
       }),
     );
-    mod.start({ lang: 'en-US', interimResults: true, continuous: false });
+    if (callbacks.onVolumeChange) {
+      try {
+        subscriptions.push(
+          mod.addListener('volumechange', (ev: SpeechVolumeEvent) => {
+            if (typeof ev.value === 'number') callbacks.onVolumeChange?.(ev.value);
+          }),
+        );
+      } catch {
+        // Older native builds may not expose volumechange yet; recognition still works.
+      }
+    }
+    mod.start({
+      lang: 'en-US',
+      interimResults: true,
+      continuous: false,
+      maxAlternatives: REASSURE_VOICE_MAX_ALTERNATIVES,
+      contextualStrings: REASSURE_VOICE_CONTEXTUAL_STRINGS,
+      androidIntentOptions: {
+        EXTRA_LANGUAGE_MODEL: 'web_search',
+        EXTRA_MASK_OFFENSIVE_WORDS: false,
+        EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 2500,
+      },
+      volumeChangeEventOptions: {
+        enabled: true,
+        intervalMillis: 300,
+      },
+    });
   } catch {
     cleanup();
     return null;

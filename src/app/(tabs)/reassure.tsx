@@ -266,6 +266,21 @@ export default function ReassureScreen() {
         />
       </ReassureHero>
 
+      {voice.volumeHint ? (
+        <Text
+          accessibilityLiveRegion="polite"
+          style={{
+            marginTop: 10,
+            fontFamily: fonts.bodyBold,
+            fontSize: 12.5,
+            lineHeight: 18.5,
+            color: palette.inkSoft,
+            textAlign: 'center',
+          }}>
+          {voice.volumeHint}
+        </Text>
+      ) : null}
+
       {voiceFallback ? (
         <View
           accessibilityLiveRegion="polite"

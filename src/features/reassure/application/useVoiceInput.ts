@@ -19,8 +19,15 @@ import {
   type SpeechSession,
 } from '@/features/reassure/application/speech';
 import type { VoiceOrbState } from '@/features/reassure/components/VoiceOrb';
+import {
+  resolveVoiceTranscript,
+  type VoiceTranscriptCandidate,
+} from '@/features/reassure/domain/voiceTranscript';
 
 const LISTEN_TIMEOUT_MS = 10_000;
+const LOW_VOLUME_THRESHOLD = 0;
+const LOW_VOLUME_SAMPLE_COUNT = 4;
+export const REASSURE_LOW_VOLUME_HINT = 'Try speaking a little closer';
 
 type Options = {
   onTranscript: (text: string) => void;
@@ -30,16 +37,6 @@ type Options = {
   onNoMatch?: () => void;
   onError?: () => void;
 };
-
-export function resolveVoiceTranscript(
-  finalTranscript: string | null | undefined,
-  interimTranscript: string | null | undefined,
-): string | null {
-  const finalText = finalTranscript?.trim() ?? '';
-  if (finalText.length > 0) return finalText;
-  const interimText = interimTranscript?.trim() ?? '';
-  return interimText.length > 0 ? interimText : null;
-}
 
 export function classifyVoiceRecognitionError(code: string): 'no_match' | 'error' {
   const normalized = code.toLowerCase().replace(/[\s-]+/g, '_');
@@ -54,6 +51,14 @@ export function classifyVoiceRecognitionError(code: string): 'no_match' | 'error
   return 'error';
 }
 
+export function nextLowVolumeSampleCount(previousCount: number, volume: number): number {
+  return volume <= LOW_VOLUME_THRESHOLD ? previousCount + 1 : 0;
+}
+
+export function shouldShowLowVolumeHint(sampleCount: number): boolean {
+  return sampleCount >= LOW_VOLUME_SAMPLE_COUNT;
+}
+
 export function useVoiceInput({
   onTranscript,
   onListeningStart,
@@ -64,6 +69,7 @@ export function useVoiceInput({
 }: Options): {
   state: VoiceOrbState;
   interim: string | null;
+  volumeHint: string | null;
   tapOrb: () => void;
   retry: () => void;
 } {
@@ -73,10 +79,12 @@ export function useVoiceInput({
     isSpeechAvailable() ? 'available_idle' : 'unavailable',
   );
   const [interim, setInterim] = useState<string | null>(null);
+  const [volumeHint, setVolumeHint] = useState<string | null>(null);
 
   const sessionRef = useRef<SpeechSession | null>(null);
-  const finalRef = useRef<string | null>(null);
-  const interimRef = useRef<string | null>(null);
+  const finalRef = useRef<VoiceTranscriptCandidate[] | null>(null);
+  const interimRef = useRef<VoiceTranscriptCandidate[] | null>(null);
+  const lowVolumeSampleCountRef = useRef(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   const requestingRef = useRef(false);
@@ -101,6 +109,7 @@ export function useVoiceInput({
       requestingRef.current = false;
       if (!mountedRef.current) return;
       setInterim(null);
+      setVolumeHint(null);
       setState(next);
     },
     [clearListenTimeout],
@@ -118,21 +127,24 @@ export function useVoiceInput({
     cleanupActiveSession();
     finalRef.current = null;
     interimRef.current = null;
+    lowVolumeSampleCountRef.current = 0;
     if (mountedRef.current) setInterim(null);
     const session = startListening({
-      onInterim: (transcript) => {
-        interimRef.current = transcript;
-        if (mountedRef.current) setInterim(transcript);
+      onInterim: (candidates) => {
+        const selection = resolveVoiceTranscript(candidates, null);
+        interimRef.current = candidates;
+        if (mountedRef.current) setInterim(selection?.transcript ?? null);
       },
-      onFinal: (transcript) => {
-        finalRef.current = transcript;
-        if (mountedRef.current) setInterim(transcript);
+      onFinal: (candidates) => {
+        const selection = resolveVoiceTranscript(candidates, null);
+        finalRef.current = candidates;
+        if (mountedRef.current) setInterim(selection?.transcript ?? null);
       },
       onEnd: () => {
-        const transcript = resolveVoiceTranscript(finalRef.current, interimRef.current);
-        if (transcript !== null) {
+        const selection = resolveVoiceTranscript(finalRef.current, interimRef.current);
+        if (selection !== null) {
           settle('available_idle');
-          onTranscript(transcript);
+          onTranscript(selection.transcript);
         } else {
           settle('no_match');
           onNoMatch?.();
@@ -144,6 +156,12 @@ export function useVoiceInput({
         if (next === 'no_match') onNoMatch?.();
         else onError?.();
       },
+      onVolumeChange: (volume) => {
+        const count = nextLowVolumeSampleCount(lowVolumeSampleCountRef.current, volume);
+        lowVolumeSampleCountRef.current = count;
+        if (!mountedRef.current) return;
+        setVolumeHint(shouldShowLowVolumeHint(count) ? REASSURE_LOW_VOLUME_HINT : null);
+      },
     });
 
     if (session === null) {
@@ -152,7 +170,10 @@ export function useVoiceInput({
       return;
     }
     sessionRef.current = session;
-    if (mountedRef.current) setInterim(null);
+    if (mountedRef.current) {
+      setInterim(null);
+      setVolumeHint(null);
+    }
     setState('listening');
     onListeningStart?.();
     timeoutRef.current = setTimeout(() => {
@@ -197,5 +218,5 @@ export function useVoiceInput({
     startAttempt();
   }, [startAttempt]);
 
-  return { state, interim, tapOrb, retry };
+  return { state, interim, volumeHint, tapOrb, retry };
 }
