@@ -86,7 +86,7 @@ function TopicRow({
         accessibilityState={{ expanded: open }}
         accessibilityLabel={`${topic.title}. ${topic.tag}.`}
         onPress={toggle}
-        style={{ padding: 16, paddingHorizontal: 18, flexDirection: 'row', gap: 12 }}>
+        style={{ padding: 16, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
         <View
           style={{
             width: 9,
@@ -94,11 +94,18 @@ function TopicRow({
             borderRadius: 5,
             backgroundColor: tag.color,
             marginTop: 6,
+            flexShrink: 0,
           }}
         />
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <Text style={{ fontFamily: fonts.displayMedium, fontSize: 16, color: palette.ink }}>
+        <View style={{ flex: 1, minWidth: 0, flexShrink: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+            <Text
+              style={{
+                flexShrink: 1,
+                fontFamily: fonts.displayMedium,
+                fontSize: 16,
+                color: palette.ink,
+              }}>
               {topic.title}
             </Text>
             <View
@@ -107,6 +114,7 @@ function TopicRow({
                 paddingHorizontal: 8,
                 paddingVertical: 3,
                 borderRadius: radii.pill,
+                flexShrink: 0,
               }}>
               <Text
                 style={{
@@ -122,6 +130,7 @@ function TopicRow({
           </View>
           <Text
             style={{
+              flexShrink: 1,
               fontFamily: fonts.body,
               fontSize: 12.5,
               lineHeight: 19,
@@ -133,7 +142,11 @@ function TopicRow({
         </View>
         <Animated.View
           style={{
-            marginTop: 4,
+            width: 18,
+            height: 18,
+            marginTop: 5,
+            alignSelf: 'flex-start',
+            flexShrink: 0,
             transform: [
               {
                 rotate: chevron.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '90deg'] }),
