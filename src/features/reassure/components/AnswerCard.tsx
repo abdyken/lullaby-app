@@ -16,6 +16,7 @@ import Svg, { Path } from 'react-native-svg';
 
 import { AnswerBlocks } from '@/features/reassure/components/AnswerBlocks';
 import {
+  GUIDES,
   KB,
   OOS_COPY,
   TOPIC_DISMISS,
@@ -81,21 +82,27 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
   const title =
     result.kind === 'topic'
       ? KB[result.key].title
-      : result.kind === 'triage'
-        ? TRIAGE_COPY.title
-        : OOS_COPY.title;
+      : result.kind === 'guide'
+        ? GUIDES[result.key].title
+        : result.kind === 'triage'
+          ? TRIAGE_COPY.title
+          : OOS_COPY.title;
   const tag =
     result.kind === 'topic'
       ? KB[result.key].tag
-      : result.kind === 'triage'
-        ? TRIAGE_COPY.tag
-        : OOS_COPY.tag;
+      : result.kind === 'guide'
+        ? GUIDES[result.key].tag
+        : result.kind === 'triage'
+          ? TRIAGE_COPY.tag
+          : OOS_COPY.tag;
   const line =
     result.kind === 'topic'
       ? KB[result.key].line
-      : result.kind === 'triage'
-        ? TRIAGE_COPY.line
-        : OOS_COPY.line;
+      : result.kind === 'guide'
+        ? GUIDES[result.key].line
+        : result.kind === 'triage'
+          ? TRIAGE_COPY.line
+          : OOS_COPY.line;
   const dismissLabel =
     result.kind === 'topic'
       ? TOPIC_DISMISS
@@ -207,6 +214,26 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
                 color: palette.inkSoft,
               }}>
               {OOS_COPY.foot}
+            </Text>
+          </View>
+        ) : null}
+
+        {/* guide — a bounded NON-medical answer: no "When to call" block, calm tone. */}
+        {result.kind === 'guide' ? (
+          <View
+            style={{
+              backgroundColor: surfaceMode === 'night' ? 'rgba(255,255,255,0.06)' : colors.surfaceSoft,
+              borderRadius: radii.small,
+              padding: 13,
+            }}>
+            <Text
+              style={{
+                fontFamily: fonts.body,
+                fontSize: 13.5,
+                lineHeight: 20,
+                color: palette.inkSoft,
+              }}>
+              {GUIDES[result.key].body}
             </Text>
           </View>
         ) : null}

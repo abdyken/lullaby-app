@@ -141,7 +141,8 @@ export default function ReassureScreen() {
     (text: string, source: AskSource) => {
       const trimmed = text.trim();
       if (trimmed.length === 0) return;
-      const result = route(trimmed);
+      // Ground logs_summary asks: only point at the recap when there's data in it.
+      const result = route(trimmed, { hasLogs: !recap.isEmpty });
       if (source === 'text' || source === 'voice') Keyboard.dismiss();
       setVoiceFallback(null);
       setAnswer(result);
@@ -155,7 +156,7 @@ export default function ReassureScreen() {
       // Bring the answer into view once it has risen in.
       scrollToAnswer(source === 'text' ? 260 : 120);
     },
-    [scrollToAnswer, track],
+    [recap.isEmpty, scrollToAnswer, track],
   );
 
   const showVoiceFallback = useCallback((message: string, kind: VoiceFallback['kind']) => {

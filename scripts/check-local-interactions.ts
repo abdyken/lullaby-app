@@ -264,6 +264,7 @@ import type { InsightsViewModel } from '../src/features/insights/types';
 // recap leaves. All are react-native-free by design (source-scanned in §X).
 import { REDFLAGS, matchesRedFlag } from '../src/features/reassure/domain/redflags';
 import { normalizeAsk, route } from '../src/features/reassure/domain/router';
+import { classifyScope } from '../src/features/reassure/domain/scope';
 import {
   DAY_CONTEXT_START_HOUR,
   NIGHT_RECAP_END_HOUR,
@@ -290,7 +291,7 @@ import {
   resolveVoiceTranscript,
   selectVoiceTranscriptCandidate,
 } from '../src/features/reassure/domain/voiceTranscript';
-import { EXAMPLE_CHIPS, KB, REASSURE_CONTENT, TOPIC_ORDER } from '../src/features/reassure/content/kb';
+import { EXAMPLE_CHIPS, GUIDES, KB, REASSURE_CONTENT, TOPIC_ORDER } from '../src/features/reassure/content/kb';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
 const NOW = Date.parse('2026-06-17T00:00:00.000Z');
@@ -5374,8 +5375,8 @@ check('X4. every demo chip routes to its expected outcome', () => {
   assert.deepEqual(route("She's hard to wake"), { kind: 'triage' });
   // Every chip in the fixture routes to a bounded outcome (never throws/empty).
   for (const chip of EXAMPLE_CHIPS) {
-    const result = route(chip.ask);
-    assert.ok(['topic', 'triage', 'oos'].includes(result.kind), `chip "${chip.label}" is bounded`);
+    const result = route(chip.ask, { hasLogs: true });
+    assert.ok(['topic', 'guide', 'triage', 'oos'].includes(result.kind), `chip "${chip.label}" is bounded`);
     if (chip.flagged) assert.deepEqual(result, { kind: 'triage' }, `flagged chip "${chip.label}" triages`);
   }
 });
@@ -5423,6 +5424,79 @@ check('X4c. burping / belching / wind-after-feeds asks route to the bounded gas 
   assert.deepEqual(route('burping and hard to wake'), { kind: 'triage' });
   // Truly unrelated asks still get the bounded decline.
   assert.deepEqual(route('which stroller should I buy'), { kind: 'oos' });
+});
+
+check('X4d. classifyScope buckets non-red-flag parent asks deterministically (v1.5)', () => {
+  // scope classifier is pure keyword code — never triage, never an LLM.
+  assert.equal(classifyScope('is she eating enough'), 'feeding_tracking');
+  assert.equal(classifyScope('how often should she feed'), 'feeding_tracking');
+  assert.equal(classifyScope('how many wet diapers is normal'), 'diaper_tracking');
+  assert.equal(classifyScope('poop is green'), 'diaper_tracking');
+  assert.equal(classifyScope('what should i log this as'), 'app_logging_help');
+  assert.equal(classifyScope('how do i track a feed'), 'app_logging_help');
+  assert.equal(classifyScope("i'm exhausted"), 'parent_support');
+  assert.equal(classifyScope('i feel overwhelmed'), 'parent_support');
+  assert.equal(classifyScope('is this normal'), 'baby_comfort');
+  assert.equal(classifyScope('which stroller should i buy'), 'out_of_scope');
+  // logs_summary needs data to point at — otherwise it is out of scope.
+  assert.equal(classifyScope('how many feeds tonight', { hasLogs: true }), 'logs_summary');
+  assert.equal(classifyScope('how many feeds tonight', { hasLogs: false }), 'out_of_scope');
+  // A "how many … is normal" ask is guidance, not a read-back of my own logs.
+  assert.equal(classifyScope('how many naps is normal', { hasLogs: true }), 'sleep_tracking');
+});
+
+check('X4e. broader parent-experience asks route to bounded local outcomes (no longer oos)', () => {
+  // Common parent-experience asks that used to fall into oos now resolve.
+  assert.deepEqual(route('is she eating enough'), { kind: 'topic', key: 'feeding' });
+  assert.deepEqual(route('how often should she feed'), { kind: 'topic', key: 'feeding' });
+  assert.deepEqual(route('how many wet diapers is normal'), { kind: 'topic', key: 'diaper' });
+  assert.deepEqual(route('poop is green'), { kind: 'topic', key: 'diaper' });
+  assert.deepEqual(route('what should i log this as'), { kind: 'guide', key: 'app_logging_help' });
+  assert.deepEqual(route("i'm exhausted"), { kind: 'guide', key: 'parent_support' });
+  // logs_summary is grounded: guide only when there is saved data to point at.
+  assert.deepEqual(route('how many feeds tonight', { hasLogs: true }), { kind: 'guide', key: 'logs_summary' });
+  assert.deepEqual(route('how many feeds tonight', { hasLogs: false }), { kind: 'oos' });
+  // None of the common parent asks are oos anymore (with data present).
+  for (const ask of [
+    'is she eating enough',
+    'how often should she feed',
+    'how many wet diapers is normal',
+    'what should i log this as',
+    "i'm exhausted",
+    'how many feeds tonight',
+  ]) {
+    assert.notEqual(route(ask, { hasLogs: true }).kind, 'oos', `"${ask}" is no longer oos`);
+  }
+  // A general baby worry with no curated topic stays a bounded decline (future: AI).
+  assert.deepEqual(route('is this normal'), { kind: 'oos' });
+  // Genuinely unrelated asks are still declined.
+  for (const ask of ['which stroller should i buy', 'what is the weather', 'book a flight']) {
+    assert.deepEqual(route(ask, { hasLogs: true }), { kind: 'oos' }, `"${ask}" stays oos`);
+  }
+});
+
+check('X4f. red flags override every broader scope — triage always wins', () => {
+  // Triage is decided in code BEFORE classifyScope is ever consulted.
+  assert.deepEqual(route('exhausted and no wet diaper'), { kind: 'triage' });
+  assert.deepEqual(route('how many feeds but she has a fever'), { kind: 'triage' });
+  assert.deepEqual(route('what should i log for her temperature'), { kind: 'triage' });
+  assert.deepEqual(route('is she eating enough, she seems limp'), { kind: 'triage' });
+});
+
+check('X4g. guides are bounded and NON-medical (parent support never poses as advice)', () => {
+  assert.deepEqual(Object.keys(GUIDES).sort(), ['app_logging_help', 'logs_summary', 'parent_support']);
+  for (const key of Object.keys(GUIDES) as (keyof typeof GUIDES)[]) {
+    const guide = GUIDES[key];
+    // A guide is NOT a medical KB card — it carries no normal/helps/call blocks.
+    assert.ok(!('normal' in guide) && !('helps' in guide) && !('call' in guide), `${key} has no medical blocks`);
+    // Non-medical tags only.
+    assert.ok(['App help', 'Support', 'Your logs'].includes(guide.tag), `${key} tag is non-medical`);
+    assert.ok(guide.line.length > 0 && guide.body.length > 0, `${key} has copy`);
+  }
+  // Parent support explicitly disclaims medical advice and points to a real person.
+  const support = GUIDES.parent_support.body.toLowerCase();
+  assert.ok(support.includes('medical advice'), 'parent support disclaims medical advice');
+  assert.ok(support.includes('doctor') || support.includes('support line'), 'parent support points to a real person');
 });
 
 check('X5. every KB topic is routable by its own title and listed in TOPIC_ORDER', () => {
@@ -5756,6 +5830,7 @@ const RX_DOMAIN_SRCS: Record<string, string> = Object.fromEntries(
     'domain/types.ts',
     'domain/redflags.ts',
     'domain/router.ts',
+    'domain/scope.ts',
     'domain/voiceTranscript.ts',
     'domain/nightWindow.ts',
     'domain/recap.ts',
@@ -5846,7 +5921,7 @@ check('X17. the edge-function content mirror has not drifted from the app module
 
 check('X17b. Reassure RN workflow wires every local entry point into the answer path', () => {
   assert.ok(REASSURE_SCREEN_SRC.includes('const ask = useCallback'), 'screen owns one shared ask funnel');
-  assert.ok(REASSURE_SCREEN_SRC.includes('const result = route(trimmed)'), 'shared ask calls route() locally');
+  assert.ok(REASSURE_SCREEN_SRC.includes('const result = route(trimmed'), 'shared ask calls route() locally');
   assert.ok(REASSURE_SCREEN_SRC.includes('<AskCard') && REASSURE_SCREEN_SRC.includes('onAsk={ask}'),
     'typed ask and chips receive the shared ask funnel');
   assert.ok(TOPIC_ACCORDION_SRC.includes('Ask about ${topic.title.toLowerCase()}'), 'topic cards expose a specific answer-card CTA');

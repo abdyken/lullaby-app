@@ -18,7 +18,7 @@
  * checksum guard against drift.
  */
 
-import type { ReassureTopicKey } from '../domain/types';
+import type { ReassureGuideKey, ReassureTopicKey } from '../domain/types';
 
 export type ReassureTopicTag = 'Common' | 'Comfort';
 
@@ -90,9 +90,87 @@ export const KB: Record<ReassureTopicKey, ReassureTopic> = {
     call: 'Baby is very hard to wake, has breathing pauses that worry you, or seems unusually limp or floppy.',
     helps: 'A calm, dark wind-down and the same short routine each night — with safe-sleep basics every time.',
   },
+  feeding: {
+    key: 'feeding',
+    title: 'Feeding',
+    tag: 'Common',
+    line: 'Newborn feeding is frequent and irregular — many babies feed 8–12 times a day, with cluster feeds some evenings.',
+    normal:
+      'Feeding every 1–3 hours, longer cluster-feeding stretches in the evening, and steady weight gain with regular wet and dirty diapers — the reassuring signs a newborn is getting enough.',
+    call: 'Far fewer wet diapers than usual, a baby too sleepy to wake for feeds, no weight gain, or feeds that are consistently painful or distressing.',
+    helps:
+      'Watch the baby, not the clock — offer a feed at early hunger cues, keep a rough eye on diaper counts, and check in with your pediatrician or a lactation supporter if feeding hurts or feels off.',
+  },
+  diaper: {
+    key: 'diaper',
+    title: 'Diapers',
+    tag: 'Common',
+    line: 'Diaper output is one of the clearest windows into how a newborn is doing.',
+    normal:
+      'Several wet diapers a day once feeding is established, and stools that shift from dark meconium to soft yellow, green, or tan — colour and frequency vary a lot in the early weeks.',
+    call: 'No wet diaper for many hours, very dark or bloody stool, hard dry pellets, or a sudden drop in output.',
+    helps:
+      'Change promptly, note roughly how many wet and dirty diapers you see, and use those counts as a simple daily check that feeding is going well.',
+  },
 };
 
-export const TOPIC_ORDER: ReassureTopicKey[] = ['hiccups', 'spitup', 'gas', 'crying', 'sleep'];
+export const TOPIC_ORDER: ReassureTopicKey[] = [
+  'hiccups',
+  'spitup',
+  'gas',
+  'crying',
+  'sleep',
+  'feeding',
+  'diaper',
+];
+
+export type ReassureGuideTag = 'App help' | 'Support' | 'Your logs';
+
+/**
+ * A bounded NON-medical guide. Deliberately NOT the medical normal/helps/call
+ * shape — rendered as a plain calm card with no "When to call" block. Used for
+ * app-experience help, gentle parent support, and pointing at the (code-computed)
+ * logs recap. See docs/reassure-scope-matrix.md.
+ */
+export type ReassureGuide = {
+  key: ReassureGuideKey;
+  title: string;
+  tag: ReassureGuideTag;
+  /** the one-line calm summary shown in the answer header */
+  line: string;
+  /** a short body paragraph — plain guidance, never a diagnosis or treatment */
+  body: string;
+};
+
+/*
+ * PLACEHOLDER product copy — pending review (docs/reassure-content-review.md).
+ * NON-MEDICAL by construction: parent_support explicitly says it is not medical
+ * advice and points to a real person for anything serious; nothing here diagnoses,
+ * treats, or reassures about an emergency.
+ */
+export const GUIDES: Record<ReassureGuideKey, ReassureGuide> = {
+  app_logging_help: {
+    key: 'app_logging_help',
+    title: 'What to log',
+    tag: 'App help',
+    line: 'Not sure where something goes? Here’s the quick version.',
+    body: 'Tap Log to record a feed, sleep, diaper, or pump — those four cover most of the night. Anything else (a spit-up, a note to yourself, a mood) goes in as a Note. You don’t have to be precise: log what you can, when you can, and skip the rest. Your recap and history build themselves from whatever you save.',
+  },
+  parent_support: {
+    key: 'parent_support',
+    title: 'You’re carrying a lot',
+    tag: 'Support',
+    line: 'Nights like this are genuinely hard — needing a break doesn’t mean you’re doing anything wrong.',
+    body: 'Reassure can’t take the tiredness away, but a few things help many parents: hand the baby to someone you trust for even ten minutes, drop every expectation tonight that isn’t feeding and safety, and remember that fed and safe is enough. This isn’t medical advice — if you ever feel you might hurt yourself or the baby, or the low feelings won’t lift, please reach out to your doctor or a local support line right away.',
+  },
+  logs_summary: {
+    key: 'logs_summary',
+    title: 'Your logs',
+    tag: 'Your logs',
+    line: 'Here’s where tonight’s logs live.',
+    body: 'The recap card just below turns every feed, sleep, diaper, and note you’ve saved into a simple count for the current window, and History has the full timeline. Reassure only ever reads back what you logged — it never guesses at what you didn’t.',
+  },
+};
 
 /* PLACEHOLDER — pending clinician review. */
 export const TRIAGE_COPY = {
@@ -133,8 +211,10 @@ export const EXAMPLE_CHIPS: ExampleChip[] = [
   { label: 'Spit-up after a feed', ask: 'A little spit-up after feeding', flagged: false },
   { label: 'Grunting & squirming', ask: 'Lots of grunting and squirming', flagged: false },
   { label: 'Burping after feeds', ask: 'She burps a lot after feeds', flagged: false },
+  { label: 'Eating enough?', ask: 'Is she eating enough', flagged: false },
   { label: "Won't stop crying", ask: "She won't stop crying", flagged: false },
   { label: "Won't settle", ask: "She won't settle at all", flagged: false },
+  { label: 'What should I log?', ask: 'What should I log this as', flagged: false },
   { label: 'She feels hot', ask: 'She feels really hot', flagged: true },
   { label: 'Hard to wake her', ask: "She's hard to wake", flagged: true },
 ];

@@ -8,18 +8,50 @@
  * bounded outcomes. There is no open-ended kind, no follow-up kind, no chat.
  */
 
-/** The curated topics Reassure can answer. Keys index into content/kb.ts. */
-export type ReassureTopicKey = 'hiccups' | 'spitup' | 'gas' | 'crying' | 'sleep';
+/** The curated MEDICAL topics Reassure can answer. Keys index into content/kb.ts KB. */
+export type ReassureTopicKey = 'hiccups' | 'spitup' | 'gas' | 'crying' | 'sleep' | 'feeding' | 'diaper';
+
+/**
+ * Bounded NON-medical guides. Keys index into content/kb.ts GUIDES. These are
+ * app-experience / parent-support answers — deliberately NOT the medical
+ * normal/helps/call shape, and never rendered with a "When to call" block.
+ */
+export type ReassureGuideKey = 'app_logging_help' | 'parent_support' | 'logs_summary';
+
+/**
+ * The broader scope classifier's output (v1.5). Produced by classifyScope() for
+ * NON-red-flag asks only — it never decides triage. Coarser than a topic key: it
+ * says which KIND of parent-experience question this is, so the (future) AI path
+ * can pick grounding + prompt, and route() can pick a bounded local outcome.
+ */
+export type ReassureScope =
+  | 'baby_comfort'
+  | 'feeding_tracking'
+  | 'sleep_tracking'
+  | 'diaper_tracking'
+  | 'app_logging_help'
+  | 'parent_support'
+  | 'logs_summary'
+  | 'out_of_scope';
+
+/**
+ * Context the classifier/router may consult. Kept minimal and code-computed:
+ *  - hasLogs — the parent has at least one saved log in the current window, so a
+ *    logs_summary ask has something to point at (else it is out of scope).
+ */
+export type ScopeContext = { hasLogs: boolean };
 
 /**
  * The single result type every input path (voice, chip, text) resolves to.
  *  - 'triage'  — a red flag matched; escalate to a doctor. Always wins.
- *  - 'topic'   — a curated KB topic answers it, then the interaction ENDS.
+ *  - 'topic'   — a curated MEDICAL KB topic answers it, then the interaction ENDS.
+ *  - 'guide'   — a bounded NON-medical guide (app help, parent support, logs).
  *  - 'oos'     — out of scope; politely decline and point to the pediatrician.
  */
 export type RouteResult =
   | { kind: 'triage' }
   | { kind: 'topic'; key: ReassureTopicKey }
+  | { kind: 'guide'; key: ReassureGuideKey }
   | { kind: 'oos' };
 
 /** Where an ask came from — analytics-safe enum (never the raw text). */
