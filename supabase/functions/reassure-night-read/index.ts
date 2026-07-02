@@ -10,9 +10,12 @@
  *   5. triage-first by construction: the prompt contains ONLY numeric tallies
  *      + a coarse age band — no note text, no parent text. Every string that
  *      could ever reach the prompt is still scanned against REDFLAGS.
- *   6. Claude call (bounded, structured output, refusal-aware, 8s, 0 retries)
- *   7. full request/response audit (service role only)
- *   8. cache + return
+ *   6. Claude call (bounded per _shared/reassureLlm.ts: Haiku default,
+ *      temp 0.3, max_tokens cap, 8s timeout, 0 retries, structured output)
+ *   7. shared output guardrail: parse → length cap → judgement-vocab check;
+ *      any failure discards the answer
+ *   8. full request/response audit via the shared writer (service role only)
+ *   9. cache + return
  *
  * Every failure returns { read: null, source: 'fallback' } — the client
  * already rendered the local descriptive read and silently keeps it.
@@ -24,94 +27,34 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 
 import { corsHeaders } from '../_shared/cors.ts';
 import { matchesRedFlag, normalizeAsk, NIGHT_READ_SYSTEM_PROMPT } from '../_shared/reassureContent.ts';
-
-const DEFAULT_MODEL = 'claude-opus-4-8';
-const LLM_TIMEOUT_MS = 8_000;
-const NIGHT_START_HOUR = 18;
-const NIGHT_LENGTH_HOURS = 16; // 18:00 → 10:00 next day
-
-type EventRow = {
-  type: 'feed' | 'sleep' | 'diaper' | 'pump' | 'note';
-  start_at: string;
-  end_at: string | null;
-  meta: { label?: string } | null;
-};
-
-type Tallies = {
-  feeds: number;
-  diapers: number;
-  spitUps: number;
-  longestSleepMin: number | null;
-  sleepRunning: boolean;
-};
-
-const SPITUP_NOTE_LABEL = 'Spit-up';
+import {
+  classifyLlmError,
+  LLM_MAX_RETRIES,
+  LLM_TIMEOUT_MS,
+  NIGHT_READ_MAX_CHARS,
+  NIGHT_READ_MAX_TOKENS,
+  REASSURE_DEFAULT_MODEL,
+  REASSURE_TEMPERATURE,
+  validateLlmOutput,
+} from '../_shared/reassureLlm.ts';
+import {
+  insertReassureAudit,
+  usageOf,
+  type ReassureAuditOutcome,
+} from '../_shared/reassureAudit.ts';
+import {
+  ageBandFromBirthDate,
+  buildPromptFacts,
+  computeTallies,
+  windowFor,
+  type EventRow,
+} from './nightReadCore.ts';
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
-}
-
-/** The night window in UTC ms, from the night key + the client's tz offset. */
-function windowFor(nightKey: string, tzOffsetMinutes: number): { startMs: number; endMs: number } {
-  const [y, m, d] = nightKey.split('-').map((part) => Number.parseInt(part, 10));
-  // Local 18:00 expressed in UTC: UTC = local + tzOffsetMinutes (JS convention).
-  const startMs = Date.UTC(y, m - 1, d, NIGHT_START_HOUR, 0) + tzOffsetMinutes * 60_000;
-  const endMs = Math.min(Date.now(), startMs + NIGHT_LENGTH_HOURS * 3_600_000);
-  return { startMs, endMs };
-}
-
-function computeTallies(rows: EventRow[], startMs: number, endMs: number): Tallies {
-  let feeds = 0;
-  let diapers = 0;
-  let spitUps = 0;
-  let longestSleepMs = 0;
-  let sleepRunning = false;
-
-  for (const row of rows) {
-    const t = Date.parse(row.start_at);
-    switch (row.type) {
-      case 'feed':
-        if (t >= startMs && t <= endMs) feeds += 1;
-        break;
-      case 'diaper':
-        if (t >= startMs && t <= endMs) diapers += 1;
-        break;
-      case 'note':
-        if (t >= startMs && t <= endMs && row.meta?.label === SPITUP_NOTE_LABEL) spitUps += 1;
-        break;
-      case 'sleep': {
-        const sleepEnd = row.end_at == null ? endMs : Date.parse(row.end_at);
-        if (t <= endMs && sleepEnd >= startMs) {
-          if (row.end_at == null) sleepRunning = true;
-          longestSleepMs = Math.max(longestSleepMs, sleepEnd - t);
-        }
-        break;
-      }
-      default:
-        break;
-    }
-  }
-
-  return {
-    feeds,
-    diapers,
-    spitUps,
-    longestSleepMin: longestSleepMs > 0 ? Math.max(1, Math.round(longestSleepMs / 60_000)) : null,
-    sleepRunning,
-  };
-}
-
-function ageBandFromBirthDate(birthDate: string | null): string {
-  if (!birthDate) return 'unknown age';
-  const weeks = Math.max(0, Math.floor((Date.now() - Date.parse(birthDate)) / (7 * 24 * 3_600_000)));
-  if (weeks < 4) return '0-4 weeks';
-  if (weeks < 12) return '1-3 months';
-  if (weeks < 26) return '3-6 months';
-  if (weeks < 52) return '6-12 months';
-  return 'over 12 months';
 }
 
 Deno.serve(async (req) => {
@@ -123,7 +66,7 @@ Deno.serve(async (req) => {
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
-  const model = Deno.env.get('REASSURE_MODEL') ?? DEFAULT_MODEL;
+  const model = Deno.env.get('REASSURE_MODEL') ?? REASSURE_DEFAULT_MODEL;
 
   // 1. Verify the JWT — a user-scoped client so every later read is under RLS.
   const authHeader = req.headers.get('Authorization') ?? '';
@@ -173,7 +116,7 @@ Deno.serve(async (req) => {
   }
 
   // 4. Events under RLS (user-scoped client) + tallies computed IN CODE.
-  const { startMs, endMs } = windowFor(nightKey, tzOffsetMinutes);
+  const { startMs, endMs } = windowFor(nightKey, tzOffsetMinutes, Date.now());
   const { data: rows } = await userClient
     .from('events')
     .select('type, start_at, end_at, meta')
@@ -187,39 +130,59 @@ Deno.serve(async (req) => {
     .select('birth_date')
     .eq('id', babyId)
     .maybeSingle();
-  const ageBand = ageBandFromBirthDate(babyRow?.birth_date ?? null);
+  const ageBand = ageBandFromBirthDate(babyRow?.birth_date ?? null, Date.now());
+
+  const auditRequest = { nightKey, tzOffsetMinutes, tallies, ageBand, model } as Record<
+    string,
+    unknown
+  >;
 
   // 5. Triage-first by construction: only these code-built strings may reach
   //    the prompt. Scan them anyway — the guard survives future edits.
-  const promptFacts = [
-    `Age band: ${ageBand}.`,
-    `Feeds logged: ${tallies.feeds}.`,
-    `Diaper changes logged: ${tallies.diapers}.`,
-    `Spit-up notes logged: ${tallies.spitUps}.`,
-    tallies.sleepRunning
-      ? 'A sleep is currently running.'
-      : tallies.longestSleepMin != null
-        ? `Longest sleep logged: ${tallies.longestSleepMin} minutes.`
-        : 'No sleep logged yet.',
-  ].join(' ');
+  const promptFacts = buildPromptFacts(tallies, ageBand);
+  auditRequest.promptFacts = promptFacts;
   if (matchesRedFlag(normalizeAsk(promptFacts))) {
     // A red flag inside pure tallies means something is structurally wrong —
-    // never call the model on it.
+    // never call the model on it, but leave the incident in the audit log.
+    await insertReassureAudit(serviceClient, {
+      user_id: user.id,
+      baby_id: babyId,
+      kind: 'night-read',
+      outcome: 'redflag_input',
+      request: auditRequest,
+      response: {},
+      model,
+      stop_reason: null,
+      latency_ms: Date.now() - startedAt,
+      usage: {},
+    });
     return json(200, { read: null, source: 'fallback', nightKey, tallies });
   }
 
   // 6. The bounded Claude call.
   let read: string | null = null;
+  let outcome: ReassureAuditOutcome = 'api_error';
   let stopReason: string | null = null;
   let llmResponse: unknown = null;
+  let usage: Record<string, unknown> = {};
   if (anthropicKey) {
     try {
-      const anthropic = new Anthropic({ apiKey: anthropicKey, maxRetries: 0 });
+      const anthropic = new Anthropic({ apiKey: anthropicKey, maxRetries: LLM_MAX_RETRIES });
       const response = await anthropic.messages.create(
         {
           model,
-          max_tokens: 300,
-          system: NIGHT_READ_SYSTEM_PROMPT,
+          max_tokens: NIGHT_READ_MAX_TOKENS,
+          temperature: REASSURE_TEMPERATURE,
+          // Stable prefix marked cacheable (§2). Today the placeholder prompt
+          // is below Haiku's minimum cacheable prefix, so this is a dormant
+          // no-op that starts paying once the reviewed prompt grows.
+          system: [
+            {
+              type: 'text',
+              text: NIGHT_READ_SYSTEM_PROMPT,
+              cache_control: { type: 'ephemeral' },
+            },
+          ],
           messages: [{ role: 'user', content: promptFacts }],
           output_config: {
             format: {
@@ -237,39 +200,54 @@ Deno.serve(async (req) => {
       );
       stopReason = response.stop_reason ?? null;
       llmResponse = response;
-      if (response.stop_reason !== 'refusal') {
+      usage = usageOf(response);
+      if (response.stop_reason === 'refusal') {
+        outcome = 'refusal';
+      } else {
         const block = response.content.find((item: { type: string }) => item.type === 'text') as
           | { type: 'text'; text: string }
           | undefined;
-        if (block?.text) {
-          const parsed = JSON.parse(block.text) as { read?: string };
-          if (typeof parsed.read === 'string' && parsed.read.length > 0) read = parsed.read;
+        // 7. The shared output guardrail — parse → length → judgement vocab.
+        //    The night read's input is numeric, so there is no source text to
+        //    exempt: ANY judgement vocabulary is an introduced medical claim.
+        const verdict = validateLlmOutput(block?.text ?? '', 'read', {
+          maxChars: NIGHT_READ_MAX_CHARS,
+        });
+        if (verdict.ok) {
+          read = verdict.value;
+          outcome = 'llm';
+        } else {
+          outcome = verdict.reason === 'parse' ? 'parse_fail' : 'guardrail_block';
         }
       }
     } catch (error) {
       llmResponse = { error: String(error) };
+      outcome = classifyLlmError(error);
     }
   } else {
     llmResponse = { error: 'ANTHROPIC_API_KEY not configured' };
+    outcome = 'no_api_key';
   }
 
-  // 7. Audit — full request/response, service-role only, fire before returning.
-  await serviceClient.from('reassure_audit').insert({
+  // 8. Audit — full request/response via the shared writer, before returning.
+  await insertReassureAudit(serviceClient, {
     user_id: user.id,
     baby_id: babyId,
     kind: 'night-read',
-    request: { nightKey, tzOffsetMinutes, tallies, ageBand, model, promptFacts },
+    outcome,
+    request: auditRequest,
     response: llmResponse ?? {},
     model,
     stop_reason: stopReason,
     latency_ms: Date.now() - startedAt,
+    usage,
   });
 
   if (read == null) {
     return json(200, { read: null, source: 'fallback', nightKey, tallies });
   }
 
-  // 8. Cache for every caregiver of this baby, then return.
+  // 9. Cache for every caregiver of this baby, then return.
   await serviceClient
     .from('reassure_night_reads')
     .upsert({ baby_id: babyId, night_key: nightKey, read, model, tallies });
