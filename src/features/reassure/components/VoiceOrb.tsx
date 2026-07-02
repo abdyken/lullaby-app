@@ -2,11 +2,11 @@
  * VoiceOrb — the signature glass circle inside the night-sky hero.
  *
  * States:
- *  - 'idle'        breathing halo, mic, "Tap to talk"
- *  - 'requesting'  permission prompt in flight
- *  - 'listening'   three staggered pulse rings + live label
- *  - 'denied'      mic permission refused → "Type instead" (tap focuses input)
- *  - 'unavailable' no speech service / module absent → same degraded behavior
+ *  - 'available_idle'    breathing halo, mic, "Tap to talk"
+ *  - 'listening'         three staggered pulse rings + live label
+ *  - 'unavailable'       no speech service / module absent
+ *  - 'permission_denied' mic permission refused
+ *  - 'error'             speech ended without a usable transcript
  *
  * All loops are gated on reduce-motion. The orb itself never routes — it only
  * reports taps; the owner decides whether that means "listen" or "focus the
@@ -18,7 +18,12 @@ import Svg, { Circle, Defs, Path, RadialGradient, Stop } from 'react-native-svg'
 
 import { colors, fonts } from '@/theme';
 
-export type VoiceOrbState = 'idle' | 'requesting' | 'listening' | 'denied' | 'unavailable';
+export type VoiceOrbState =
+  | 'available_idle'
+  | 'listening'
+  | 'unavailable'
+  | 'permission_denied'
+  | 'error';
 
 const ORB_SIZE = 154;
 const RING_COUNT = 3;
@@ -113,7 +118,7 @@ type Props = {
 
 export function VoiceOrb({ state, reduceMotion, onPress, interimText }: Props) {
   const [breathe] = useState(() => new Animated.Value(0));
-  const degraded = state === 'denied' || state === 'unavailable';
+  const degraded = state === 'permission_denied' || state === 'unavailable' || state === 'error';
 
   useEffect(() => {
     if (reduceMotion || degraded) {
@@ -140,20 +145,28 @@ export function VoiceOrb({ state, reduceMotion, onPress, interimText }: Props) {
     return () => loop.stop();
   }, [breathe, degraded, reduceMotion]);
 
-  const label =
-    state === 'listening'
-      ? 'Listening…'
-      : state === 'requesting'
-        ? 'One moment…'
-        : degraded
-          ? 'Type instead'
-          : 'Tap to talk';
+  const label: Record<VoiceOrbState, string> = {
+    available_idle: 'Tap to talk',
+    listening: 'Listening...',
+    unavailable: 'Voice unavailable in this build',
+    permission_denied: 'Enable microphone in settings',
+    error: "Voice didn't catch that — type instead",
+  };
 
-  const accessibilityLabel = degraded
-    ? 'Voice input unavailable. Tap to type your question instead.'
-    : state === 'listening'
-      ? 'Listening. Tap to stop.'
-      : 'Tap to talk';
+  const accessibilityLabel = (() => {
+    switch (state) {
+      case 'unavailable':
+        return 'Voice unavailable in this build. Tap to type your question instead.';
+      case 'permission_denied':
+        return 'Enable microphone in settings, or tap to type your question instead.';
+      case 'error':
+        return "Voice didn't catch that. Tap to type your question instead.";
+      case 'listening':
+        return 'Listening. Tap to stop.';
+      case 'available_idle':
+        return 'Tap to talk';
+    }
+  })();
 
   return (
     <View style={{ alignItems: 'center' }}>
@@ -217,14 +230,19 @@ export function VoiceOrb({ state, reduceMotion, onPress, interimText }: Props) {
           }}>
           {degraded ? <KeyboardIcon /> : <MicIcon />}
           <Text
+            numberOfLines={2}
+            adjustsFontSizeToFit
+            minimumFontScale={0.75}
             style={{
+              width: ORB_SIZE - 34,
               fontFamily: fonts.bodyBold,
               fontSize: 11,
               letterSpacing: 1.3,
               textTransform: 'uppercase',
+              textAlign: 'center',
               color: colors.sleep,
             }}>
-            {label}
+            {label[state]}
           </Text>
         </View>
       </Pressable>

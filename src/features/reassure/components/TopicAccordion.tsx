@@ -41,11 +41,13 @@ function TopicRow({
   surfaceMode,
   reduceMotion,
   onToggle,
+  onAskTopic,
 }: {
   topicKey: ReassureTopicKey;
   surfaceMode: SurfaceMode;
   reduceMotion: boolean;
   onToggle: (key: ReassureTopicKey, open: boolean) => void;
+  onAskTopic: (key: ReassureTopicKey) => void;
 }) {
   const topic = KB[topicKey];
   const palette = surfaces[surfaceMode];
@@ -152,6 +154,22 @@ function TopicRow({
       {open ? (
         <View style={{ paddingHorizontal: 18, paddingBottom: 18, paddingTop: 2 }}>
           <AnswerBlocks topic={topic} surfaceMode={surfaceMode} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Ask about ${topic.title}`}
+            onPress={() => onAskTopic(topicKey)}
+            style={({ pressed }) => ({
+              alignSelf: 'flex-start',
+              backgroundColor: night ? 'rgba(85,96,198,0.18)' : colors.sleepTint,
+              borderRadius: radii.pill,
+              paddingHorizontal: 13,
+              paddingVertical: 8,
+              transform: [{ scale: pressed ? 0.96 : 1 }],
+            })}>
+            <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.sleep }}>
+              Ask about this
+            </Text>
+          </Pressable>
         </View>
       ) : null}
     </View>
@@ -162,10 +180,12 @@ export function TopicAccordion({
   surfaceMode,
   reduceMotion,
   onToggle,
+  onAskTopic,
 }: {
   surfaceMode: SurfaceMode;
   reduceMotion: boolean;
   onToggle: (key: ReassureTopicKey, open: boolean) => void;
+  onAskTopic: (key: ReassureTopicKey) => void;
 }) {
   return (
     <View style={{ gap: 11 }}>
@@ -176,6 +196,7 @@ export function TopicAccordion({
           surfaceMode={surfaceMode}
           reduceMotion={reduceMotion}
           onToggle={onToggle}
+          onAskTopic={onAskTopic}
         />
       ))}
     </View>

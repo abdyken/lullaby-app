@@ -107,7 +107,7 @@ function plural(count: number, singular: string, pluralForm?: string): string {
  * clinician-owned Phase-2 concern, never template text.
  */
 export function recapReadText(recap: ReassureNightRecap): string {
-  const opener = recap.window.label === 'tonight' ? 'Since 6pm' : 'Last night (6pm–10am)';
+  const opener = recap.window.label === 'tonight' ? 'Since 6pm' : 'For the 6pm-10am window';
 
   if (recap.isEmpty) {
     return `${opener} there are no saved logs yet. Your recap builds itself from every feed, sleep, diaper, or note you save.`;
@@ -138,5 +138,5 @@ export function recapReadText(recap: ReassureNightRecap): string {
 
 /** Short label for the recap chip — descriptive source note, never a verdict. */
 export function recapWindowLabel(recap: ReassureNightRecap): string {
-  return recap.window.label === 'tonight' ? 'From tonight’s logs' : 'From last night’s logs';
+  return recap.window.label === 'tonight' ? 'Since 6pm' : 'Morning recap';
 }

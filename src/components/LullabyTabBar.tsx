@@ -3,8 +3,8 @@
  * `tabBar`). It renders one stable pill from the committed theme.
  */
 import { Tabs } from 'expo-router';
-import type { ComponentProps } from 'react';
-import { View } from 'react-native';
+import { useEffect, useState, type ComponentProps } from 'react';
+import { Keyboard, View } from 'react-native';
 
 import { TabBarPill, useTabBarLayout, type TabBarTab } from '@/components/TabBarPill';
 import type { TabName } from '@/components/TabIcon';
@@ -28,9 +28,20 @@ const ICONS: Record<string, TabName> = {
 
 export function LullabyTabBar({ state, navigation }: LullabyTabBarProps) {
   const { mode } = useTheme();
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   // Shared, pixel-snapped geometry for the floating pill.
   const { pillWidth, paddingBottom } = useTabBarLayout();
+  const activeRouteName = state.routes[state.index]?.name;
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const tabs: TabBarTab[] = state.routes.map((route, index) => ({
     key: route.key,
@@ -48,6 +59,10 @@ export function LullabyTabBar({ state, navigation }: LullabyTabBarProps) {
       }
     },
   }));
+
+  if (activeRouteName === 'reassure' && keyboardVisible) {
+    return null;
+  }
 
   return (
     <View

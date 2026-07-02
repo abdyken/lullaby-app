@@ -273,8 +273,10 @@ import {
   SPITUP_NOTE_LABEL,
   buildReassureRecap,
   recapReadText,
+  recapWindowLabel,
 } from '../src/features/reassure/domain/recap';
-import { KB, REASSURE_CONTENT, TOPIC_ORDER } from '../src/features/reassure/content/kb';
+import { isSpeechAvailable } from '../src/features/reassure/application/speech';
+import { EXAMPLE_CHIPS, KB, REASSURE_CONTENT, TOPIC_ORDER } from '../src/features/reassure/content/kb';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
 const NOW = Date.parse('2026-06-17T00:00:00.000Z');
@@ -4680,6 +4682,23 @@ const LOGGING_PROVIDER_SRC = readFileSync(
   new URL('../src/features/logging/state/LoggingProvider.tsx', import.meta.url),
   'utf8',
 );
+const SCREEN_SRC = readFileSync(new URL('../src/components/Screen.tsx', import.meta.url), 'utf8');
+const LULLABY_TAB_BAR_SRC = readFileSync(
+  new URL('../src/components/LullabyTabBar.tsx', import.meta.url),
+  'utf8',
+);
+const REASSURE_SCREEN_SRC = readFileSync(
+  new URL('../src/app/(tabs)/reassure.tsx', import.meta.url),
+  'utf8',
+);
+const VOICE_ORB_SRC = readFileSync(
+  new URL('../src/features/reassure/components/VoiceOrb.tsx', import.meta.url),
+  'utf8',
+);
+const USE_VOICE_INPUT_SRC = readFileSync(
+  new URL('../src/features/reassure/application/useVoiceInput.ts', import.meta.url),
+  'utf8',
+);
 const TOPIC_ACCORDION_SRC = readFileSync(
   new URL('../src/features/reassure/components/TopicAccordion.tsx', import.meta.url),
   'utf8',
@@ -5497,6 +5516,47 @@ check('X11. sleeps overlapping the window count; a running sleep is flagged', ()
   assert.equal(running.isEmpty, false);
 });
 
+check('X11b. canonical feed/diaper/sleep/spit-up fixture counts, while pump is ignored', () => {
+  const recap = buildReassureRecap(
+    [
+      rxFeed(rxIso(20)),
+      rxDiaper(rxIso(21)),
+      rxSleep(rxIso(22), rxIso(22, 0, 40)),
+      rxNote(rxIso(23), 'spit_up', SPITUP_NOTE_LABEL),
+      rxPump(rxIso(23, 0, 30)),
+    ],
+    RX_NOW,
+  );
+  assert.equal(recap.feedCount, 1);
+  assert.equal(recap.diaperCount, 1);
+  assert.equal(recap.longestSleepMin, 40);
+  assert.equal(recap.spitUpCount, 1);
+  assert.equal(recap.isEmpty, false);
+});
+
+check('X11c. local ask workflow outcomes cover typed topic, triage chip, and unknown ask', () => {
+  assert.deepEqual(route('She hiccups after every feed'), { kind: 'topic', key: 'hiccups' });
+  const triageChips = EXAMPLE_CHIPS.filter((chip) => chip.flagged);
+  assert.ok(triageChips.length > 0, 'fixture has red triage chips');
+  for (const chip of triageChips) {
+    assert.deepEqual(route(chip.ask), { kind: 'triage' }, `${chip.label} routes to triage`);
+  }
+  assert.deepEqual(route('what stroller should I buy'), { kind: 'oos' });
+});
+
+check('X11d. recap wording uses the active window, not stale last-night logs copy', () => {
+  const live = buildReassureRecap([], RX_NOW);
+  assert.equal(live.window.label, 'tonight');
+  assert.equal(recapWindowLabel(live), 'Since 6pm');
+  assert.match(recapReadText(live), /^Since 6pm/);
+  assert.doesNotMatch(recapReadText(live), /last night's logs/i);
+
+  const morning = buildReassureRecap([], new Date(2026, 5, 30, 14, 0).getTime());
+  assert.equal(morning.window.label, 'last-night');
+  assert.equal(recapWindowLabel(morning), 'Morning recap');
+  assert.doesNotMatch(recapReadText(morning), /last night's logs/i);
+});
+
 // Shared AI-layer modules (Deno-side, import-free by design so Node can
 // require() them) — the smoke runner exercises the ACTUAL values and guardrail
 // both edge functions deploy with. Same pattern as the §X17 content mirror.
@@ -5671,6 +5731,58 @@ check('X17. the edge-function content mirror has not drifted from the app module
     normalizeAsk("She WON’T wake"),
     'normalization identical on both sides',
   );
+});
+
+check('X17b. Reassure RN workflow wires every local entry point into the answer path', () => {
+  assert.ok(REASSURE_SCREEN_SRC.includes('const ask = useCallback'), 'screen owns one shared ask funnel');
+  assert.ok(REASSURE_SCREEN_SRC.includes('const result = route(trimmed)'), 'shared ask calls route() locally');
+  assert.ok(REASSURE_SCREEN_SRC.includes('<AskCard') && REASSURE_SCREEN_SRC.includes('onAsk={ask}'),
+    'typed ask and chips receive the shared ask funnel');
+  assert.ok(TOPIC_ACCORDION_SRC.includes('Ask about this'), 'topic cards expose an answer-card CTA');
+  assert.ok(REASSURE_SCREEN_SRC.includes('onAskTopic') && REASSURE_SCREEN_SRC.includes("ask(KB[key].title, 'chip')"),
+    'topic CTA reuses the same ask path');
+  assert.ok(REASSURE_SCREEN_SRC.includes('reassure-answer-scroll-target'), 'answer scroll target exists');
+  assert.ok(REASSURE_SCREEN_SRC.includes('scrollToAnswer') && REASSURE_SCREEN_SRC.includes('scrollRef.current?.scrollTo'),
+    'answer card is scrolled into view after render');
+});
+
+check('X17c. voice fallback states are explicit and unavailable voice focuses the text input', () => {
+  assert.doesNotThrow(() => isSpeechAvailable(), 'speech availability probe is non-throwing under Node/dev builds');
+  for (const label of [
+    'Tap to talk',
+    'Listening...',
+    'Voice unavailable in this build',
+    'Enable microphone in settings',
+    "Voice didn't catch that — type instead",
+  ]) {
+    assert.ok(VOICE_ORB_SRC.includes(label), `VoiceOrb contains "${label}"`);
+  }
+  assert.ok(!VOICE_ORB_SRC.includes('One moment'), 'voice orb does not show the vague pending label');
+  assert.ok(USE_VOICE_INPUT_SRC.includes("'permission_denied'"), 'permission denial has its own state');
+  assert.ok(USE_VOICE_INPUT_SRC.includes("'error'"), 'speech capture failure has its own state');
+  assert.ok(REASSURE_SCREEN_SRC.includes('focusAskInputWithHint'), 'degraded voice focuses text input with a hint');
+  assert.ok(REASSURE_SCREEN_SRC.includes('inputRef.current?.focus()'), 'text input receives focus');
+  assert.ok(REASSURE_SCREEN_SRC.includes('Voice is unavailable in this build'), 'unavailable build hint is visible');
+});
+
+check('X17d. Reassure keyboard/tabbar structure keeps send, chips, and answers reachable', () => {
+  assert.ok(REASSURE_SCREEN_SRC.includes('KeyboardAvoidingView'), 'Reassure is keyboard-aware');
+  assert.ok(REASSURE_SCREEN_SRC.includes('keyboardShouldPersistTaps="handled"'), 'send stays tappable while keyboard is open');
+  assert.ok(REASSURE_SCREEN_SRC.includes('bottomGapExtra={32}'), 'Reassure adds extra bottom clearance');
+  assert.ok(SCREEN_SRC.includes('keyboardShouldPersistTaps'), 'Screen exposes opt-in keyboard tap behavior');
+  assert.ok(LULLABY_TAB_BAR_SRC.includes("Keyboard.addListener('keyboardDidShow'"), 'tabbar observes keyboard open');
+  assert.ok(
+    LULLABY_TAB_BAR_SRC.includes("activeRouteName === 'reassure' && keyboardVisible"),
+    'tabbar hides only for Reassure while the keyboard is visible',
+  );
+});
+
+check('X17e. Reassure recap title uses active-window wording', () => {
+  assert.ok(REASSURE_SCREEN_SRC.includes('recapHeading'), 'screen derives a dynamic recap heading');
+  assert.ok(REASSURE_SCREEN_SRC.includes("Based on tonight's logs"), 'live window title is explicit');
+  assert.ok(REASSURE_SCREEN_SRC.includes('Morning recap'), 'closed morning window title is explicit');
+  assert.ok(!REASSURE_SCREEN_SRC.includes("last night's logs"), 'stale lowercase last-night logs copy is absent');
+  assert.ok(!REASSURE_SCREEN_SRC.includes('last night’s logs'), 'stale smart-apostrophe last-night logs copy is absent');
 });
 
 // ---------------------------------------------------------------------------

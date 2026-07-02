@@ -2,8 +2,9 @@
  * useVoiceInput — the voice orb's state machine.
  *
  *   unavailable ──(module/service missing)── terminal for the session
- *   idle → tap → requesting → listening → (final|end|error) → idle
- *                    └─ denied (permission refused; tap now means "type instead")
+ *   available_idle → tap → listening → final transcript → available_idle
+ *                    ├─ permission_denied (tap now means "type instead")
+ *                    └─ error (tap now means "type instead")
  *
  * The final transcript flows to `onTranscript`, which the screen feeds into the
  * SAME route() every other input path uses — voice gets no special routing.
@@ -25,9 +26,17 @@ type Options = {
   onTranscript: (text: string) => void;
   onListeningStart?: () => void;
   onDenied?: () => void;
+  onUnavailable?: () => void;
+  onError?: () => void;
 };
 
-export function useVoiceInput({ onTranscript, onListeningStart, onDenied }: Options): {
+export function useVoiceInput({
+  onTranscript,
+  onListeningStart,
+  onDenied,
+  onUnavailable,
+  onError,
+}: Options): {
   state: VoiceOrbState;
   interim: string | null;
   tapOrb: () => void;
@@ -35,7 +44,7 @@ export function useVoiceInput({ onTranscript, onListeningStart, onDenied }: Opti
   // Availability is latched once with a lazy initializer (React-Compiler-safe;
   // no setState-in-effect). A device doesn't gain a speech service mid-session.
   const [state, setState] = useState<VoiceOrbState>(() =>
-    isSpeechAvailable() ? 'idle' : 'unavailable',
+    isSpeechAvailable() ? 'available_idle' : 'unavailable',
   );
   const [interim, setInterim] = useState<string | null>(null);
 
@@ -43,6 +52,7 @@ export function useVoiceInput({ onTranscript, onListeningStart, onDenied }: Opti
   const finalRef = useRef<string | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
+  const requestingRef = useRef(false);
 
   const clearListenTimeout = useCallback(() => {
     if (timeoutRef.current !== null) {
@@ -84,16 +94,23 @@ export function useVoiceInput({ onTranscript, onListeningStart, onDenied }: Opti
       },
       onEnd: () => {
         const finalTranscript = finalRef.current?.trim() ?? '';
-        settle('idle');
-        if (finalTranscript.length > 0) onTranscript(finalTranscript);
+        if (finalTranscript.length > 0) {
+          settle('available_idle');
+          onTranscript(finalTranscript);
+        } else {
+          settle('error');
+          onError?.();
+        }
       },
       onError: () => {
-        settle('idle');
+        settle('error');
+        onError?.();
       },
     });
 
     if (session === null) {
       settle('unavailable');
+      onUnavailable?.();
       return;
     }
     sessionRef.current = session;
@@ -101,9 +118,10 @@ export function useVoiceInput({ onTranscript, onListeningStart, onDenied }: Opti
     onListeningStart?.();
     timeoutRef.current = setTimeout(() => {
       sessionRef.current?.abort();
-      settle('idle');
+      settle('error');
+      onError?.();
     }, LISTEN_TIMEOUT_MS);
-  }, [onListeningStart, onTranscript, settle]);
+  }, [onError, onListeningStart, onTranscript, onUnavailable, settle]);
 
   const tapOrb = useCallback(() => {
     if (state === 'listening') {
@@ -111,19 +129,26 @@ export function useVoiceInput({ onTranscript, onListeningStart, onDenied }: Opti
       sessionRef.current?.stop();
       return;
     }
-    if (state !== 'idle') return; // degraded states are handled by the owner
+    if (state !== 'available_idle' || requestingRef.current) return; // degraded states are handled by the owner
 
-    setState('requesting');
+    if (!isSpeechAvailable()) {
+      setState('unavailable');
+      onUnavailable?.();
+      return;
+    }
+
+    requestingRef.current = true;
     void requestSpeechPermission().then((permission) => {
+      requestingRef.current = false;
       if (!mountedRef.current) return;
       if (permission === 'denied') {
-        setState('denied');
+        setState('permission_denied');
         onDenied?.();
         return;
       }
       beginListening();
     });
-  }, [beginListening, onDenied, state]);
+  }, [beginListening, onDenied, onUnavailable, state]);
 
   return { state, interim, tapOrb };
 }
