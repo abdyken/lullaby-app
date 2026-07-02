@@ -41,6 +41,7 @@ import { useLogging } from '@/features/logging/state/LoggingProvider';
 import { useNightRead } from '@/features/reassure/application/nightRead';
 import { useVoiceInput } from '@/features/reassure/application/useVoiceInput';
 import { KB } from '@/features/reassure/content/kb';
+import { clinicalContentVisible } from '@/features/reassure/domain/contentGate';
 import { currentContextWindowFor } from '@/features/reassure/domain/nightWindow';
 import { buildReassureRecap, recapHeading } from '@/features/reassure/domain/recap';
 import { route } from '@/features/reassure/domain/router';
@@ -51,6 +52,11 @@ import { useTheme } from '@/state/ThemeProvider';
 import { colors, fonts, radii, surfaces, tabbar } from '@/theme';
 
 const REASSURE_TABBAR_EXTRA_CLEARANCE = tabbar.height + 64;
+
+/* Draft-content release gate: the clinical KB surfaces (topic accordion, topic
+ * answer blocks) are dev-only while REASSURE_CONTENT.status is 'draft'. Triage,
+ * guides, and the code-computed recap render regardless (domain/contentGate.ts). */
+const showClinical = clinicalContentVisible(__DEV__);
 
 type VoiceFallback = {
   message: string;
@@ -255,7 +261,7 @@ export default function ReassureScreen() {
       </Text>
       <Text
         style={{ fontFamily: fonts.body, fontSize: 14, lineHeight: 20, color: palette.inkSoft, marginTop: 2 }}>
-        Quick, bounded guidance for tonight — never a diagnosis.
+        General supportive information for tonight — not medical advice, never a diagnosis.
       </Text>
 
       {/* night-sky hero + voice orb (the signature moment) */}
@@ -405,14 +411,18 @@ export default function ReassureScreen() {
         <AiConsentCard surfaceMode={mode} onGrant={grantConsent} onDecline={declineConsent} />
       ) : null}
 
-      {/* common tonight */}
-      <Kicker text="Common tonight" color={palette.inkFaint} />
-      <TopicAccordion
-        surfaceMode={mode}
-        reduceMotion={reduceMotion}
-        onToggle={onTopicToggle}
-        onAskTopic={onAskTopic}
-      />
+      {/* common tonight — clinical KB blocks, hidden in public builds until clinician sign-off */}
+      {showClinical ? (
+        <>
+          <Kicker text="Common tonight" color={palette.inkFaint} />
+          <TopicAccordion
+            surfaceMode={mode}
+            reduceMotion={reduceMotion}
+            onToggle={onTopicToggle}
+            onAskTopic={onAskTopic}
+          />
+        </>
+      ) : null}
 
       {/* quiet, persistent disclaimer (§8) — present, low-contrast, not a nag */}
       <Text
