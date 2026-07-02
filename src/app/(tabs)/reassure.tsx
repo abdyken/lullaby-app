@@ -16,7 +16,7 @@
  */
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { ScrollView, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { Screen } from '@/components/Screen';
 import { AnswerCard, type TriageAction } from '@/features/reassure/components/AnswerCard';
@@ -29,10 +29,11 @@ import type { CareEvent } from '@/features/logging/domain/types';
 import { useLogging } from '@/features/logging/state/LoggingProvider';
 import { useNightRead } from '@/features/reassure/application/nightRead';
 import { useVoiceInput } from '@/features/reassure/application/useVoiceInput';
+import { KB } from '@/features/reassure/content/kb';
 import { nightWindowFor } from '@/features/reassure/domain/nightWindow';
 import { buildReassureRecap } from '@/features/reassure/domain/recap';
 import { route } from '@/features/reassure/domain/router';
-import type { AskSource, RouteResult } from '@/features/reassure/domain/types';
+import type { AskSource, ReassureTopicKey, RouteResult } from '@/features/reassure/domain/types';
 import { useAnalytics } from '@/lib/useAnalytics';
 import { useReduceMotion } from '@/lib/useReduceMotion';
 import { useTheme } from '@/state/ThemeProvider';
@@ -70,6 +71,7 @@ export default function ReassureScreen() {
   const answerYRef = useRef(0);
 
   const [answer, setAnswer] = useState<RouteResult | null>(null);
+  const [voiceHint, setVoiceHint] = useState<string | null>(null);
 
   // The recap window is refreshed when the tab regains focus (async tick, so
   // no synchronous setState inside the focus effect — React Compiler rule).
@@ -101,6 +103,19 @@ export default function ReassureScreen() {
     [recapSource],
   );
   const nightRead = useNightRead(recap);
+  const recapHeading = recap.window.label === 'tonight' ? "Based on tonight's logs" : 'Morning recap';
+
+  const scrollToAnswer = useCallback(
+    (delayMs = 90) => {
+      setTimeout(() => {
+        scrollRef.current?.scrollTo({
+          y: Math.max(0, answerYRef.current - 24),
+          animated: !reduceMotion,
+        });
+      }, delayMs);
+    },
+    [reduceMotion],
+  );
 
   /** The single funnel: every input path lands here. Never routes empty text. */
   const ask = useCallback(
@@ -108,6 +123,7 @@ export default function ReassureScreen() {
       const trimmed = text.trim();
       if (trimmed.length === 0) return;
       const result = route(trimmed);
+      setVoiceHint(null);
       setAnswer(result);
       // PRIVACY: coarse enums only — the raw ask text is never sent to analytics.
       track('reassure_asked', {
@@ -117,29 +133,46 @@ export default function ReassureScreen() {
       });
       if (result.kind === 'triage') track('reassure_triage_shown');
       // Bring the answer into view once it has risen in.
-      setTimeout(() => {
-        scrollRef.current?.scrollTo({
-          y: Math.max(0, answerYRef.current - 80),
-          animated: !reduceMotion,
-        });
-      }, 90);
+      scrollToAnswer();
     },
-    [reduceMotion, track],
+    [scrollToAnswer, track],
   );
+
+  const focusAskInputWithHint = useCallback((hint: string) => {
+    setVoiceHint(hint);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, []);
 
   const voice = useVoiceInput({
     onTranscript: (text) => ask(text, 'voice'),
     onListeningStart: () => track('reassure_voice_used'),
-    onDenied: () => track('reassure_voice_permission_denied'),
+    onDenied: () => {
+      track('reassure_voice_permission_denied');
+      focusAskInputWithHint('Microphone permission is off. Enable microphone in settings, or type instead.');
+    },
+    onUnavailable: () => {
+      focusAskInputWithHint('Voice is unavailable in this build, so you can type your question here.');
+    },
+    onError: () => {
+      focusAskInputWithHint("Voice didn't catch that. Type your question here instead.");
+    },
   });
 
   const onOrbPress = useCallback(() => {
-    if (voice.state === 'denied' || voice.state === 'unavailable') {
-      inputRef.current?.focus();
+    if (voice.state === 'unavailable') {
+      focusAskInputWithHint('Voice is unavailable in this build, so you can type your question here.');
+      return;
+    }
+    if (voice.state === 'permission_denied') {
+      focusAskInputWithHint('Microphone permission is off. Enable microphone in settings, or type instead.');
+      return;
+    }
+    if (voice.state === 'error') {
+      focusAskInputWithHint("Voice didn't catch that. Type your question here instead.");
       return;
     }
     voice.tapOrb();
-  }, [voice]);
+  }, [focusAskInputWithHint, voice]);
 
   const onTriageAction = useCallback(
     (action: TriageAction) => track('reassure_triage_call_tapped', { action }),
@@ -153,8 +186,23 @@ export default function ReassureScreen() {
     [track],
   );
 
+  const onAskTopic = useCallback(
+    (key: ReassureTopicKey) => {
+      ask(KB[key].title, 'chip');
+    },
+    [ask],
+  );
+
   return (
-    <Screen surfaceMode={mode} scrollRef={scrollRef}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <Screen
+        surfaceMode={mode}
+        scrollRef={scrollRef}
+        bottomGapExtra={32}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}>
       <Text
         style={{ fontFamily: fonts.bodyBold, fontSize: 10, letterSpacing: 1.4, color: colors.sleep }}>
         IS THIS NORMAL?
@@ -176,6 +224,22 @@ export default function ReassureScreen() {
           interimText={voice.interim}
         />
       </ReassureHero>
+
+      {voiceHint ? (
+        <Text
+          accessibilityLiveRegion="polite"
+          style={{
+            fontFamily: fonts.bodyBold,
+            fontSize: 12.5,
+            lineHeight: 18.5,
+            color: palette.inkSoft,
+            marginTop: 10,
+            paddingHorizontal: 6,
+            textAlign: 'center',
+          }}>
+          {voiceHint}
+        </Text>
+      ) : null}
 
       {/* bounded promise — soft lavender, calm, never an alarm */}
       <View
@@ -200,8 +264,10 @@ export default function ReassureScreen() {
       {/* the bounded answer (topic / triage / out-of-scope) */}
       {answer !== null ? (
         <View
+          testID="reassure-answer-scroll-target"
           onLayout={(event) => {
             answerYRef.current = event.nativeEvent.layout.y;
+            scrollToAnswer(0);
           }}>
           <AnswerCard
             result={answer}
@@ -214,12 +280,17 @@ export default function ReassureScreen() {
       ) : null}
 
       {/* tonight recap, grounded in the saved logs */}
-      <Kicker text="Based on tonight's logs" color={palette.inkFaint} />
+      <Kicker text={recapHeading} color={palette.inkFaint} />
       <RecapCard surfaceMode={mode} recap={recap} readOverride={nightRead} />
 
       {/* common tonight */}
       <Kicker text="Common tonight" color={palette.inkFaint} />
-      <TopicAccordion surfaceMode={mode} reduceMotion={reduceMotion} onToggle={onTopicToggle} />
+      <TopicAccordion
+        surfaceMode={mode}
+        reduceMotion={reduceMotion}
+        onToggle={onTopicToggle}
+        onAskTopic={onAskTopic}
+      />
 
       {/* quiet, persistent disclaimer (§8) — present, low-contrast, not a nag */}
       <Text
@@ -234,6 +305,7 @@ export default function ReassureScreen() {
         }}>
         General information, not medical advice. When in doubt, call your pediatrician.
       </Text>
-    </Screen>
+      </Screen>
+    </KeyboardAvoidingView>
   );
 }

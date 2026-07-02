@@ -4,7 +4,13 @@
  * floating tab bar. The cream background is sacred (§6) — every screen uses it.
  */
 import type { ReactNode, RefObject } from 'react';
-import { type NativeScrollEvent, type NativeSyntheticEvent, ScrollView, View } from 'react-native';
+import {
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  ScrollView,
+  type ScrollViewProps,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { surfaces, tabbar, type SurfaceMode } from '@/theme';
@@ -23,6 +29,11 @@ type Props = {
   contentOffset?: { x: number; y: number };
   /** optional handle to the inner ScrollView (e.g. Reassure scrolls its answer into view) */
   scrollRef?: RefObject<ScrollView | null>;
+  /** extra clearance for keyboard-heavy screens; most tabs use the default tabbar gap */
+  bottomGapExtra?: number;
+  /** opt-in keyboard behavior for screens with inline text inputs */
+  keyboardShouldPersistTaps?: ScrollViewProps['keyboardShouldPersistTaps'];
+  keyboardDismissMode?: ScrollViewProps['keyboardDismissMode'];
 };
 
 export function Screen({
@@ -33,6 +44,9 @@ export function Screen({
   scrollEnabled = true,
   contentOffset,
   scrollRef,
+  bottomGapExtra = 0,
+  keyboardShouldPersistTaps,
+  keyboardDismissMode,
 }: Props) {
   const insets = useSafeAreaInsets();
   const background = surfaces[surfaceMode].bg;
@@ -41,7 +55,7 @@ export function Screen({
   // is `height` tall (see LullabyTabBar). Add a comfortable clearance so the
   // last card (e.g. TimelineCard) is never tucked under the pill.
   const barFootprint = tabbar.height + Math.max(insets.bottom + 8, tabbar.marginBottom);
-  const bottomGap = barFootprint + 24;
+  const bottomGap = barFootprint + 24 + bottomGapExtra;
 
   const padding = {
     paddingTop: insets.top + 8,
@@ -59,7 +73,9 @@ export function Screen({
         onScroll={onScroll}
         scrollEventThrottle={16}
         scrollEnabled={scrollEnabled}
-        contentOffset={contentOffset}>
+        contentOffset={contentOffset}
+        keyboardShouldPersistTaps={keyboardShouldPersistTaps}
+        keyboardDismissMode={keyboardDismissMode}>
         {children}
       </ScrollView>
     );
