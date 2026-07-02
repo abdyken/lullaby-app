@@ -1,5 +1,5 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Text, useWindowDimensions, View } from 'react-native';
 
 import { Screen } from '@/components/Screen';
@@ -11,16 +11,12 @@ import { WeeklyRecapCard } from '@/features/insights/components/WeeklyRecapCard'
 import { WeeklySleepBars } from '@/features/insights/components/WeeklySleepBars';
 import { getInsightsViewModel } from '@/features/insights/getInsightsViewModel';
 import { buildInsightsViewModel } from '@/features/insights/insightSelectors';
-import { loadLegacyInsightsHistory } from '@/features/insights/loadLegacyInsightsHistory';
 import type { InsightStatViewModel, InsightsViewModel } from '@/features/insights/types';
-import { isLoggingV2Enabled } from '@/features/logging';
-import type { CareEvent } from '@/features/logging/domain/types';
 import { useLogging } from '@/features/logging/state/LoggingProvider';
 import { useAnalytics } from '@/lib/useAnalytics';
 import { fireMilestoneOnce, reached4DataDaysMilestoneKey } from '@/lib/analyticsMilestones';
 import { getProMode } from '@/lib/proConfig';
 import { useAuth } from '@/state/AuthProvider';
-import { useLocalEvents } from '@/state/LocalEventProvider';
 import { useTheme } from '@/state/ThemeProvider';
 import { colors, fonts, radii, shadows, surfaces, tabbar, type SurfaceMode } from '@/theme';
 
@@ -99,7 +95,6 @@ function statForDataState(
 export function InsightsScreen() {
   const { mode, isTransitioning } = useTheme();
   const { loadInsightsHistory } = useLogging();
-  const { events: legacyEvents } = useLocalEvents();
   const { session, baby } = useAuth();
   const track = useAnalytics();
   const { width, height } = useWindowDimensions();
@@ -109,26 +104,7 @@ export function InsightsScreen() {
   const initialViewModel = useMemo(() => buildInsightsViewModel({ events: [], now: resolveInsightsNow() }), []);
   const [loadedViewModel, setLoadedViewModel] = useState<InsightsViewModel | null>(null);
 
-  // Keep the latest legacy events in a ref so `loadHistory` stays stable: the
-  // focus effect should fire once per visit, not re-run on every new log. Fresh
-  // events are still read whenever Insights regains focus.
-  const legacyEventsRef = useRef(legacyEvents);
-  useEffect(() => {
-    legacyEventsRef.current = legacyEvents;
-  }, [legacyEvents]);
-
-  // In a default production build the V2 logging flag is off and
-  // `loadInsightsHistory` returns [], so read the live Supabase-synced legacy
-  // events and map them into the CareEvent shape the selectors expect (the 7-day
-  // windowing happens downstream in buildInsightsViewModel). With the V2 flag on
-  // (dev), use the V2 history unchanged.
-  const loadHistory = useCallback(
-    (nowMs: number): Promise<CareEvent[]> =>
-      isLoggingV2Enabled()
-        ? loadInsightsHistory(nowMs)
-        : Promise.resolve(loadLegacyInsightsHistory(legacyEventsRef.current)),
-    [loadInsightsHistory],
-  );
+  const loadHistory = useCallback((nowMs: number) => loadInsightsHistory(nowMs), [loadInsightsHistory]);
 
   // Reload on tab focus so backdated logs inside the 7-day window are picked up.
   // Analytics fire here: insights_opened every visit; the weekly-recap preview and

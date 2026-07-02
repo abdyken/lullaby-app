@@ -33,11 +33,6 @@ const DEFAULT_PORT = 8081;
 // How far above the preferred port to look for a free one before giving up.
 const MAX_PORT_SCAN = 20;
 
-// Default the local-dev feature flag unless the caller already set it.
-if (!process.env.EXPO_PUBLIC_LOGGING_V2) {
-  process.env.EXPO_PUBLIC_LOGGING_V2 = '1';
-}
-
 function fail(message) {
   console.error(`\n[dev] ${message}\n`);
   process.exit(1);

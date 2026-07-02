@@ -9,10 +9,9 @@
  * Native, no AsyncStorage import.
  *
  * The new domain is stored UNDER ITS OWN KEY, beside the legacy
- * `lullaby/local-events/v1` store, so turning logging v2 on/off never corrupts
- * the old MVP data (plan §2.1 "create the new domain next to the old one"). The
- * `LegacyLoggingMapper` is what reads existing legacy rows into `CareEvent`s;
- * this store only holds events authored through the v2 path.
+ * `lullaby/local-events/v1` store. The `LegacyLoggingMapper` is what reads
+ * existing legacy rows into `CareEvent`s; this store holds events authored
+ * through the canonical logging path.
  *
  * AsyncStorage caveat (plan §5): this whole-snapshot store is fine for the MVP's
  * scale and the migration period, but it is not a queryable event store. Swapping
@@ -57,7 +56,7 @@ export interface LoggingPersistencePort {
 
 /* ----------------------------- validation ----------------------------- */
 
-const EVENT_TYPES: readonly CareEventType[] = ['feed', 'sleep', 'diaper', 'pump'];
+const EVENT_TYPES: readonly CareEventType[] = ['feed', 'sleep', 'diaper', 'pump', 'note'];
 const EVENT_STATUSES: readonly CareEventStatus[] = ['active', 'completed', 'cancelled', 'deleted'];
 const SYNC_STATUSES: readonly SyncStatus[] = ['local', 'pending', 'synced', 'failed'];
 

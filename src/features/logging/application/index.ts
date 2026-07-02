@@ -24,5 +24,6 @@ export * from './startPump';
 export * from './finishPump';
 export * from './savePump';
 export * from './cancelPump';
+export * from './saveNote';
 export * from './undoLoggingMutation';
 export * from './getInsightsSevenDayHistory';

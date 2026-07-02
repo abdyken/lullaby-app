@@ -47,7 +47,7 @@ function AppShellStartupGate({ children }: { children: ReactNode }) {
         babyLoaded: baby != null,
         eventsHydrated,
         eventsMode: syncMode,
-        loggingV2: enabled,
+        canonicalLogging: enabled,
         loggingHydrated,
       });
     }
@@ -72,11 +72,9 @@ export default function TabsLayout() {
           until configured. Mounted under AuthGate so it can read the signed-in
           caregiver / baby for baby-scoped entitlement. No layout of its own. */}
       <ProProvider>
-        {/* One shared event store for all tabs, so Tonight and Log see the same
-            events. Reassure simply ignores it. */}
+        {/* Legacy/local event store stays mounted for compatibility reads. */}
         <LocalEventProvider>
-          {/* Logging v2 feature API (Feed/Sleep/Diaper/Pump). Inert while the
-              loggingV2 flag is off — no I/O, no behavior change to the MVP. */}
+          {/* Canonical logging API (Feed/Sleep/Diaper/Pump/Notes). */}
           <LoggingProvider>
             <AppShellStartupGate>
               {/* flex:1 wrapper so app-level toasts can float above the floating tab bar. */}
@@ -118,8 +116,8 @@ export default function TabsLayout() {
                   <Tabs.Screen name="reassure" options={{ title: 'Reassure' }} />
                 </Tabs>
                 <AppToast />
-                {/* Logging v2 "saved · Undo" toast — inert unless the flag is on and a
-                    v2 mutation just landed; never collides with the legacy AppToast. */}
+                {/* Canonical logging "saved · Undo" toast. Legacy AppToast remains
+                    mounted for compatibility-only local events. */}
                 <LoggingToast />
               </View>
             </AppShellStartupGate>

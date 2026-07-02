@@ -1,16 +1,14 @@
 /**
  * LoggingToast — the v2 "saved · Undo" confirmation (plan §8, Phase 2/3/5/6).
  *
- * The flag-on counterpart to AppToast: the same calm pill language (white surface,
- * soft warm shadow, rounded pill, small text, floating just above the tab bar),
- * but it reads the v2 logging store via `useLogging()` and its Undo runs the
- * shared single-Undo (soft-delete a created event / restore a finished session).
+ * The canonical logging counterpart to AppToast: the same calm pill language
+ * (white surface, soft warm shadow, rounded pill, small text, floating just
+ * above the tab bar), but it reads the logging store via `useLogging()` and its
+ * Undo runs the shared single-Undo (soft-delete a created event / restore a
+ * finished session).
  *
- * It is inert unless the loggingV2 flag is on AND a mutation just landed, so it
- * never collides with the legacy AppToast (the flag-off path): with the flag off
- * the provider does no I/O and never sets a toast; with it on, the v2 flows are
- * the ones saving, so only this toast shows. Purely presentational — all state
- * (the toast + the Undo action) lives in LoggingProvider.
+ * Purely presentational — all state (the toast + the Undo action) lives in
+ * LoggingProvider.
  */
 import { Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

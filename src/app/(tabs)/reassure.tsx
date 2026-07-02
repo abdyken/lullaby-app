@@ -25,14 +25,16 @@ import { ReassureHero } from '@/features/reassure/components/ReassureHero';
 import { RecapCard } from '@/features/reassure/components/RecapCard';
 import { TopicAccordion } from '@/features/reassure/components/TopicAccordion';
 import { VoiceOrb } from '@/features/reassure/components/VoiceOrb';
+import type { CareEvent } from '@/features/logging/domain/types';
+import { useLogging } from '@/features/logging/state/LoggingProvider';
 import { useNightRead } from '@/features/reassure/application/nightRead';
 import { useVoiceInput } from '@/features/reassure/application/useVoiceInput';
+import { nightWindowFor } from '@/features/reassure/domain/nightWindow';
 import { buildReassureRecap } from '@/features/reassure/domain/recap';
 import { route } from '@/features/reassure/domain/router';
 import type { AskSource, RouteResult } from '@/features/reassure/domain/types';
 import { useAnalytics } from '@/lib/useAnalytics';
 import { useReduceMotion } from '@/lib/useReduceMotion';
-import { useLocalEvents } from '@/state/LocalEventProvider';
 import { useTheme } from '@/state/ThemeProvider';
 import { colors, fonts, radii, surfaces } from '@/theme';
 
@@ -58,7 +60,7 @@ export default function ReassureScreen() {
   const { mode } = useTheme();
   const palette = surfaces[mode];
   const track = useAnalytics();
-  const { events } = useLocalEvents();
+  const { loadEventsInRange } = useLogging();
   const reduceMotionPref = useReduceMotion();
   // Until the OS preference resolves, don't run loops (treat as reduced).
   const reduceMotion = reduceMotionPref ?? true;
@@ -71,17 +73,33 @@ export default function ReassureScreen() {
 
   // The recap window is refreshed when the tab regains focus (async tick, so
   // no synchronous setState inside the focus effect — React Compiler rule).
-  const [recapNow, setRecapNow] = useState(() => Date.now());
+  const [recapSource, setRecapSource] = useState<{ now: number; events: CareEvent[] }>(() => ({
+    now: Date.now(),
+    events: [],
+  }));
   useFocusEffect(
     useCallback(() => {
+      let cancelled = false;
       track('reassure_opened');
       track('reassure_recap_viewed');
-      const tick = setTimeout(() => setRecapNow(Date.now()), 0);
-      return () => clearTimeout(tick);
-    }, [track]),
+      const tick = setTimeout(() => {
+        const now = Date.now();
+        const window = nightWindowFor(now);
+        void loadEventsInRange({ fromMs: window.startMs, toMs: window.endMs }).then((events) => {
+          if (!cancelled) setRecapSource({ now, events });
+        });
+      }, 0);
+      return () => {
+        cancelled = true;
+        clearTimeout(tick);
+      };
+    }, [loadEventsInRange, track]),
   );
 
-  const recap = useMemo(() => buildReassureRecap(events, recapNow), [events, recapNow]);
+  const recap = useMemo(
+    () => buildReassureRecap(recapSource.events, recapSource.now),
+    [recapSource],
+  );
   const nightRead = useNightRead(recap);
 
   /** The single funnel: every input path lands here. Never routes empty text. */

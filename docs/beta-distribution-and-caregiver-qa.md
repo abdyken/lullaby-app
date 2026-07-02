@@ -24,7 +24,6 @@ Set these for a parent-test (sync) build. `EXPO_PUBLIC_*` values are **build-tim
 changing any of them requires a fresh build / `expo start --clear`.
 
 ```
-EXPO_PUBLIC_LOGGING_V2=false
 EXPO_PUBLIC_PRO_PREVIEW_ENABLED=0
 EXPO_PUBLIC_FORCE_ONBOARDING=false
 EXPO_PUBLIC_APP_INSTALL_URL=<internal beta install link>
@@ -36,9 +35,9 @@ EXPO_PUBLIC_THEME_REVEAL_DURATION_MS=600
 - **`EXPO_PUBLIC_PRO_PREVIEW_ENABLED=0`** — Pro preview must be **disabled** for real parent
   testing. The control cohort measures pure logging retention without any Pro messaging, and no
   card should ever imply a charge during the parent test.
-- **`EXPO_PUBLIC_LOGGING_V2=false`** — Logging V2 must be **disabled**: the current
-  retention/sync path is the legacy `LogEvent` → Supabase `events` flow that Insights and
-  two-phone sync are validated against.
+- **Logging is canonical by default** — there is no `EXPO_PUBLIC_LOGGING_V2` parent-test
+  toggle. Feed, sleep, diaper, pump, note, and spit-up writes go through the canonical logging
+  store; legacy rows are read through the compatibility mapper so old data still appears.
 - **`EXPO_PUBLIC_FORCE_ONBOARDING=false`** — testers go through onboarding once, then land in
   the app normally on subsequent opens.
 - **`EXPO_PUBLIC_APP_INSTALL_URL`** — point this at the **Android internal install link** now,

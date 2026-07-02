@@ -126,6 +126,7 @@ import {
   isBottleFeed,
   isBreastFeed,
   isDiaperEvent,
+  isNoteEvent,
   isPumpEvent,
   isSleepEvent,
 } from '../src/features/logging/domain/types';
@@ -136,17 +137,23 @@ import type {
   CareEvent,
   CareEventBase,
   DiaperEvent,
+  NoteEvent,
   PumpEvent,
   SleepEvent,
 } from '../src/features/logging/domain/types';
-// Logging v2 repository/service layer (plan Phase 1.2) — interface, in-memory
-// persistence, the impl, the legacy mapper, and the loggingV2 feature flag.
+// Canonical logging repository/service layer — interface, in-memory persistence,
+// the impl, the legacy mapper, and the compatibility feature-flag shim.
 import {
   createInMemoryLoggingPersistence,
   parseLoggingSnapshot,
   serializeLoggingSnapshot,
 } from '../src/features/logging/data/loggingPersistence';
 import { createLoggingRepository } from '../src/features/logging/data/LoggingRepositoryImpl';
+import {
+  mergeCanonicalEvents,
+  migrateLegacyEventsToLoggingSnapshot,
+  selectCanonicalEventsInRange,
+} from '../src/features/logging/data/normalizedEvents';
 import {
   careEventToLegacyEvent,
   legacyEventToCareEvent,
@@ -211,6 +218,7 @@ import {
   saveBottleFeed,
   saveCompletedSleep,
   saveDiaper,
+  saveNote,
   savePump,
   getInsightsSevenDayHistory,
   startBreastFeed,
@@ -2258,7 +2266,7 @@ check('OC17. the pure-JS SHA-256 matches the NIST test vectors (correct PKCE S25
   );
 });
 
-// V. Logging v2 repository + mapper + feature flag (plan Phase 1.2). These are
+// V. Canonical logging repository + mapper + compatibility flag shim. These are
 // async (the repository contract returns Promises), so they run after the sync
 // checks above and print the final summary on completion.
 async function checkAsync(name: string, fn: () => Promise<void>): Promise<void> {
@@ -2387,6 +2395,47 @@ async function runAsyncChecks(): Promise<void> {
     type: 'sleep',
     childId: 'baby-mia',
     details: { sleepType: 'night' },
+  });
+
+  const makeActiveSleepAt = (id: string, cid: string, startedAt: number): SleepEvent => ({
+    ...careBase({
+      id,
+      clientEventId: cid,
+      type: 'sleep',
+      status: 'active',
+      occurredAt: iso(startedAt),
+      startedAt: iso(startedAt),
+      endedAt: null,
+      createdAt: iso(startedAt),
+      updatedAt: iso(startedAt),
+    }),
+    type: 'sleep',
+    childId: 'baby-mia',
+    status: 'active',
+    details: { sleepType: 'night' },
+  });
+
+  const makeNoteAt = (
+    id: string,
+    cid: string,
+    at: number,
+    details: NoteEvent['details'] = { noteType: 'general' },
+  ): NoteEvent => ({
+    ...careBase({
+      id,
+      clientEventId: cid,
+      type: 'note',
+      status: 'completed',
+      occurredAt: iso(at),
+      startedAt: null,
+      endedAt: null,
+      createdAt: iso(at),
+      updatedAt: iso(at),
+    }),
+    type: 'note',
+    childId: 'baby-mia',
+    status: 'completed',
+    details,
   });
 
   await checkAsync(
@@ -2573,12 +2622,13 @@ async function runAsyncChecks(): Promise<void> {
         legacyEvent({ id: 'lg-s2', type: 'sleep', startAt: iso(localTime(2, 1)), endAt: iso(localTime(2, 3)) }),
         // a diaper on a 4th distinct day
         legacyEvent({ id: 'lg-d1', type: 'diaper', startAt: iso(localTime(3, 9)), meta: { kind: 'both' } }),
-        // a note must be dropped by the mapper and never break the view model
+        // a note maps through the canonical layer and never breaks the view model
         legacyEvent({ id: 'lg-n1', type: 'note', startAt: iso(localTime(0, 7)), meta: { label: 'Fussy' } }),
       ];
 
       const careEvents = loadLegacyInsightsHistory(legacy);
-      assert.equal(careEvents.length, 6); // 7 legacy events minus the dropped note
+      assert.equal(careEvents.length, 7);
+      assert.ok(careEvents.some((event) => isNoteEvent(event)), 'legacy notes map into canonical note events');
 
       const vm = buildInsightsViewModel({ events: careEvents, now });
       assert.ok(vm.dataDays >= 4); // feeds(day0), sleeps(day1,2), diaper(day3) = 4 distinct days
@@ -2645,7 +2695,7 @@ async function runAsyncChecks(): Promise<void> {
     assert.deepEqual(today.map((e) => e.id), ['evt-today']);
   });
 
-  await checkAsync('V6. legacyEventToCareEvent maps breast/bottle/sleep/diaper/pump and skips notes', async () => {
+  await checkAsync('V6. legacyEventToCareEvent maps breast/bottle/sleep/diaper/pump/note', async () => {
     const legacyBreast: LogEvent = {
       id: 'l-feed-L',
       babyId: 'baby-mia',
@@ -2699,9 +2749,16 @@ async function runAsyncChecks(): Promise<void> {
     }
 
     const note = legacyEventToCareEvent({ ...legacySleep, id: 'l-note', type: 'note', meta: { label: 'Fussy' } });
-    assert.equal(note, null); // notes are out of scope for the four core flows
+    assert.ok(note && isNoteEvent(note));
+    if (note && isNoteEvent(note)) {
+      assert.equal(note.details.noteType, 'general');
+      assert.equal(note.details.label, 'Fussy');
+    }
 
-    assert.equal(mapLegacyEvents([legacyBreast, legacySleep, { ...legacySleep, id: 'l-note', type: 'note', meta: {} }]).length, 2);
+    const spitUp = legacyEventToCareEvent({ ...legacySleep, id: 'l-spit', type: 'note', meta: { label: SPITUP_NOTE_LABEL } });
+    assert.ok(spitUp && isNoteEvent(spitUp) && spitUp.details.noteType === 'spit_up');
+
+    assert.equal(mapLegacyEvents([legacyBreast, legacySleep, { ...legacySleep, id: 'l-note', type: 'note', meta: {} }]).length, 3);
   });
 
   await checkAsync('V7. careEventToLegacyEvent preserves what the legacy shape can hold', async () => {
@@ -2736,13 +2793,27 @@ async function runAsyncChecks(): Promise<void> {
       details: { kind: 'dry' },
     };
     assert.equal(careEventToLegacyEvent(diaperDry).meta.kind, undefined); // 'dry' has no legacy kind
+
+    const note = makeNoteAt('c-note', 'c-note', NOW, {
+      noteType: 'spit_up',
+      label: 'Spit-up',
+      note: 'small amount',
+    });
+    const noteBack = careEventToLegacyEvent(note);
+    assert.equal(noteBack.type, 'note');
+    assert.equal(noteBack.meta.label, 'Spit-up');
+    assert.equal(noteBack.meta.note, 'small amount');
   });
 
   await checkAsync('V8. logging snapshot serialize → parse round-trips events + queue; bad input degrades safely', async () => {
-    const snapshot = { events: [makeDiaper('evt-d1', 'cid-d1')], syncQueue: ['evt-d1'] };
+    const snapshot = {
+      events: [makeDiaper('evt-d1', 'cid-d1'), makeNoteAt('evt-n1', 'cid-n1', NOW, { noteType: 'general' })],
+      syncQueue: ['evt-d1', 'evt-n1'],
+    };
     const restored = parseLoggingSnapshot(serializeLoggingSnapshot(snapshot));
-    assert.ok(restored && restored.events.length === 1);
-    assert.deepEqual(restored?.syncQueue, ['evt-d1']);
+    assert.ok(restored && restored.events.length === 2);
+    assert.ok(restored?.events.some((event) => isNoteEvent(event)), 'stored note survives parse');
+    assert.deepEqual(restored?.syncQueue, ['evt-d1', 'evt-n1']);
     assert.equal(parseLoggingSnapshot(null), null);
     assert.equal(parseLoggingSnapshot('not json {'), null);
     // a malformed row is dropped rather than failing the whole load
@@ -2750,15 +2821,107 @@ async function runAsyncChecks(): Promise<void> {
     assert.ok(partial && partial.events.length === 0);
   });
 
-  await checkAsync('V9. loggingV2 flag honors a runtime override and resolves as a flag set', async () => {
+  await checkAsync('V9. loggingV2 compatibility flag is always on and no longer reads Expo env', async () => {
     resetLoggingFlags();
     assert.equal(typeof isLoggingV2Enabled(), 'boolean');
     setLoggingV2Enabled(true);
     assert.equal(isLoggingV2Enabled(), true);
     assert.equal(resolveLoggingFlags().loggingV2, true);
     setLoggingV2Enabled(false);
-    assert.equal(isLoggingV2Enabled(), false);
+    assert.equal(isLoggingV2Enabled(), true);
+    assert.equal(resolveLoggingFlags().loggingV2, true);
+    const featureFlagsSrc = readFileSync(
+      new URL('../src/features/logging/config/featureFlags.ts', import.meta.url),
+      'utf8',
+    );
+    assert.ok(
+      !featureFlagsSrc.includes('EXPO_PUBLIC_LOGGING_V2'),
+      'featureFlags must not read the old Expo env toggle',
+    );
     resetLoggingFlags();
+  });
+
+  await checkAsync('V10. saveNote writes a canonical note event and keeps active-session recovery empty', async () => {
+    const clock = createManualClock(NOW);
+    const port = createInMemoryLoggingPersistence();
+    const repo = createLoggingRepository(port, clock);
+    const actor: LoggingActor = { familyId: 'fam-1', childId: 'baby-mia', userId: 'cg-mom' };
+    const result = await saveNote(
+      { repo, clock, actor },
+      {
+        clientEventId: 'note-cid-1',
+        noteType: 'spit_up',
+        label: ' Spit-up ',
+        note: ' small amount ',
+      },
+    );
+
+    assert.ok(result.ok && isNoteEvent(result.event));
+    if (result.ok && isNoteEvent(result.event)) {
+      assert.equal(result.event.details.noteType, 'spit_up');
+      assert.equal(result.event.details.label, 'Spit-up');
+      assert.equal(result.event.details.note, 'small amount');
+    }
+
+    const today = await repo.getTodayEvents({ familyId: 'fam-1', childId: 'baby-mia' });
+    const active = await repo.getActiveSessions({ familyId: 'fam-1', childId: 'baby-mia', userId: 'cg-mom' });
+    const historyRows = buildV2HistoryTimeline(today, seedCaregivers, NOW);
+
+    assert.equal(today.length, 1);
+    assert.ok(isNoteEvent(today[0]));
+    assert.equal(active.length, 0);
+    assert.equal(historyRows[0].label, 'Spit-up');
+  });
+
+  await checkAsync('V11. canonical merge and legacy snapshot migration are idempotent with v2 winning', async () => {
+    const legacy: LogEvent = {
+      id: 'legacy-note',
+      babyId: 'baby-mia',
+      caregiverId: 'cg-mom',
+      type: 'note',
+      startAt: iso(NOW),
+      endAt: null,
+      meta: { label: 'Fussy' },
+      createdAt: iso(NOW),
+    };
+    const canonical = makeNoteAt('canonical-note', 'legacy-note', NOW, {
+      noteType: 'spit_up',
+      label: 'Spit-up',
+    });
+    const compatibility = mapLegacyEvents([legacy]);
+
+    const merged = mergeCanonicalEvents([canonical], compatibility);
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0].id, 'canonical-note');
+    assert.ok(isNoteEvent(merged[0]) && merged[0].details.noteType === 'spit_up');
+
+    const migratedOnce = migrateLegacyEventsToLoggingSnapshot(
+      { events: [canonical], syncQueue: ['canonical-note', 'canonical-note'] },
+      [legacy],
+    );
+    const migratedTwice = migrateLegacyEventsToLoggingSnapshot(migratedOnce, [legacy]);
+    assert.equal(migratedOnce.events.length, 1);
+    assert.deepEqual(migratedOnce.syncQueue, ['canonical-note']);
+    assert.deepEqual(migratedTwice, migratedOnce);
+  });
+
+  await checkAsync('V12. canonical range selection includes overlapping sleeps and instant notes', async () => {
+    const fromMs = NOW + 60 * 60_000;
+    const toMs = NOW + 3 * 60 * 60_000;
+    const overlappingSleep = makeCompletedSleepAt(
+      'range-sleep',
+      'range-sleep-cid',
+      NOW + 30 * 60_000,
+      NOW + 90 * 60_000,
+    );
+    const note = makeNoteAt('range-note', 'range-note-cid', NOW + 2 * 60 * 60_000, {
+      noteType: 'general',
+      label: 'Fussy',
+    });
+    const futureFeed = makeBottleAt('range-future-feed', 'range-future-feed-cid', NOW + 4 * 60 * 60_000);
+
+    const selected = selectCanonicalEventsInRange([overlappingSleep, note, futureFeed], { fromMs, toMs });
+    assert.deepEqual(selected.map((event) => event.id), ['range-note', 'range-sleep']);
   });
 
   // W. Active-session model + timestamp-based timers (plan §1.3, §6, Phase 4) —
@@ -4671,7 +4834,9 @@ check('ST6. auth status transitions are reasoned and duplicate same-user session
 
 check('ST7. logging v2 waits for event hydration and merges the restored event source', () => {
   assert.ok(
-    LOGGING_PROVIDER_SRC.includes('eventsHydrated') && LOGGING_PROVIDER_SRC.includes('!enabled || !scope || !eventsHydrated'),
+    LOGGING_PROVIDER_SRC.includes('eventsHydrated') &&
+      LOGGING_PROVIDER_SRC.includes('!scope || !eventsHydrated') &&
+      !LOGGING_PROVIDER_SRC.includes('!enabled || !scope || !eventsHydrated'),
     'LoggingProvider hydrate should wait until LocalEventProvider has restored events',
   );
   assert.ok(
@@ -5214,29 +5379,78 @@ const RX_NOW = new Date(2026, 5, 30, 2, 0).getTime();
 const rxIso = (h: number, dayOffset = 0, min = 0) =>
   new Date(2026, 5, 29 + dayOffset, h, min).toISOString();
 let rxSeq = 0;
-const rxEvent = (
-  type: LogEventType,
-  startAt: string,
-  overrides: Partial<LogEvent> = {},
-): LogEvent => ({
+const rxBase = (
+  type: CareEvent['type'],
+  occurredAt: string,
+  over: Partial<CareEventBase> = {},
+): CareEventBase => ({
   id: `rx-${(rxSeq += 1)}`,
-  babyId: 'rx-baby',
-  caregiverId: 'rx-cg',
+  clientEventId: `rx-cid-${rxSeq}`,
+  familyId: 'rx-baby',
+  childId: 'rx-baby',
+  createdByUserId: 'rx-cg',
   type,
-  startAt,
-  endAt: null,
-  meta: {},
-  createdAt: startAt,
-  ...overrides,
+  status: 'completed',
+  occurredAt,
+  startedAt: null,
+  endedAt: null,
+  timezoneOffsetMinutes: 0,
+  createdAt: occurredAt,
+  updatedAt: occurredAt,
+  syncStatus: 'local',
+  version: 1,
+  ...over,
+});
+const rxFeed = (at: string): BottleFeedEvent => ({
+  ...rxBase('feed', at),
+  type: 'feed',
+  childId: 'rx-baby',
+  status: 'completed',
+  method: 'bottle',
+  details: { amountMl: 90, milkType: 'formula' },
+});
+const rxDiaper = (at: string): DiaperEvent => ({
+  ...rxBase('diaper', at),
+  type: 'diaper',
+  childId: 'rx-baby',
+  status: 'completed',
+  details: { kind: 'wet' },
+});
+const rxNote = (at: string, noteType: NoteEvent['details']['noteType'], label: string): NoteEvent => ({
+  ...rxBase('note', at),
+  type: 'note',
+  childId: 'rx-baby',
+  status: 'completed',
+  details: { noteType, label },
+});
+const rxPump = (at: string): PumpEvent => ({
+  ...rxBase('pump', at, { childId: null, startedAt: at, endedAt: at }),
+  type: 'pump',
+  childId: null,
+  subjectUserId: 'rx-cg',
+  status: 'completed',
+  details: { side: 'left', leftVolumeMl: 40, rightVolumeMl: null },
+});
+const rxSleep = (startedAt: string, endedAt: string | null = null): SleepEvent => ({
+  ...rxBase('sleep', startedAt, {
+    status: endedAt === null ? 'active' : 'completed',
+    startedAt,
+    endedAt,
+    updatedAt: endedAt ?? startedAt,
+  }),
+  type: 'sleep',
+  childId: 'rx-baby',
+  status: endedAt === null ? 'active' : 'completed',
+  details: { sleepType: 'night' },
 });
 
 check('X9. recap counts spit-up notes separately from other notes', () => {
   const recap = buildReassureRecap(
     [
-      rxEvent('note', rxIso(22), { meta: { label: SPITUP_NOTE_LABEL } }),
-      rxEvent('note', rxIso(23), { meta: { label: SPITUP_NOTE_LABEL } }),
-      rxEvent('note', rxIso(21), { meta: { label: 'Fussy' } }),
-      rxEvent('feed', rxIso(20)),
+      rxNote(rxIso(22), 'spit_up', SPITUP_NOTE_LABEL),
+      rxNote(rxIso(23), 'spit_up', SPITUP_NOTE_LABEL),
+      rxNote(rxIso(21), 'general', 'Fussy'),
+      rxFeed(rxIso(20)),
     ],
     RX_NOW,
   );
@@ -5249,10 +5463,10 @@ check('X9. recap counts spit-up notes separately from other notes', () => {
 check('X10. events outside the night window are excluded', () => {
   const recap = buildReassureRecap(
     [
-      rxEvent('feed', rxIso(12)), // yesterday noon — before 18:00 open
-      rxEvent('diaper', rxIso(15)), // yesterday afternoon
-      rxEvent('feed', rxIso(19)), // in window
-      rxEvent('feed', rxIso(3, 1)), // "today" 3am but AFTER now (02:00) — excluded
+      rxFeed(rxIso(12)), // yesterday noon — before 18:00 open
+      rxDiaper(rxIso(15)), // yesterday afternoon
+      rxFeed(rxIso(19)), // in window
+      rxFeed(rxIso(3, 1)), // "today" 3am but AFTER now (02:00) — excluded
     ],
     RX_NOW,
   );
@@ -5260,17 +5474,25 @@ check('X10. events outside the night window are excluded', () => {
   assert.equal(recap.diaperCount, 0);
 });
 
+check('X10b. Reassure ignores caregiver-owned pump events from canonical history', () => {
+  const recap = buildReassureRecap([rxPump(rxIso(20))], RX_NOW);
+  assert.equal(recap.isEmpty, true);
+  assert.equal(recap.feedCount, 0);
+  assert.equal(recap.diaperCount, 0);
+  assert.equal(recap.spitUpCount, 0);
+});
+
 check('X11. sleeps overlapping the window count; a running sleep is flagged', () => {
   const overlapping = buildReassureRecap(
     // began 17:30 (before the window opened) and ended 19:10 inside it
-    [rxEvent('sleep', rxIso(17, 0, 30), { endAt: rxIso(19, 0, 10) })],
+    [rxSleep(rxIso(17, 0, 30), rxIso(19, 0, 10))],
     RX_NOW,
   );
   assert.equal(overlapping.isEmpty, false);
   assert.equal(overlapping.longestSleepMin, 100);
   assert.equal(overlapping.sleepRunning, false);
 
-  const running = buildReassureRecap([rxEvent('sleep', rxIso(23))], RX_NOW);
+  const running = buildReassureRecap([rxSleep(rxIso(23))], RX_NOW);
   assert.equal(running.sleepRunning, true);
   assert.equal(running.isEmpty, false);
 });
@@ -5336,15 +5558,15 @@ check('X12. recapReadText stays strictly descriptive — no judgement vocabulary
     buildReassureRecap([], RX_NOW),
     buildReassureRecap(
       [
-        rxEvent('feed', rxIso(20)),
-        rxEvent('feed', rxIso(23)),
-        rxEvent('diaper', rxIso(22)),
-        rxEvent('note', rxIso(22, 0, 30), { meta: { label: SPITUP_NOTE_LABEL } }),
-        rxEvent('sleep', rxIso(21), { endAt: rxIso(21, 0, 40) }),
+        rxFeed(rxIso(20)),
+        rxFeed(rxIso(23)),
+        rxDiaper(rxIso(22)),
+        rxNote(rxIso(22, 0, 30), 'spit_up', SPITUP_NOTE_LABEL),
+        rxSleep(rxIso(21), rxIso(21, 0, 40)),
       ],
       RX_NOW,
     ),
-    buildReassureRecap([rxEvent('sleep', rxIso(23))], RX_NOW),
+    buildReassureRecap([rxSleep(rxIso(23))], RX_NOW),
   ];
   for (const recap of samples) {
     const text = recapReadText(recap);
@@ -5410,6 +5632,10 @@ check('X16. the Tonight note sheet offers the Spit-up preset via the shared cons
   assert.ok(
     tonightSrc.includes("from '@/features/reassure/domain/recap'"),
     'the constant is imported from the recap domain, the single source of truth',
+  );
+  assert.ok(
+    tonightSrc.includes("noteType: key === SPITUP_NOTE_LABEL ? 'spit_up' : 'general'"),
+    'the Tonight note sheet saves a stable noteType, not only display copy',
   );
 });
 

@@ -14,8 +14,8 @@
  *   - `quickLogMeta`  — the four card subtitles (plan §7.1).
  *   - `tonightStatus` — the "time since last…" strip, v2 source.
  *
- * Returns `null` when the `loggingV2` flag is off, so the screen falls straight
- * back to the legacy `useLocalEvents` view (the production path is untouched).
+ * Returns `null` until logging hydration completes, so the tab shell can keep
+ * the startup loading surface instead of flashing an empty Today view.
  *
  * React + app-type imports, so it is NOT re-exported from the Node-safe barrel;
  * the screen imports it directly (like `LoggingProvider` / `useElapsedTime`).
@@ -109,9 +109,9 @@ function nextNapLabel(wakeStartedAt: string | null, now: number): string {
 }
 
 /**
- * Today view-model from the v2 store, or `null` when the flag is off. `now` is the
- * (possibly frozen, during a theme reveal) reference time; durations are derived
- * from timestamps so this carries no ticking counter.
+ * Today view-model from the canonical store, or `null` until hydration is ready.
+ * `now` is the (possibly frozen, during a theme reveal) reference time; durations
+ * are derived from timestamps so this carries no ticking counter.
  */
 export function useV2TodayView(params: { now?: number; caregivers: Caregiver[] }): V2TodayView | null {
   const { now: nowParam, caregivers } = params;

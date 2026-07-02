@@ -2,11 +2,9 @@
  * Logging v2 — shared event model (plan §4).
  *
  * A discriminated `CareEvent` union: one shared timeline, a separately validated
- * payload per feature (Feed / Sleep / Diaper / Pump). This lives BESIDE the
- * existing flat `LogEvent` (src/data/models.ts); the old MVP keeps working while
- * the new logging domain is built up behind a `loggingV2` flag and a
- * `LegacyLoggingMapper` (added in later tasks). Nothing here is wired into the
- * running app yet — it is the foundation the repository, store, and flows sit on.
+ * payload per feature (Feed / Sleep / Diaper / Pump / Note). This lives beside
+ * the existing flat `LogEvent` (src/data/models.ts); old rows are read through
+ * `LegacyLoggingMapper` while all new product writes use this model.
  *
  * Source of truth: docs/LULLABY_LOGGING_IMPLEMENTATION_PLAN_EN.md §4.
  */
@@ -17,8 +15,8 @@ export type ISODateTime = string;
 /** Where a locally-created event sits relative to the backend. */
 export type SyncStatus = 'local' | 'pending' | 'synced' | 'failed';
 
-/** The four core logging functions. `note` stays on the legacy model, out of scope. */
-export type CareEventType = 'feed' | 'sleep' | 'diaper' | 'pump';
+/** The canonical logging functions surfaced across Today, History, Insights, and Reassure. */
+export type CareEventType = 'feed' | 'sleep' | 'diaper' | 'pump' | 'note';
 
 /** Lifecycle of an event. Instant events are `completed`; sessions start `active`. */
 export type CareEventStatus = 'active' | 'completed' | 'cancelled' | 'deleted';
@@ -28,6 +26,7 @@ export type PumpSide = 'left' | 'right' | 'both';
 export type MilkType = 'breast_milk' | 'formula' | 'mixed' | 'other';
 export type DiaperKind = 'wet' | 'dirty' | 'both' | 'dry';
 export type SleepType = 'nap' | 'night' | 'unknown';
+export type NoteType = 'general' | 'spit_up';
 
 /** Fields shared by every `CareEvent`, regardless of type. */
 export interface CareEventBase {
@@ -141,6 +140,25 @@ export interface PumpEvent extends CareEventBase {
   };
 }
 
+/* ----------------------------- Note ------------------------------ */
+
+/**
+ * A calm side-log for observations that are not one of the timed/quantity flows.
+ * `noteType` gives Reassure a stable, label-independent way to count small
+ * spit-ups while leaving future symptom detail extensible.
+ */
+export interface NoteEvent extends CareEventBase {
+  type: 'note';
+  childId: string;
+  /** Instant event — never `active`. */
+  status: 'completed' | 'deleted';
+  details: {
+    noteType: NoteType;
+    label?: string;
+    note?: string;
+  };
+}
+
 /* ----------------------------- Union ----------------------------- */
 
 export type CareEvent =
@@ -148,7 +166,8 @@ export type CareEvent =
   | BottleFeedEvent
   | SleepEvent
   | DiaperEvent
-  | PumpEvent;
+  | PumpEvent
+  | NoteEvent;
 
 /* --------------------------- Drafts / undo ----------------------- */
 
@@ -196,6 +215,8 @@ export const isSleepEvent = (e: CareEvent): e is SleepEvent => e.type === 'sleep
 export const isDiaperEvent = (e: CareEvent): e is DiaperEvent => e.type === 'diaper';
 
 export const isPumpEvent = (e: CareEvent): e is PumpEvent => e.type === 'pump';
+
+export const isNoteEvent = (e: CareEvent): e is NoteEvent => e.type === 'note';
 
 /** An active session (sleep / breast / pump still running). */
 export const isActiveSession = (e: CareEvent): boolean => e.status === 'active';

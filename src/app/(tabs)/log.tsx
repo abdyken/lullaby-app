@@ -1,20 +1,19 @@
 /**
  * Log — the "what happened" history screen (§4).
  *
- * Reads the SAME shared local events as Tonight (via useLocalEvents): the raw
- * `events` drive grouping + the night recap, and `fullTimeline` supplies the
- * display-ready rows so each line looks exactly like Tonight's timeline.
+ * Reads canonical logging history from LoggingProvider. Legacy data is folded in
+ * by the provider's compatibility adapter, so old rows and new v2 rows render in
+ * one timeline.
  *
- * Local-only: no persistence, no backend, no logging controls here (logging
- * lives on Tonight). Filtering remains wired in-memory but is hidden for the
- * current small demo timeline.
+ * Filtering remains wired in-memory but is hidden for the current small demo
+ * timeline.
  */
-import { useMemo, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { Screen } from '@/components/Screen';
 import { TimelineItem } from '@/components/TimelineItem';
-import { isLoggingV2Enabled } from '@/features/logging';
 import type { CareEvent } from '@/features/logging/domain/types';
 import { buildV2HistoryTimeline } from '@/features/logging/state/historyTimeline';
 import { useLogging } from '@/features/logging/state/LoggingProvider';
@@ -22,7 +21,6 @@ import { useLocalEvents } from '@/state/LocalEventProvider';
 import { useAuth } from '@/state/AuthProvider';
 import { useTheme } from '@/state/ThemeProvider';
 import { caregivers as seedCaregivers, type TimelineEntry } from '@/data/mock';
-import type { LogEvent } from '@/data/models';
 import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
 const SHOW_HISTORY_FILTERS = false;
@@ -67,7 +65,7 @@ function dayHeading(key: string, now: number): string {
 type Group = { key: string; heading: string; entries: TimelineEntry[] };
 type HistorySourceEvent = {
   id: string;
-  kind: LogEvent['type'] | CareEvent['type'];
+  kind: CareEvent['type'];
   occurredAt: string;
 };
 
@@ -161,10 +159,6 @@ function EmptyState({ filter, surfaceMode }: { filter: Filter; surfaceMode: Surf
   );
 }
 
-function legacyHistorySource(event: LogEvent): HistorySourceEvent {
-  return { id: event.id, kind: event.type, occurredAt: event.createdAt };
-}
-
 function v2HistorySource(event: CareEvent): HistorySourceEvent {
   return { id: event.id, kind: event.type, occurredAt: event.occurredAt };
 }
@@ -174,15 +168,15 @@ function filterHistoryEvents(events: HistorySourceEvent[], filter: Filter): Hist
 }
 
 export default function LogScreen() {
-  const { events, fullTimeline, resetLocalEvents } = useLocalEvents();
-  const logging = useLogging();
+  const { resetLocalEvents } = useLocalEvents();
+  const { loadAllEvents } = useLogging();
   const { caregivers: activeCaregivers, caregiver: ownCaregiver } = useAuth();
   const { mode } = useTheme();
   const palette = surfaces[mode];
   const [filter, setFilter] = useState<Filter>('all');
+  const [historyEvents, setHistoryEvents] = useState<CareEvent[]>([]);
   // Stamp "now" once (for Today/Yesterday headings) so render stays pure.
   const [now] = useState(() => Date.now());
-  const loggingV2 = isLoggingV2Enabled();
   // Active caregivers come from AuthProvider (real ones in Supabase mode, the
   // seed Mom/Dad in local-only mode); the direct seed import stays only as the
   // ultimate fallback for a transient empty read.
@@ -192,16 +186,27 @@ export default function LogScreen() {
   );
 
   const v2Timeline = useMemo(
-    () => buildV2HistoryTimeline(logging.todayEvents, v2Caregivers, now),
-    [logging.todayEvents, v2Caregivers, now],
+    () => buildV2HistoryTimeline(historyEvents, v2Caregivers, now),
+    [historyEvents, v2Caregivers, now],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      void loadAllEvents().then((events) => {
+        if (!cancelled) setHistoryEvents(events);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [loadAllEvents]),
   );
 
   const groups = useMemo(() => {
-    const timeline = loggingV2 ? v2Timeline : fullTimeline;
-    const sourceEvents = loggingV2 ? logging.todayEvents.map(v2HistorySource) : events.map(legacyHistorySource);
-    const rows = new Map(timeline.map((entry) => [entry.id, entry]));
+    const sourceEvents = historyEvents.map(v2HistorySource);
+    const rows = new Map(v2Timeline.map((entry) => [entry.id, entry]));
     return groupByDay(filterHistoryEvents(sourceEvents, filter), rows, now);
-  }, [events, fullTimeline, filter, logging.todayEvents, loggingV2, now, v2Timeline]);
+  }, [filter, historyEvents, now, v2Timeline]);
 
   return (
     <Screen surfaceMode={mode}>

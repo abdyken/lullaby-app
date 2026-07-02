@@ -20,6 +20,7 @@ import {
   isBottleFeed,
   isBreastFeed,
   isDiaperEvent,
+  isNoteEvent,
   isPumpEvent,
   isSleepEvent,
   type BreastFeedEvent,
@@ -135,6 +136,7 @@ const TINT_BY_TYPE: Record<CareEventType, string> = {
   sleep: colors.sleep,
   diaper: colors.diaper,
   pump: colors.pump,
+  note: colors.sleep,
 };
 
 /**
@@ -195,6 +197,12 @@ export function formatTimelineEvent(event: CareEvent, now: number): TimelineEven
     return { ...view, icon: 'pump', tint };
   }
 
+  if (isNoteEvent(event)) {
+    const label = event.details.noteType === 'spit_up' ? 'Spit-up' : (event.details.label ?? 'Note');
+    const detail = event.details.note ?? (event.details.noteType === 'spit_up' ? 'small spit-up' : '');
+    return { title: label, subtitle: detail, icon: 'note', tint };
+  }
+
   // Unreachable for the closed union, but keeps the formatter total + type-safe.
   return { title: 'Logged', subtitle: '', icon: (event as CareEvent).type, tint };
 }
@@ -220,6 +228,9 @@ export function formatLoggingToast(event: CareEvent, now: number): string {
     const total = pumpTotalVolumeMl(event.details);
     if (total > 0) return `Pump logged · ${total} ml`;
     return 'Pump logged without volume';
+  }
+  if (isNoteEvent(event)) {
+    return event.details.noteType === 'spit_up' ? 'Spit-up noted' : 'Note saved';
   }
   return 'Logged';
 }

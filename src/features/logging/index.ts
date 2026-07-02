@@ -20,6 +20,7 @@ export * from './data/LoggingRepository';
 export * from './data/LoggingRepositoryImpl';
 export * from './data/LegacyLoggingMapper';
 export * from './data/loggingPersistence';
+export * from './data/normalizedEvents';
 
 // Active-session state, selectors, and hydration (plan §1.3, §6, Phase 4).
 export * from './state/loggingStore';

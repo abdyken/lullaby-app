@@ -10,10 +10,9 @@
  *   - exposes the Feed use-cases (start/switch/finish/cancel breast, save bottle)
  *     as bound actions that run the pure use-case then refresh the store.
  *
- * It is GATED on the `loggingV2` flag: while the flag is off (the production
- * default during migration) the provider does no I/O at all — no hydrate, no
- * AppState subscription — so the existing MVP is completely untouched. Nothing
- * renders v2 data unless a flag-on caller opens a v2 flow.
+ * Logging v2 is now the canonical production logging engine. Legacy
+ * LocalEventProvider data is still read through the mapper for compatibility,
+ * but new product writes land here.
  *
  * This file is React + AsyncStorage, so it is NOT re-exported from the logging
  * barrel (which stays Node-runnable). Import it directly.
@@ -35,16 +34,17 @@ import { logStartupStep } from '@/lib/startupDiagnostics';
 import { useAuth } from '@/state/AuthProvider';
 import { useLocalEvents } from '@/state/LocalEventProvider';
 
-import { isLoggingV2Enabled } from '../config/featureFlags';
 import { mapLegacyEvents } from '../data/LegacyLoggingMapper';
 import { createDeviceLoggingRepository } from '../data/loggingStorage';
 import type { LoggingRepository } from '../data/LoggingRepository';
+import { mergeCanonicalEvents, selectCanonicalEventsInRange } from '../data/normalizedEvents';
 import type { LoggingError } from '../domain/errors';
 import type {
   BreastFeedEvent,
   BreastSide,
   CareEvent,
   DiaperKind,
+  NoteType,
   PumpEvent,
   PumpSide,
   PumpVolumeDraft,
@@ -60,10 +60,11 @@ import {
   finishBreastFeed,
   finishPump as runFinishPump,
   finishSleep as runFinishSleep,
-  getInsightsSevenDayHistory,
+  INSIGHTS_HISTORY_WINDOW_MS,
   saveBottleFeed,
   saveCompletedSleep as runSaveCompletedSleep,
   saveDiaper as runSaveDiaper,
+  saveNote as runSaveNote,
   savePump as runSavePump,
   startBreastFeed,
   startPump as runStartPump,
@@ -75,12 +76,12 @@ import {
   type LoggingUseCaseDeps,
   type SaveBottleFeedInput,
   type SaveCompletedSleepInput,
+  type SaveNoteInput,
   type StartSleepInput,
 } from '../application';
 import {
   hydrateLoggingState,
   mergeExternalLoggingEvents,
-  mergeLoggingEventsById,
   reconcileLoggingState,
   type LoggingScope,
 } from './loggingHydration';
@@ -98,6 +99,10 @@ export type LoggingToastState = { id: number; message: string };
 
 /** How long the "saved · Undo" toast stays before it quietly fades (mirrors AppToast). */
 const TOAST_DURATION_MS = 3200;
+const ALL_EVENTS_RANGE = {
+  fromMs: Number.MIN_SAFE_INTEGER,
+  toMs: Number.MAX_SAFE_INTEGER,
+} as const;
 
 type LoggingContextValue = {
   /** Whether the v2 logging system is active. When false, all data is inert. */
@@ -121,6 +126,10 @@ type LoggingContextValue = {
   clearError: () => void;
   /** Read-only persisted logging history for Insights. */
   loadInsightsHistory: (nowMs?: number) => Promise<CareEvent[]>;
+  /** Canonical events in an arbitrary range, including legacy compatibility rows. */
+  loadEventsInRange: (range: { fromMs: number; toMs: number }) => Promise<CareEvent[]>;
+  /** Canonical full history, newest first. */
+  loadAllEvents: () => Promise<CareEvent[]>;
 
   /** The live "saved · Undo" toast for the last completing/instant save (plan §8). */
   toast: LoggingToastState | null;
@@ -151,6 +160,8 @@ type LoggingContextValue = {
 
   /** Log a diaper change (instant, two-tap). Returns false when validation rejected it. */
   saveDiaper: (kind: DiaperKind) => Promise<boolean>;
+  /** Save a general note or spit-up note. */
+  saveNote: (input: SaveNoteInput & { noteType?: NoteType }) => Promise<boolean>;
 
   /** Start (or reopen) the caregiver's pump session on the given side. */
   startPump: (side: PumpSide) => Promise<void>;
@@ -189,7 +200,7 @@ function useLoggingActor(): LoggingActor | null {
 }
 
 export function LoggingProvider({ children }: { children: ReactNode }) {
-  const enabled = isLoggingV2Enabled();
+  const enabled = true;
   const actor = useLoggingActor();
   const { events: restoredEvents, isHydrated: eventsHydrated } = useLocalEvents();
 
@@ -239,10 +250,10 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
     [actor],
   );
 
-  // Launch hydrate + foreground reconcile — only when enabled and an actor is
-  // resolved. Disabled or no actor → no I/O at all (the MVP path is untouched).
+  // Launch hydrate + foreground reconcile once an actor is resolved and legacy
+  // events have hydrated, so compatibility rows are present on first paint.
   useEffect(() => {
-    if (!enabled || !scope || !eventsHydrated) return;
+    if (!scope || !eventsHydrated) return;
     let cancelled = false;
     logStartupStep('logging v2 hydrate start', {
       childReady: scope.childId.length > 0,
@@ -288,7 +299,7 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       unsubscribe();
     };
-  }, [enabled, scope, repo, clock, eventsHydrated]);
+  }, [scope, repo, clock, eventsHydrated]);
 
   // Re-read events + active sessions after a mutation, preserving UI-only state.
   const refresh = useCallback(async () => {
@@ -481,6 +492,25 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
     [deps, refresh, runExclusive, recordMutation],
   );
 
+  const saveNote = useCallback(
+    async (input: SaveNoteInput = {}) => {
+      if (!deps) return false;
+      let ok = false;
+      await runExclusive(async () => {
+        const result = await runSaveNote(deps, input);
+        if (result.ok) {
+          ok = true;
+          await refresh();
+          recordMutation('create', result.event, null);
+        } else {
+          setState((prev) => withError(prev, result.error));
+        }
+      });
+      return ok;
+    },
+    [deps, refresh, runExclusive, recordMutation],
+  );
+
   // Pump — same validate-then-write / refresh-on-success / set-error-on-failure
   // pattern as Sleep, scoped to the caregiver. `startPump` reopens the existing
   // session (the use-case guards one active pump per caregiver). Finishing keeps
@@ -561,13 +591,26 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
 
   const clearError = useCallback(() => setState((prev) => clearErrorTransition(prev)), []);
 
+  const loadAllEvents = useCallback(async () => {
+    if (!scope) return [];
+    const storedEvents = await repo.getEventsInRange({ ...scope, ...ALL_EVENTS_RANGE });
+    return mergeCanonicalEvents(storedEvents, restoredCareEventsRef.current);
+  }, [repo, scope]);
+
+  const loadEventsInRange = useCallback(
+    async (range: { fromMs: number; toMs: number }) => selectCanonicalEventsInRange(await loadAllEvents(), range),
+    [loadAllEvents],
+  );
+
   const loadInsightsHistory = useCallback(
     async (nowMs = clock.now()) => {
-      if (!enabled || !scope) return [];
-      const storedEvents = await getInsightsSevenDayHistory(repo, scope, nowMs);
-      return mergeLoggingEventsById(storedEvents, restoredCareEventsRef.current);
+      if (!scope) return [];
+      return loadEventsInRange({
+        fromMs: nowMs - INSIGHTS_HISTORY_WINDOW_MS,
+        toMs: nowMs,
+      });
     },
-    [enabled, repo, scope, clock],
+    [scope, clock, loadEventsInRange],
   );
 
   const value = useMemo<LoggingContextValue>(
@@ -583,6 +626,8 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       error: state.error,
       clearError,
       loadInsightsHistory,
+      loadEventsInRange,
+      loadAllEvents,
       toast,
       undo,
       dismissToast,
@@ -596,6 +641,7 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       cancelSleep,
       saveCompletedSleep,
       saveDiaper,
+      saveNote,
       startPump,
       finishPump,
       savePump,
@@ -613,6 +659,8 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       state.error,
       clearError,
       loadInsightsHistory,
+      loadEventsInRange,
+      loadAllEvents,
       toast,
       undo,
       dismissToast,
@@ -626,6 +674,7 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       cancelSleep,
       saveCompletedSleep,
       saveDiaper,
+      saveNote,
       startPump,
       finishPump,
       savePump,

@@ -18,6 +18,7 @@
 import { loggingError } from '../domain/errors';
 import type { CareEvent } from '../domain/types';
 import type { ActiveSessionsQuery, LoggingRepository } from '../data/LoggingRepository';
+import { mergeCanonicalEvents } from '../data/normalizedEvents';
 import type { Clock } from '../timer/clock';
 import { isReversedRange } from '../timer/sessionMath';
 import {
@@ -68,13 +69,8 @@ function activeStartedAtMs(event: CareEvent): number {
 }
 
 export function mergeLoggingEventsById(...groups: (readonly CareEvent[])[]): CareEvent[] {
-  const byId = new Map<string, CareEvent>();
-  for (const group of groups) {
-    for (const event of group) {
-      if (!byId.has(event.id)) byId.set(event.id, event);
-    }
-  }
-  return [...byId.values()];
+  const [first = [], ...rest] = groups;
+  return mergeCanonicalEvents(first, rest.flat());
 }
 
 /** Read today's events and active sessions together. */
