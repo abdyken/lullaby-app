@@ -1,7 +1,9 @@
 /**
- * reassure-topic-polish — the Phase-3 edge function (built; client wiring
- * intentionally deferred until the consent copy + clinician sign-off land —
- * see SUMMARY.md).
+ * reassure-topic-polish — the Phase-3 edge function (built + tested; client
+ * wiring intentionally deferred until the consent copy AND the clinician
+ * sign-off of the system prompt land — manifest items #10/#13 in
+ * docs/reassure-content-review.md. Do NOT call this from the app until both
+ * gates clear; smoke §X22 enforces the dark state).
  *
  * Rephrases ONE clinician-owned topic line in the parent's own words. The
  * safety order is absolute and lives in CODE:
@@ -10,9 +12,14 @@
  *      a match returns { kind: 'triage' } and the model is NEVER called
  *   3. unknown topic → { kind: 'oos' } — the model is NEVER called
  *   4. only then: Claude rephrases the KB entry, grounded in nothing else
- *   5. full audit (service role), refusal-aware, 8s, 0 retries
+ *      (bounded per _shared/reassureLlm.ts: Haiku default, temp 0.3,
+ *      max_tokens cap, 8s timeout, 0 retries, structured output)
+ *   5. shared output guardrail: parse → length cap → new-medical-claim
+ *      check (judgement vocabulary the KB line itself does not contain)
+ *   6. audit via the shared writer — with the parent's raw text MINIMIZED
+ *      (§6): only a short preview + length persist, never the full text
  *
- * Every failure falls back to the KB entry's original line — the client
+ * Every failure returns the KB entry's original line VERBATIM — the client
  * always has a complete curated answer without this function.
  */
 import Anthropic from 'npm:@anthropic-ai/sdk@0.65.0';
@@ -26,9 +33,23 @@ import {
   TOPIC_POLISH_SYSTEM_PROMPT,
   type ReassureTopicKey,
 } from '../_shared/reassureContent.ts';
+import {
+  classifyLlmError,
+  LLM_MAX_RETRIES,
+  LLM_TIMEOUT_MS,
+  REASSURE_DEFAULT_MODEL,
+  REASSURE_TEMPERATURE,
+  TOPIC_POLISH_MAX_CHARS,
+  TOPIC_POLISH_MAX_TOKENS,
+  validateLlmOutput,
+} from '../_shared/reassureLlm.ts';
+import {
+  insertReassureAudit,
+  minimizeParentTextForAudit,
+  usageOf,
+  type ReassureAuditOutcome,
+} from '../_shared/reassureAudit.ts';
 
-const DEFAULT_MODEL = 'claude-opus-4-8';
-const LLM_TIMEOUT_MS = 8_000;
 const MAX_PARENT_TEXT_CHARS = 280;
 
 function json(status: number, body: unknown): Response {
@@ -47,7 +68,7 @@ Deno.serve(async (req) => {
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
-  const model = Deno.env.get('REASSURE_MODEL') ?? DEFAULT_MODEL;
+  const model = Deno.env.get('REASSURE_MODEL') ?? REASSURE_DEFAULT_MODEL;
 
   // 1. JWT.
   const authHeader = req.headers.get('Authorization') ?? '';
@@ -72,20 +93,30 @@ Deno.serve(async (req) => {
   const serviceClient = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false },
   });
+  // §6 — the audit request carries only a minimized preview of the parent's
+  // words, never the full raw text.
+  const auditRequest = {
+    topicKey,
+    parentText: minimizeParentTextForAudit(parentText),
+    model,
+  };
   const audit = (
-    kindResult: string,
+    outcome: ReassureAuditOutcome,
     stopReason: string | null,
     response: unknown,
-  ): Promise<unknown> =>
-    serviceClient.from('reassure_audit').insert({
+    usage: Record<string, unknown> = {},
+  ): Promise<void> =>
+    insertReassureAudit(serviceClient, {
       user_id: user.id,
       baby_id: null,
       kind: 'topic-polish',
-      request: { topicKey, parentText, model, result: kindResult },
+      outcome,
+      request: auditRequest,
       response: response ?? {},
       model,
       stop_reason: stopReason,
       latency_ms: Date.now() - startedAt,
+      usage,
     });
 
   // 2. TRIAGE FIRST — the shared red-flag scan on the parent's raw words.
@@ -102,19 +133,32 @@ Deno.serve(async (req) => {
     return json(200, { kind: 'oos' });
   }
 
-  // 4. The grounded rephrase. Fallback is always the curated line itself.
+  // 4. The grounded rephrase. Fallback is always the curated line itself,
+  //    VERBATIM — refusal, parse failure, guardrail block, timeout, and API
+  //    errors all leave `line` untouched.
   let line = topic.line;
   let source: 'llm' | 'fallback' = 'fallback';
+  let outcome: ReassureAuditOutcome = 'api_error';
   let stopReason: string | null = null;
   let llmResponse: unknown = null;
+  let usage: Record<string, unknown> = {};
   if (anthropicKey) {
     try {
-      const anthropic = new Anthropic({ apiKey: anthropicKey, maxRetries: 0 });
+      const anthropic = new Anthropic({ apiKey: anthropicKey, maxRetries: LLM_MAX_RETRIES });
       const response = await anthropic.messages.create(
         {
           model,
-          max_tokens: 300,
-          system: TOPIC_POLISH_SYSTEM_PROMPT,
+          max_tokens: TOPIC_POLISH_MAX_TOKENS,
+          temperature: REASSURE_TEMPERATURE,
+          // Stable prefix marked cacheable (§2); dormant below Haiku's
+          // minimum cacheable prefix until the reviewed prompt grows.
+          system: [
+            {
+              type: 'text',
+              text: TOPIC_POLISH_SYSTEM_PROMPT,
+              cache_control: { type: 'ephemeral' },
+            },
+          ],
           messages: [
             {
               role: 'user',
@@ -140,32 +184,41 @@ Deno.serve(async (req) => {
       );
       stopReason = response.stop_reason ?? null;
       llmResponse = response;
-      if (response.stop_reason !== 'refusal') {
+      usage = usageOf(response);
+      if (response.stop_reason === 'refusal') {
+        outcome = 'refusal';
+      } else {
         const block = response.content.find((item: { type: string }) => item.type === 'text') as
           | { type: 'text'; text: string }
           | undefined;
-        if (block?.text) {
-          const parsed = JSON.parse(block.text) as { line?: string };
-          // The polish must stay bounded: reject empty or runaway output.
-          if (
-            typeof parsed.line === 'string' &&
-            parsed.line.length > 0 &&
-            parsed.line.length <= topic.line.length * 3
-          ) {
-            line = parsed.line;
-            source = 'llm';
-          }
+        // 5. The shared output guardrail. The KB line is the source text:
+        //    judgement vocabulary it already contains ("normal", "typical")
+        //    is allowed; anything the model INTRODUCES is a new medical
+        //    claim and discards the rephrase. Length stays bounded to the
+        //    original line (never more than 3×, never past the hard cap).
+        const verdict = validateLlmOutput(block?.text ?? '', 'line', {
+          maxChars: Math.min(TOPIC_POLISH_MAX_CHARS, topic.line.length * 3),
+          sourceText: topic.line,
+        });
+        if (verdict.ok) {
+          line = verdict.value;
+          source = 'llm';
+          outcome = 'llm';
+        } else {
+          outcome = verdict.reason === 'parse' ? 'parse_fail' : 'guardrail_block';
         }
       }
     } catch (error) {
       llmResponse = { error: String(error) };
+      outcome = classifyLlmError(error);
     }
   } else {
     llmResponse = { error: 'ANTHROPIC_API_KEY not configured' };
+    outcome = 'no_api_key';
   }
 
-  // 5. Audit before returning.
-  await audit('topic', stopReason, llmResponse);
+  // 6. Audit before returning.
+  await audit(outcome, stopReason, llmResponse, usage);
 
   return json(200, { kind: 'topic', topicKey, line, source });
 });
