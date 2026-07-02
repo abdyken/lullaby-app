@@ -53,7 +53,7 @@ const REASSURE_TABBAR_EXTRA_CLEARANCE = tabbar.height + 64;
 
 type VoiceFallback = {
   message: string;
-  openSettings: boolean;
+  kind: 'unavailable' | 'permission_denied' | 'retryable';
 };
 
 function Kicker({ text, color }: { text: string; color: string }) {
@@ -142,7 +142,7 @@ export default function ReassureScreen() {
       const trimmed = text.trim();
       if (trimmed.length === 0) return;
       const result = route(trimmed);
-      if (source === 'text') Keyboard.dismiss();
+      if (source === 'text' || source === 'voice') Keyboard.dismiss();
       setVoiceFallback(null);
       setAnswer(result);
       // PRIVACY: coarse enums only — the raw ask text is never sent to analytics.
@@ -158,8 +158,12 @@ export default function ReassureScreen() {
     [scrollToAnswer, track],
   );
 
-  const focusAskInputWithHint = useCallback((message: string, openSettings = false) => {
-    setVoiceFallback({ message, openSettings });
+  const showVoiceFallback = useCallback((message: string, kind: VoiceFallback['kind']) => {
+    setVoiceFallback({ message, kind });
+  }, []);
+
+  const focusAskInputWithHint = useCallback((message: string, kind: VoiceFallback['kind']) => {
+    setVoiceFallback({ message, kind });
     setTimeout(() => inputRef.current?.focus(), 0);
   }, []);
 
@@ -175,34 +179,41 @@ export default function ReassureScreen() {
 
   const voice = useVoiceInput({
     onTranscript: (text) => ask(text, 'voice'),
-    onListeningStart: () => track('reassure_voice_used'),
+    onListeningStart: () => {
+      setVoiceFallback(null);
+      track('reassure_voice_used');
+    },
     onDenied: () => {
       track('reassure_voice_permission_denied');
-      focusAskInputWithHint('Microphone permission is off. You can open settings or type instead.', true);
+      showVoiceFallback('Microphone permission is off. You can open settings or type instead.', 'permission_denied');
     },
     onUnavailable: () => {
-      focusAskInputWithHint('Voice is unavailable in this build, so you can type your question here.');
+      focusAskInputWithHint('Voice is unavailable in this build, so you can type your question here.', 'unavailable');
+    },
+    onNoMatch: () => {
+      showVoiceFallback("I didn't catch that. You can try again or type instead.", 'retryable');
     },
     onError: () => {
-      focusAskInputWithHint("Voice didn't catch that. Type your question here instead.");
+      showVoiceFallback("Voice didn't catch that. You can try again or type instead.", 'retryable');
     },
   });
 
+  const retryVoice = useCallback(() => {
+    setVoiceFallback(null);
+    voice.retry();
+  }, [voice]);
+
   const onOrbPress = useCallback(() => {
     if (voice.state === 'unavailable') {
-      focusAskInputWithHint('Voice is unavailable in this build, so you can type your question here.');
+      focusAskInputWithHint('Voice is unavailable in this build, so you can type your question here.', 'unavailable');
       return;
     }
     if (voice.state === 'permission_denied') {
-      focusAskInputWithHint('Microphone permission is off. You can open settings or type instead.', true);
-      return;
-    }
-    if (voice.state === 'error') {
-      focusAskInputWithHint("Voice didn't catch that. Type your question here instead.");
+      showVoiceFallback('Microphone permission is off. You can open settings or type instead.', 'permission_denied');
       return;
     }
     voice.tapOrb();
-  }, [focusAskInputWithHint, voice]);
+  }, [focusAskInputWithHint, showVoiceFallback, voice]);
 
   const onTriageAction = useCallback(
     (action: TriageAction) => track('reassure_triage_call_tapped', { action }),
@@ -274,7 +285,24 @@ export default function ReassureScreen() {
             {voiceFallback.message}
           </Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 9 }}>
-            {voiceFallback.openSettings ? (
+            {voiceFallback.kind === 'retryable' ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Try voice again"
+                onPress={retryVoice}
+                style={({ pressed }) => ({
+                  backgroundColor: colors.sleep,
+                  borderRadius: radii.pill,
+                  paddingHorizontal: 13,
+                  paddingVertical: 8,
+                  transform: [{ scale: pressed ? 0.96 : 1 }],
+                })}>
+                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.white }}>
+                  Try again
+                </Text>
+              </Pressable>
+            ) : null}
+            {voiceFallback.kind === 'permission_denied' ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Open microphone settings"

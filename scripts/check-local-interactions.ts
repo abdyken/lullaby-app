@@ -279,6 +279,10 @@ import {
   recapWindowLabel,
 } from '../src/features/reassure/domain/recap';
 import { isSpeechAvailable } from '../src/features/reassure/application/speech';
+import {
+  classifyVoiceRecognitionError,
+  resolveVoiceTranscript,
+} from '../src/features/reassure/application/useVoiceInput';
 import { EXAMPLE_CHIPS, KB, REASSURE_CONTENT, TOPIC_ORDER } from '../src/features/reassure/content/kb';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
@@ -5792,25 +5796,49 @@ check('X17b. Reassure RN workflow wires every local entry point into the answer 
 
 check('X17c. voice fallback states are explicit and unavailable voice focuses the text input', () => {
   assert.doesNotThrow(() => isSpeechAvailable(), 'speech availability probe is non-throwing under Node/dev builds');
+  assert.equal(classifyVoiceRecognitionError('no-speech'), 'no_match');
+  assert.equal(classifyVoiceRecognitionError('no_match'), 'no_match');
+  assert.equal(classifyVoiceRecognitionError('speech timeout'), 'no_match');
+  assert.equal(classifyVoiceRecognitionError('network'), 'error');
+  assert.equal(resolveVoiceTranscript('', 'quiet hiccups'), 'quiet hiccups');
+  assert.equal(resolveVoiceTranscript('final hiccups', 'quiet hiccups'), 'final hiccups');
+  assert.equal(resolveVoiceTranscript('', ''), null);
   for (const label of [
     'Tap to talk',
     'Listening...',
-    'Voice unavailable in this build',
-    'Enable microphone in settings',
-    "Voice didn't catch that — type instead",
+    'Voice unavailable',
+    'Enable microphone',
+    "Didn't catch that",
+    'Try again',
   ]) {
     assert.ok(VOICE_ORB_SRC.includes(label), `VoiceOrb contains "${label}"`);
   }
   assert.ok(!VOICE_ORB_SRC.includes('One moment'), 'voice orb does not show the vague pending label');
   assert.ok(VOICE_ORB_SRC.includes('MicOffIcon') && !VOICE_ORB_SRC.includes('KeyboardIcon'),
     'degraded orb uses a mic-off icon, not a keyboard glyph');
+  assert.ok(USE_VOICE_INPUT_SRC.includes("'no_match'"), 'no-speech has its own retryable state');
   assert.ok(USE_VOICE_INPUT_SRC.includes("'permission_denied'"), 'permission denial has its own state');
   assert.ok(USE_VOICE_INPUT_SRC.includes("'error'"), 'speech capture failure has its own state');
-  assert.ok(REASSURE_SCREEN_SRC.includes('focusAskInputWithHint'), 'degraded voice focuses text input with a hint');
+  assert.ok(USE_VOICE_INPUT_SRC.includes("settle('no_match')"), 'empty transcript settles as no_match, not unavailable');
+  assert.ok(USE_VOICE_INPUT_SRC.includes('retry: () => void') && USE_VOICE_INPUT_SRC.includes('startAttempt'),
+    'hook exposes retry and uses one safe start path');
+  assert.ok(USE_VOICE_INPUT_SRC.includes('cleanupActiveSession()') && USE_VOICE_INPUT_SRC.includes('sessionRef.current?.abort()'),
+    'active speech session/listeners are cleaned before retry and on teardown');
+  assert.ok(USE_VOICE_INPUT_SRC.includes("state === 'unavailable' || state === 'permission_denied'"),
+    'only unavailable/permission states block orb retry');
+  assert.ok(REASSURE_SCREEN_SRC.includes("onTranscript: (text) => ask(text, 'voice')"),
+    'successful transcript feeds the same local ask path');
+  assert.ok(REASSURE_SCREEN_SRC.includes("source === 'text' || source === 'voice'"),
+    'voice submit dismisses the keyboard like typed ask');
+  assert.ok(REASSURE_SCREEN_SRC.includes('focusAskInputWithHint'), 'unavailable voice focuses text input with a hint');
   assert.ok(REASSURE_SCREEN_SRC.includes('inputRef.current?.focus()'), 'text input receives focus');
   assert.ok(REASSURE_SCREEN_SRC.includes('Voice is unavailable in this build'), 'unavailable build hint is visible');
   assert.ok(REASSURE_SCREEN_SRC.includes('Open Settings') && REASSURE_SCREEN_SRC.includes('Type instead'),
-    'voice degraded state exposes explicit actions');
+    'permission/unavailable states expose explicit non-voice actions');
+  assert.ok(REASSURE_SCREEN_SRC.includes('Try again') && REASSURE_SCREEN_SRC.includes('voice.retry()'),
+    'no_match/error expose an explicit voice retry action');
+  assert.ok(REASSURE_SCREEN_SRC.includes("voiceFallback.kind === 'retryable'"),
+    'retryable voice failures are distinct from permission denial');
   assert.ok(REASSURE_SCREEN_SRC.includes('Linking.openSettings()'), 'Open Settings action reaches OS settings');
 });
 

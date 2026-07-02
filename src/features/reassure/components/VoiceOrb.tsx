@@ -6,7 +6,8 @@
  *  - 'listening'         three staggered pulse rings + live label
  *  - 'unavailable'       no speech service / module absent
  *  - 'permission_denied' mic permission refused
- *  - 'error'             speech ended without a usable transcript
+ *  - 'no_match'          speech ran but produced no usable transcript
+ *  - 'error'             temporary recognition failure
  *
  * All loops are gated on reduce-motion. The orb itself never routes — it only
  * reports taps; the owner decides whether that means "listen" or "focus the
@@ -23,6 +24,7 @@ export type VoiceOrbState =
   | 'listening'
   | 'unavailable'
   | 'permission_denied'
+  | 'no_match'
   | 'error';
 
 const ORB_SIZE = 154;
@@ -119,7 +121,8 @@ type Props = {
 
 export function VoiceOrb({ state, reduceMotion, onPress, interimText }: Props) {
   const [breathe] = useState(() => new Animated.Value(0));
-  const degraded = state === 'permission_denied' || state === 'unavailable' || state === 'error';
+  const degraded =
+    state === 'permission_denied' || state === 'unavailable' || state === 'no_match' || state === 'error';
 
   useEffect(() => {
     if (reduceMotion || degraded) {
@@ -149,9 +152,10 @@ export function VoiceOrb({ state, reduceMotion, onPress, interimText }: Props) {
   const label: Record<VoiceOrbState, string> = {
     available_idle: 'Tap to talk',
     listening: 'Listening...',
-    unavailable: 'Voice unavailable in this build',
-    permission_denied: 'Enable microphone in settings',
-    error: "Voice didn't catch that — type instead",
+    unavailable: 'Voice unavailable',
+    permission_denied: 'Enable microphone',
+    no_match: "Didn't catch that",
+    error: 'Try again',
   };
 
   const accessibilityLabel = (() => {
@@ -159,9 +163,11 @@ export function VoiceOrb({ state, reduceMotion, onPress, interimText }: Props) {
       case 'unavailable':
         return 'Voice unavailable in this build. Tap to type your question instead.';
       case 'permission_denied':
-        return 'Enable microphone in settings, or tap to type your question instead.';
+        return 'Enable microphone. Open settings or type your question instead.';
+      case 'no_match':
+        return "Didn't catch that. Tap to try speaking again.";
       case 'error':
-        return "Voice didn't catch that. Tap to type your question instead.";
+        return "Voice didn't catch that. Tap to try again.";
       case 'listening':
         return 'Listening. Tap to stop.';
       case 'available_idle':
