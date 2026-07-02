@@ -81,18 +81,33 @@ Provider is Anthropic (no training on API data on any tier). The
 length (never the full text), and every row expires via `expires_at`
 (90-day TTL). Nothing from this layer is written to analytics.
 
-## Deploy runbook (not performed from agent sessions)
+## Deploy runbook
+
+> **Activation status — 2026-07-02 (project `xhyziuvgglsrdaakpmui`).**
+> Step 2 (migrations) is **DONE**: `reassure_night_reads` and `reassure_audit`
+> are applied and verified on the remote (RLS on; night_reads has the single
+> caregiver-SELECT policy, audit has zero client policies). Steps 1, 3, 4
+> (secrets + `reassure-night-read` deploy) are **still manual** — they need the
+> Supabase CLI / dashboard and the `ANTHROPIC_API_KEY`, neither of which is
+> available from the agent session. **This pass deploys ONLY
+> `reassure-night-read`; `reassure-topic-polish` stays dark and un-wired**
+> (do not run its deploy line below until gates #10 and #13 clear).
 
 1. **Secrets** (Supabase Dashboard → Edge Functions → Secrets, or CLI):
    ```sh
    supabase secrets set ANTHROPIC_API_KEY=<key>
    supabase secrets set REASSURE_MODEL=claude-haiku-4-5-20251001
    ```
-2. **Migrations** (both are still unapplied on the remote as of 2026-07-02):
+2. **Migrations** — ✅ **applied 2026-07-02** to `xhyziuvgglsrdaakpmui`
+   (via the Supabase MCP `apply_migration`; from a clean CLI checkout use
+   `supabase db push` instead):
    ```sh
    supabase db push   # applies 20260702090001_create_reassure_night_reads
                       #     and 20260702090002_create_reassure_audit
    ```
+   Verify: `reassure_night_reads` (RLS on, 1 caregiver-SELECT policy) and
+   `reassure_audit` (RLS on, **0** client policies; `outcome`/`usage`/
+   `expires_at` columns present).
 3. **Audit retention purge** — schedule after the migration (pg_cron, or any
    scheduler with service-role access):
    ```sql
@@ -102,7 +117,17 @@ length (never the full text), and every row expires via `expires_at`
 4. **Functions:**
    ```sh
    supabase functions deploy reassure-night-read
-   supabase functions deploy reassure-topic-polish
+   # DO NOT deploy reassure-topic-polish in the night-read activation pass —
+   # it stays dark until gates #10 and #13 clear:
+   # supabase functions deploy reassure-topic-polish
+   ```
+   After deploy, confirm the function boots without import errors and that the
+   shared modules resolve (`_shared/reassureLlm.ts`, `_shared/reassureAudit.ts`,
+   `_shared/reassureContent.ts`, `reassure-night-read/nightReadCore.ts`):
+   ```sh
+   supabase functions list                 # reassure-night-read shows ACTIVE
+   supabase functions logs reassure-night-read --tail   # no boot/import errors
+   supabase secrets list                    # ANTHROPIC_API_KEY + REASSURE_MODEL present (names only)
    ```
 5. **Staging checks (spec §7):**
    - happy path: Pro user, fresh night → `source:'llm'`, audit row `outcome='llm'`;
@@ -115,6 +140,42 @@ length (never the full text), and every row expires via `expires_at`
    - topic polish (curl with a user JWT): red-flag text → `{kind:'triage'}`
      and unknown topic → `{kind:'oos'}`, both with **no** Anthropic call in
      the function logs.
+
+## Rollback
+
+The night-read layer is fail-safe by construction: the client renders the
+local descriptive read first and only overlays the LLM read if the function
+answers within its 3 s ceiling. So a bad deploy degrades to the local read, it
+does not break Reassure.
+
+- **Roll back the function** (fastest kill switch, no client release needed):
+  ```sh
+  supabase functions deploy reassure-night-read --version <previous-version>
+  # or fully disable it:
+  supabase functions delete reassure-night-read   # client falls back to local read
+  ```
+- **Disable the model without redeploying** — unset the key; the function then
+  audits `outcome='no_api_key'` and returns the local fallback:
+  ```sh
+  supabase secrets unset ANTHROPIC_API_KEY
+  ```
+- **Migrations**: the tables are additive and safe to leave in place on a
+  function rollback. Only drop them for a full teardown, and only if no rows
+  must be retained (`reassure_audit` is a safety-review log):
+  ```sql
+  drop table if exists public.reassure_night_reads;
+  drop table if exists public.reassure_audit;
+  ```
+
+## Rotating `ANTHROPIC_API_KEY`
+
+1. Mint a new key in the Anthropic console; keep the old one live.
+2. `supabase secrets set ANTHROPIC_API_KEY=<new-key>` (never commit it, never
+   put it in `.env` or source — it lives only in Supabase function secrets).
+3. Redeploy so the running instances pick it up:
+   `supabase functions deploy reassure-night-read`.
+4. Force one live night-read call and confirm `outcome='llm'` in
+   `reassure_audit`; then revoke the old key in the Anthropic console.
 
 ## Verification map (spec §8 → smoke checks)
 
