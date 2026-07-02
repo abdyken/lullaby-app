@@ -53,6 +53,7 @@ function TopicRow({
   const palette = surfaces[surfaceMode];
   const night = surfaceMode === 'night';
   const tag = TAG_COLOR[topic.tag];
+  const askLabel = `Ask about ${topic.title.toLowerCase()}`;
   const [open, setOpen] = useState(false);
   const [chevron] = useState(() => new Animated.Value(0));
 
@@ -156,18 +157,22 @@ function TopicRow({
           <AnswerBlocks topic={topic} surfaceMode={surfaceMode} />
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Ask about ${topic.title}`}
+            accessibilityLabel={askLabel}
             onPress={() => onAskTopic(topicKey)}
+            hitSlop={6}
             style={({ pressed }) => ({
               alignSelf: 'flex-start',
-              backgroundColor: night ? 'rgba(85,96,198,0.18)' : colors.sleepTint,
+              backgroundColor: night ? 'rgba(85,96,198,0.20)' : colors.sleepTint,
+              borderWidth: 1.5,
+              borderColor: night ? 'rgba(124,132,218,0.34)' : 'rgba(85,96,198,0.18)',
               borderRadius: radii.pill,
-              paddingHorizontal: 13,
-              paddingVertical: 8,
+              paddingHorizontal: 14,
+              paddingVertical: 9,
+              marginTop: 2,
               transform: [{ scale: pressed ? 0.96 : 1 }],
             })}>
             <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.sleep }}>
-              Ask about this
+              {askLabel}
             </Text>
           </Pressable>
         </View>

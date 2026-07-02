@@ -265,13 +265,16 @@ import type { InsightsViewModel } from '../src/features/insights/types';
 import { REDFLAGS, matchesRedFlag } from '../src/features/reassure/domain/redflags';
 import { normalizeAsk, route } from '../src/features/reassure/domain/router';
 import {
+  DAY_CONTEXT_START_HOUR,
   NIGHT_RECAP_END_HOUR,
   NIGHT_RECAP_START_HOUR,
+  currentContextWindowFor,
   nightWindowFor,
 } from '../src/features/reassure/domain/nightWindow';
 import {
   SPITUP_NOTE_LABEL,
   buildReassureRecap,
+  recapHeading,
   recapReadText,
   recapWindowLabel,
 } from '../src/features/reassure/domain/recap';
@@ -4695,6 +4698,10 @@ const VOICE_ORB_SRC = readFileSync(
   new URL('../src/features/reassure/components/VoiceOrb.tsx', import.meta.url),
   'utf8',
 );
+const ASK_CARD_SRC = readFileSync(
+  new URL('../src/features/reassure/components/AskCard.tsx', import.meta.url),
+  'utf8',
+);
 const USE_VOICE_INPUT_SRC = readFileSync(
   new URL('../src/features/reassure/application/useVoiceInput.ts', import.meta.url),
   'utf8',
@@ -5370,27 +5377,32 @@ check('X7. matchesRedFlag expects normalized input and REDFLAGS is lowercase-onl
   assert.ok(matchesRedFlag("she won't wake"), 'matches on normalized text');
 });
 
-check('X8. night window: live-night, 2am, and morning-recap cases + boundaries', () => {
+check('X8. current context: live-night, daytime context, and finished-night boundaries', () => {
   const at = (h: number, min = 0) => new Date(2026, 5, 30, h, min).getTime(); // June 30 2026, local
   // 19:00 → tonight, from today 18:00
-  let w = nightWindowFor(at(19));
+  let w = currentContextWindowFor(at(19));
   assert.equal(w.label, 'tonight');
   assert.equal(w.startMs, new Date(2026, 5, 30, NIGHT_RECAP_START_HOUR).getTime());
   assert.equal(w.endMs, at(19));
   // 02:00 → tonight, from YESTERDAY 18:00
-  w = nightWindowFor(at(2));
+  w = currentContextWindowFor(at(2));
   assert.equal(w.label, 'tonight');
   assert.equal(w.startMs, new Date(2026, 5, 29, NIGHT_RECAP_START_HOUR).getTime());
-  // 14:00 → closed last-night window [yesterday 18:00, today 10:00]
-  w = nightWindowFor(at(14));
-  assert.equal(w.label, 'last-night');
-  assert.equal(w.startMs, new Date(2026, 5, 29, NIGHT_RECAP_START_HOUR).getTime());
-  assert.equal(w.endMs, new Date(2026, 5, 30, NIGHT_RECAP_END_HOUR).getTime());
-  // boundaries
-  assert.equal(nightWindowFor(at(17, 59)).label, 'last-night');
-  assert.equal(nightWindowFor(at(18, 0)).label, 'tonight');
-  assert.equal(nightWindowFor(at(9, 59)).label, 'tonight');
-  assert.equal(nightWindowFor(at(10, 0)).label, 'last-night');
+  // 14:00 → current daytime context, from today 10:00
+  w = currentContextWindowFor(at(14));
+  assert.equal(w.label, 'today');
+  assert.equal(w.startMs, new Date(2026, 5, 30, DAY_CONTEXT_START_HOUR).getTime());
+  assert.equal(w.endMs, at(14));
+  // boundaries for the screen's default current context
+  assert.equal(currentContextWindowFor(at(17, 59)).label, 'today');
+  assert.equal(currentContextWindowFor(at(18, 0)).label, 'tonight');
+  assert.equal(currentContextWindowFor(at(9, 59)).label, 'tonight');
+  assert.equal(currentContextWindowFor(at(10, 0)).label, 'today');
+  // intentional morning recap still exists as a finished-night helper
+  const finished = nightWindowFor(at(14));
+  assert.equal(finished.label, 'last-night');
+  assert.equal(finished.startMs, new Date(2026, 5, 29, NIGHT_RECAP_START_HOUR).getTime());
+  assert.equal(finished.endMs, new Date(2026, 5, 30, NIGHT_RECAP_END_HOUR).getTime());
 });
 
 // Recap fixtures — a deterministic 2am "tonight" scenario.
@@ -5493,12 +5505,19 @@ check('X10. events outside the night window are excluded', () => {
   assert.equal(recap.diaperCount, 0);
 });
 
-check('X10b. Reassure ignores caregiver-owned pump events from canonical history', () => {
-  const recap = buildReassureRecap([rxPump(rxIso(20))], RX_NOW);
-  assert.equal(recap.isEmpty, true);
-  assert.equal(recap.feedCount, 0);
-  assert.equal(recap.diaperCount, 0);
-  assert.equal(recap.spitUpCount, 0);
+check('X10b. Reassure ignores caregiver-owned pump events in every recap context', () => {
+  const dayNow = new Date(2026, 5, 30, 14, 0).getTime();
+  const recaps = [
+    buildReassureRecap([rxPump(rxIso(20))], RX_NOW),
+    buildReassureRecap([rxPump(rxIso(13, 1))], dayNow),
+    buildReassureRecap([rxPump(rxIso(20))], dayNow, nightWindowFor(dayNow)),
+  ];
+  for (const recap of recaps) {
+    assert.equal(recap.isEmpty, true);
+    assert.equal(recap.feedCount, 0);
+    assert.equal(recap.diaperCount, 0);
+    assert.equal(recap.spitUpCount, 0);
+  }
 });
 
 check('X11. sleeps overlapping the window count; a running sleep is flagged', () => {
@@ -5544,15 +5563,36 @@ check('X11c. local ask workflow outcomes cover typed topic, triage chip, and unk
   assert.deepEqual(route('what stroller should I buy'), { kind: 'oos' });
 });
 
-check('X11d. recap wording uses the active window, not stale last-night logs copy', () => {
+check('X11d. recap wording uses current context unless a finished night is requested', () => {
   const live = buildReassureRecap([], RX_NOW);
   assert.equal(live.window.label, 'tonight');
+  assert.equal(recapHeading(live), "Based on tonight's logs");
   assert.equal(recapWindowLabel(live), 'Since 6pm');
   assert.match(recapReadText(live), /^Since 6pm/);
   assert.doesNotMatch(recapReadText(live), /last night's logs/i);
 
-  const morning = buildReassureRecap([], new Date(2026, 5, 30, 14, 0).getTime());
+  const dayNow = new Date(2026, 5, 30, 14, 0).getTime();
+  const daytime = buildReassureRecap(
+    [
+      rxFeed(rxIso(11, 1)),
+      rxDiaper(rxIso(12, 1)),
+      rxSleep(rxIso(9, 1)), // active sleep overlaps the 10am-current daytime context
+      rxPump(rxIso(13, 1)),
+    ],
+    dayNow,
+  );
+  assert.equal(daytime.window.label, 'today');
+  assert.equal(recapHeading(daytime), "Today's context");
+  assert.equal(recapWindowLabel(daytime), 'Since 10am');
+  assert.match(recapReadText(daytime), /^Since 10am/);
+  assert.equal(daytime.feedCount, 1);
+  assert.equal(daytime.diaperCount, 1);
+  assert.equal(daytime.sleepRunning, true);
+  assert.equal(daytime.isEmpty, false);
+
+  const morning = buildReassureRecap([], dayNow, nightWindowFor(dayNow));
   assert.equal(morning.window.label, 'last-night');
+  assert.equal(recapHeading(morning), 'Morning recap');
   assert.equal(recapWindowLabel(morning), 'Morning recap');
   assert.doesNotMatch(recapReadText(morning), /last night's logs/i);
 });
@@ -5738,12 +5778,16 @@ check('X17b. Reassure RN workflow wires every local entry point into the answer 
   assert.ok(REASSURE_SCREEN_SRC.includes('const result = route(trimmed)'), 'shared ask calls route() locally');
   assert.ok(REASSURE_SCREEN_SRC.includes('<AskCard') && REASSURE_SCREEN_SRC.includes('onAsk={ask}'),
     'typed ask and chips receive the shared ask funnel');
-  assert.ok(TOPIC_ACCORDION_SRC.includes('Ask about this'), 'topic cards expose an answer-card CTA');
+  assert.ok(TOPIC_ACCORDION_SRC.includes('Ask about ${topic.title.toLowerCase()}'), 'topic cards expose a specific answer-card CTA');
   assert.ok(REASSURE_SCREEN_SRC.includes('onAskTopic') && REASSURE_SCREEN_SRC.includes("ask(KB[key].title, 'chip')"),
     'topic CTA reuses the same ask path');
   assert.ok(REASSURE_SCREEN_SRC.includes('reassure-answer-scroll-target'), 'answer scroll target exists');
   assert.ok(REASSURE_SCREEN_SRC.includes('scrollToAnswer') && REASSURE_SCREEN_SRC.includes('scrollRef.current?.scrollTo'),
     'answer card is scrolled into view after render');
+  assert.ok(ASK_CARD_SRC.includes('<Pressable') && ASK_CARD_SRC.includes("onAsk(chip.ask, 'chip')"),
+    'chips are rendered as pressable controls');
+  assert.ok(ASK_CARD_SRC.includes('borderRadius: radii.pill') && ASK_CARD_SRC.includes('minHeight: 36'),
+    'chips carry clear pill-button styling');
 });
 
 check('X17c. voice fallback states are explicit and unavailable voice focuses the text input', () => {
@@ -5758,17 +5802,27 @@ check('X17c. voice fallback states are explicit and unavailable voice focuses th
     assert.ok(VOICE_ORB_SRC.includes(label), `VoiceOrb contains "${label}"`);
   }
   assert.ok(!VOICE_ORB_SRC.includes('One moment'), 'voice orb does not show the vague pending label');
+  assert.ok(VOICE_ORB_SRC.includes('MicOffIcon') && !VOICE_ORB_SRC.includes('KeyboardIcon'),
+    'degraded orb uses a mic-off icon, not a keyboard glyph');
   assert.ok(USE_VOICE_INPUT_SRC.includes("'permission_denied'"), 'permission denial has its own state');
   assert.ok(USE_VOICE_INPUT_SRC.includes("'error'"), 'speech capture failure has its own state');
   assert.ok(REASSURE_SCREEN_SRC.includes('focusAskInputWithHint'), 'degraded voice focuses text input with a hint');
   assert.ok(REASSURE_SCREEN_SRC.includes('inputRef.current?.focus()'), 'text input receives focus');
   assert.ok(REASSURE_SCREEN_SRC.includes('Voice is unavailable in this build'), 'unavailable build hint is visible');
+  assert.ok(REASSURE_SCREEN_SRC.includes('Open Settings') && REASSURE_SCREEN_SRC.includes('Type instead'),
+    'voice degraded state exposes explicit actions');
+  assert.ok(REASSURE_SCREEN_SRC.includes('Linking.openSettings()'), 'Open Settings action reaches OS settings');
 });
 
 check('X17d. Reassure keyboard/tabbar structure keeps send, chips, and answers reachable', () => {
   assert.ok(REASSURE_SCREEN_SRC.includes('KeyboardAvoidingView'), 'Reassure is keyboard-aware');
+  assert.ok(REASSURE_SCREEN_SRC.includes('Keyboard.dismiss()'), 'typed ask dismisses the keyboard on submit');
+  assert.ok(REASSURE_SCREEN_SRC.includes("source === 'text' ? 260 : 120"), 'typed ask scroll waits for keyboard/layout settle');
   assert.ok(REASSURE_SCREEN_SRC.includes('keyboardShouldPersistTaps="handled"'), 'send stays tappable while keyboard is open');
-  assert.ok(REASSURE_SCREEN_SRC.includes('bottomGapExtra={32}'), 'Reassure adds extra bottom clearance');
+  assert.ok(REASSURE_SCREEN_SRC.includes('REASSURE_TABBAR_EXTRA_CLEARANCE'), 'Reassure has named tabbar clearance');
+  assert.ok(REASSURE_SCREEN_SRC.includes('tabbar.height + 64'), 'Reassure bottom clearance accounts for tabbar height plus extra space');
+  assert.ok(SCREEN_SRC.includes('StatusBar.currentHeight') && SCREEN_SRC.includes('topInset'),
+    'Screen protects Android content from the status bar');
   assert.ok(SCREEN_SRC.includes('keyboardShouldPersistTaps'), 'Screen exposes opt-in keyboard tap behavior');
   assert.ok(LULLABY_TAB_BAR_SRC.includes("Keyboard.addListener('keyboardDidShow'"), 'tabbar observes keyboard open');
   assert.ok(
@@ -5779,8 +5833,10 @@ check('X17d. Reassure keyboard/tabbar structure keeps send, chips, and answers r
 
 check('X17e. Reassure recap title uses active-window wording', () => {
   assert.ok(REASSURE_SCREEN_SRC.includes('recapHeading'), 'screen derives a dynamic recap heading');
-  assert.ok(REASSURE_SCREEN_SRC.includes("Based on tonight's logs"), 'live window title is explicit');
-  assert.ok(REASSURE_SCREEN_SRC.includes('Morning recap'), 'closed morning window title is explicit');
+  assert.ok(REASSURE_SCREEN_SRC.includes('currentContextWindowFor'), 'screen defaults to current context, not finished night');
+  assert.ok(RX_DOMAIN_SRCS['domain/recap.ts'].includes("Based on tonight's logs"), 'live window title is explicit');
+  assert.ok(RX_DOMAIN_SRCS['domain/recap.ts'].includes("Today's context"), 'daytime context title is explicit');
+  assert.ok(RX_DOMAIN_SRCS['domain/recap.ts'].includes('Morning recap'), 'closed morning window title is explicit');
   assert.ok(!REASSURE_SCREEN_SRC.includes("last night's logs"), 'stale lowercase last-night logs copy is absent');
   assert.ok(!REASSURE_SCREEN_SRC.includes('last night’s logs'), 'stale smart-apostrophe last-night logs copy is absent');
 });

@@ -16,7 +16,17 @@
  */
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from 'react-native';
+import {
+  Keyboard,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { Screen } from '@/components/Screen';
 import { AnswerCard, type TriageAction } from '@/features/reassure/components/AnswerCard';
@@ -30,14 +40,21 @@ import { useLogging } from '@/features/logging/state/LoggingProvider';
 import { useNightRead } from '@/features/reassure/application/nightRead';
 import { useVoiceInput } from '@/features/reassure/application/useVoiceInput';
 import { KB } from '@/features/reassure/content/kb';
-import { nightWindowFor } from '@/features/reassure/domain/nightWindow';
-import { buildReassureRecap } from '@/features/reassure/domain/recap';
+import { currentContextWindowFor } from '@/features/reassure/domain/nightWindow';
+import { buildReassureRecap, recapHeading } from '@/features/reassure/domain/recap';
 import { route } from '@/features/reassure/domain/router';
 import type { AskSource, ReassureTopicKey, RouteResult } from '@/features/reassure/domain/types';
 import { useAnalytics } from '@/lib/useAnalytics';
 import { useReduceMotion } from '@/lib/useReduceMotion';
 import { useTheme } from '@/state/ThemeProvider';
-import { colors, fonts, radii, surfaces } from '@/theme';
+import { colors, fonts, radii, surfaces, tabbar } from '@/theme';
+
+const REASSURE_TABBAR_EXTRA_CLEARANCE = tabbar.height + 64;
+
+type VoiceFallback = {
+  message: string;
+  openSettings: boolean;
+};
 
 function Kicker({ text, color }: { text: string; color: string }) {
   return (
@@ -71,7 +88,7 @@ export default function ReassureScreen() {
   const answerYRef = useRef(0);
 
   const [answer, setAnswer] = useState<RouteResult | null>(null);
-  const [voiceHint, setVoiceHint] = useState<string | null>(null);
+  const [voiceFallback, setVoiceFallback] = useState<VoiceFallback | null>(null);
 
   // The recap window is refreshed when the tab regains focus (async tick, so
   // no synchronous setState inside the focus effect — React Compiler rule).
@@ -86,7 +103,7 @@ export default function ReassureScreen() {
       track('reassure_recap_viewed');
       const tick = setTimeout(() => {
         const now = Date.now();
-        const window = nightWindowFor(now);
+        const window = currentContextWindowFor(now);
         void loadEventsInRange({ fromMs: window.startMs, toMs: window.endMs }).then((events) => {
           if (!cancelled) setRecapSource({ now, events });
         });
@@ -103,14 +120,16 @@ export default function ReassureScreen() {
     [recapSource],
   );
   const nightRead = useNightRead(recap);
-  const recapHeading = recap.window.label === 'tonight' ? "Based on tonight's logs" : 'Morning recap';
+  const currentRecapHeading = recapHeading(recap);
 
   const scrollToAnswer = useCallback(
-    (delayMs = 90) => {
+    (delayMs = 120) => {
       setTimeout(() => {
-        scrollRef.current?.scrollTo({
-          y: Math.max(0, answerYRef.current - 24),
-          animated: !reduceMotion,
+        requestAnimationFrame(() => {
+          scrollRef.current?.scrollTo({
+            y: Math.max(0, answerYRef.current - 24),
+            animated: !reduceMotion,
+          });
         });
       }, delayMs);
     },
@@ -123,7 +142,8 @@ export default function ReassureScreen() {
       const trimmed = text.trim();
       if (trimmed.length === 0) return;
       const result = route(trimmed);
-      setVoiceHint(null);
+      if (source === 'text') Keyboard.dismiss();
+      setVoiceFallback(null);
       setAnswer(result);
       // PRIVACY: coarse enums only — the raw ask text is never sent to analytics.
       track('reassure_asked', {
@@ -133,14 +153,24 @@ export default function ReassureScreen() {
       });
       if (result.kind === 'triage') track('reassure_triage_shown');
       // Bring the answer into view once it has risen in.
-      scrollToAnswer();
+      scrollToAnswer(source === 'text' ? 260 : 120);
     },
     [scrollToAnswer, track],
   );
 
-  const focusAskInputWithHint = useCallback((hint: string) => {
-    setVoiceHint(hint);
+  const focusAskInputWithHint = useCallback((message: string, openSettings = false) => {
+    setVoiceFallback({ message, openSettings });
     setTimeout(() => inputRef.current?.focus(), 0);
+  }, []);
+
+  const openVoiceSettings = useCallback(() => {
+    void Linking.openSettings().catch(() => {
+      inputRef.current?.focus();
+    });
+  }, []);
+
+  const focusTypeInstead = useCallback(() => {
+    inputRef.current?.focus();
   }, []);
 
   const voice = useVoiceInput({
@@ -148,7 +178,7 @@ export default function ReassureScreen() {
     onListeningStart: () => track('reassure_voice_used'),
     onDenied: () => {
       track('reassure_voice_permission_denied');
-      focusAskInputWithHint('Microphone permission is off. Enable microphone in settings, or type instead.');
+      focusAskInputWithHint('Microphone permission is off. You can open settings or type instead.', true);
     },
     onUnavailable: () => {
       focusAskInputWithHint('Voice is unavailable in this build, so you can type your question here.');
@@ -164,7 +194,7 @@ export default function ReassureScreen() {
       return;
     }
     if (voice.state === 'permission_denied') {
-      focusAskInputWithHint('Microphone permission is off. Enable microphone in settings, or type instead.');
+      focusAskInputWithHint('Microphone permission is off. You can open settings or type instead.', true);
       return;
     }
     if (voice.state === 'error') {
@@ -200,7 +230,7 @@ export default function ReassureScreen() {
       <Screen
         surfaceMode={mode}
         scrollRef={scrollRef}
-        bottomGapExtra={32}
+        bottomGapExtra={REASSURE_TABBAR_EXTRA_CLEARANCE}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}>
       <Text
@@ -225,20 +255,61 @@ export default function ReassureScreen() {
         />
       </ReassureHero>
 
-      {voiceHint ? (
-        <Text
+      {voiceFallback ? (
+        <View
           accessibilityLiveRegion="polite"
           style={{
-            fontFamily: fonts.bodyBold,
-            fontSize: 12.5,
-            lineHeight: 18.5,
-            color: palette.inkSoft,
             marginTop: 10,
             paddingHorizontal: 6,
-            textAlign: 'center',
+            alignItems: 'center',
           }}>
-          {voiceHint}
-        </Text>
+          <Text
+            style={{
+              fontFamily: fonts.bodyBold,
+              fontSize: 12.5,
+              lineHeight: 18.5,
+              color: palette.inkSoft,
+              textAlign: 'center',
+            }}>
+            {voiceFallback.message}
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 9 }}>
+            {voiceFallback.openSettings ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open microphone settings"
+                onPress={openVoiceSettings}
+                style={({ pressed }) => ({
+                  backgroundColor: colors.sleep,
+                  borderRadius: radii.pill,
+                  paddingHorizontal: 13,
+                  paddingVertical: 8,
+                  transform: [{ scale: pressed ? 0.96 : 1 }],
+                })}>
+                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.white }}>
+                  Open Settings
+                </Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Type instead"
+              onPress={focusTypeInstead}
+              style={({ pressed }) => ({
+                backgroundColor: mode === 'night' ? 'rgba(255,255,255,0.08)' : colors.surface,
+                borderWidth: 1.5,
+                borderColor: palette.line,
+                borderRadius: radii.pill,
+                paddingHorizontal: 13,
+                paddingVertical: 8,
+                transform: [{ scale: pressed ? 0.96 : 1 }],
+              })}>
+              <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.sleep }}>
+                Type instead
+              </Text>
+            </Pressable>
+          </View>
+        </View>
       ) : null}
 
       {/* bounded promise — soft lavender, calm, never an alarm */}
@@ -280,7 +351,7 @@ export default function ReassureScreen() {
       ) : null}
 
       {/* tonight recap, grounded in the saved logs */}
-      <Kicker text={recapHeading} color={palette.inkFaint} />
+      <Kicker text={currentRecapHeading} color={palette.inkFaint} />
       <RecapCard surfaceMode={mode} recap={recap} readOverride={nightRead} />
 
       {/* common tonight */}

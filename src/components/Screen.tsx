@@ -7,8 +7,10 @@ import type { ReactNode, RefObject } from 'react';
 import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  Platform,
   ScrollView,
   type ScrollViewProps,
+  StatusBar,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -50,6 +52,8 @@ export function Screen({
 }: Props) {
   const insets = useSafeAreaInsets();
   const background = surfaces[surfaceMode].bg;
+  const statusBarInset = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
+  const topInset = Math.max(insets.top, statusBarInset);
   // Reserve space for the floating tab bar. Mirror its real footprint exactly:
   // the bar floats at paddingBottom = max(insets.bottom + 8, marginBottom) and
   // is `height` tall (see LullabyTabBar). Add a comfortable clearance so the
@@ -58,7 +62,7 @@ export function Screen({
   const bottomGap = barFootprint + 24 + bottomGapExtra;
 
   const padding = {
-    paddingTop: insets.top + 8,
+    paddingTop: topInset + 10,
     paddingHorizontal: 18,
     paddingBottom: bottomGap,
   };
