@@ -69,6 +69,17 @@ export const KB: Record<ReassureTopicKey, ReassureTopic> = {
     call: "A hard, swollen belly with vomiting, no stool plus real distress, or crying that can't be soothed for hours.",
     helps: 'Gentle bicycle legs, tummy time while awake and watched, and burping partway through feeds.',
   },
+  crying: {
+    key: 'crying',
+    title: 'Crying & settling',
+    tag: 'Comfort',
+    line: 'Crying is how a newborn tells you they need something — lots of fussing, often worse in the evening, is common in the first weeks.',
+    normal:
+      'Crying or fussing that comes and goes, a more unsettled stretch in the evening, and upset that eases with feeding, holding, a clean diaper, or gentle motion.',
+    call: "Crying that is high-pitched, weak, or truly nonstop for hours, a baby who can't be comforted or roused at all, or crying with a fever, breathing trouble, or a change in colour.",
+    helps:
+      'Work the calm checklist — feed, burp, diaper, warmth, a cuddle — then try skin-to-skin, slow rocking, or a walk. If you feel overwhelmed, it is always okay to put baby down somewhere safe and take a breather.',
+  },
   sleep: {
     key: 'sleep',
     title: 'Sleep',
@@ -81,7 +92,7 @@ export const KB: Record<ReassureTopicKey, ReassureTopic> = {
   },
 };
 
-export const TOPIC_ORDER: ReassureTopicKey[] = ['hiccups', 'spitup', 'gas', 'sleep'];
+export const TOPIC_ORDER: ReassureTopicKey[] = ['hiccups', 'spitup', 'gas', 'crying', 'sleep'];
 
 /* PLACEHOLDER — pending clinician review. */
 export const TRIAGE_COPY = {
@@ -121,6 +132,7 @@ export const EXAMPLE_CHIPS: ExampleChip[] = [
   { label: 'Hiccups after feeds', ask: 'She hiccups after every feed', flagged: false },
   { label: 'Spit-up after a feed', ask: 'A little spit-up after feeding', flagged: false },
   { label: 'Grunting & squirming', ask: 'Lots of grunting and squirming', flagged: false },
+  { label: "Won't stop crying", ask: "She won't stop crying", flagged: false },
   { label: "Won't settle", ask: "She won't settle at all", flagged: false },
   { label: 'She feels hot', ask: 'She feels really hot', flagged: true },
   { label: 'Hard to wake her', ask: "She's hard to wake", flagged: true },

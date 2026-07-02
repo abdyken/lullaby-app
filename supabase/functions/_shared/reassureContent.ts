@@ -58,7 +58,7 @@ export function matchesRedFlag(normalizedText: string): boolean {
   return REDFLAGS.some((flag) => normalizedText.includes(flag));
 }
 
-export type ReassureTopicKey = 'hiccups' | 'spitup' | 'gas' | 'sleep';
+export type ReassureTopicKey = 'hiccups' | 'spitup' | 'gas' | 'crying' | 'sleep';
 
 export type ReassureTopic = {
   key: ReassureTopicKey;
@@ -101,6 +101,17 @@ export const KB: Record<ReassureTopicKey, ReassureTopic> = {
       'Grunting, squirming, pulling legs up, and passing gas — often around feeds — with baby settling again after.',
     call: "A hard, swollen belly with vomiting, no stool plus real distress, or crying that can't be soothed for hours.",
     helps: 'Gentle bicycle legs, tummy time while awake and watched, and burping partway through feeds.',
+  },
+  crying: {
+    key: 'crying',
+    title: 'Crying & settling',
+    tag: 'Comfort',
+    line: 'Crying is how a newborn tells you they need something — lots of fussing, often worse in the evening, is common in the first weeks.',
+    normal:
+      'Crying or fussing that comes and goes, a more unsettled stretch in the evening, and upset that eases with feeding, holding, a clean diaper, or gentle motion.',
+    call: "Crying that is high-pitched, weak, or truly nonstop for hours, a baby who can't be comforted or roused at all, or crying with a fever, breathing trouble, or a change in colour.",
+    helps:
+      'Work the calm checklist — feed, burp, diaper, warmth, a cuddle — then try skin-to-skin, slow rocking, or a walk. If you feel overwhelmed, it is always okay to put baby down somewhere safe and take a breather.',
   },
   sleep: {
     key: 'sleep',

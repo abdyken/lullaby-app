@@ -9,7 +9,7 @@
  */
 
 /** The curated topics Reassure can answer. Keys index into content/kb.ts. */
-export type ReassureTopicKey = 'hiccups' | 'spitup' | 'gas' | 'sleep';
+export type ReassureTopicKey = 'hiccups' | 'spitup' | 'gas' | 'crying' | 'sleep';
 
 /**
  * The single result type every input path (voice, chip, text) resolves to.

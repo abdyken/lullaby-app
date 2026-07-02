@@ -5,7 +5,9 @@
  * Semantics are ported verbatim from .reference/reassure-demo.html `route()`:
  *   1. RED FLAGS FIRST. If any red-flag substring matches, return triage —
  *      before and regardless of any topic match. Safety overrides comfort.
- *   2. Topic regexes (hiccups → spit-up → gas → sleep, in demo order).
+ *   2. Topic regexes (hiccups → spit-up → gas → crying → sleep). Crying &
+ *      settling owns cry/fuss/scream/soothe/settle so those asks land on the
+ *      dedicated comfort card rather than the sleep card.
  *   3. Otherwise out-of-scope — a polite bounded decline.
  *
  * The red-flag check preceding the first topic regex is asserted by a
@@ -40,7 +42,12 @@ export function route(text: string): RouteResult {
   if (/hiccup/.test(t)) return { kind: 'topic', key: 'hiccups' };
   if (/spit|posset|throw up|throwing up|vomit/.test(t)) return { kind: 'topic', key: 'spitup' };
   if (/gas|grunt|squirm|wriggl|fart|wind|colic|tummy/.test(t)) return { kind: 'topic', key: 'gas' };
-  if (/sleep|nap|settle|won'?t sleep|wont sleep|fuss|restless|awake/.test(t)) {
+  // Crying & settling — a core newborn-night worry. Owns settle/fuss (moved out
+  // of the sleep regex below) so "won't settle" and "fussy tonight" land here.
+  if (/cry|fuss|scream|sooth|settle|inconsolable|upset/.test(t)) {
+    return { kind: 'topic', key: 'crying' };
+  }
+  if (/sleep|nap|won'?t sleep|wont sleep|restless|awake/.test(t)) {
     return { kind: 'topic', key: 'sleep' };
   }
   // 3) Bounded decline.
