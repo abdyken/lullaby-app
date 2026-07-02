@@ -262,6 +262,7 @@ import { buildWeeklyExportText } from '../src/features/insights/buildWeeklyExpor
 import type { InsightsViewModel } from '../src/features/insights/types';
 // Reassure v2 — the pure triage router / red-flag guardrail / night-window
 // recap leaves. All are react-native-free by design (source-scanned in §X).
+import { clinicalContentVisible } from '../src/features/reassure/domain/contentGate';
 import { REDFLAGS, matchesRedFlag } from '../src/features/reassure/domain/redflags';
 import { normalizeAsk, route } from '../src/features/reassure/domain/router';
 import { classifyScope } from '../src/features/reassure/domain/scope';
@@ -6619,6 +6620,73 @@ check('PC7. local storage parse handles empty/corrupt values calmly', () => {
   // A real number round-trips untouched.
   assert.equal(parsePediatricianPhone('+1 555'), '+1 555');
   assert.ok(hasDialablePhone('+1 555'));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RG. Reassure draft-content release gate (Apple review safety posture)
+//
+// REASSURE_CONTENT.status is the clinician sign-off flag. Until it flips to
+// 'approved', the placeholder clinical KB blocks must stay out of public
+// builds; dev builds keep them for QA. Triage escalation and the non-medical
+// guides are never gated — pointing at a real professional is always safe.
+// ─────────────────────────────────────────────────────────────────────────────
+
+check('RG1. the pure gate: dev builds see draft content, public builds need approval', () => {
+  assert.equal(clinicalContentVisible(true), true, 'dev builds keep draft content visible for QA');
+  assert.equal(
+    clinicalContentVisible(false),
+    REASSURE_CONTENT.status === 'approved',
+    'public builds show clinical KB content only after clinician sign-off',
+  );
+});
+
+check('RG2. both clinical render sites consult the gate; triage stays ungated', () => {
+  for (const [name, src] of [
+    ['AnswerCard', RX_ANSWERCARD_SRC],
+    ['reassure screen', RX_REASSURE_SCREEN_SRC],
+  ] as const) {
+    assert.ok(
+      src.includes('clinicalContentVisible(__DEV__)'),
+      `${name} consults the gate with the real __DEV__`,
+    );
+  }
+  // The clinical KB blocks render only behind the gate…
+  assert.ok(
+    RX_ANSWERCARD_SRC.includes("result.kind === 'topic' && showClinical"),
+    'AnswerCard shows the clinical answer blocks only when the gate allows',
+  );
+  // …the gated replacement is a pediatrician pointer, not silence…
+  assert.ok(
+    RX_ANSWERCARD_SRC.includes("result.kind === 'topic' && !showClinical"),
+    'a gated topic still gets a calm bounded card',
+  );
+  // …and the triage branch has no gate anywhere near it (escalation is never hidden).
+  assert.ok(
+    RX_ANSWERCARD_SRC.includes("result.kind === 'triage' ?") &&
+      !RX_ANSWERCARD_SRC.includes("result.kind === 'triage' && showClinical"),
+    'triage renders unconditionally',
+  );
+  // The topic accordion (all-KB surface) is gated on the screen.
+  assert.ok(
+    RX_REASSURE_SCREEN_SRC.includes('showClinical ? (') &&
+      RX_REASSURE_SCREEN_SRC.includes('<TopicAccordion'),
+    'the Common-tonight accordion renders only behind the gate',
+  );
+});
+
+check('RG3. the Reassure screen states plainly that it is not medical advice', () => {
+  assert.ok(
+    RX_REASSURE_SCREEN_SRC.includes('not medical advice'),
+    'the screen carries an explicit not-medical-advice statement',
+  );
+  assert.ok(
+    RX_REASSURE_SCREEN_SRC.includes('General information, not medical advice.'),
+    'the quiet persistent disclaimer is intact',
+  );
+  assert.ok(
+    RX_REASSURE_SCREEN_SRC.includes('doesn’t diagnose or treat'),
+    'the bounded-promise card is intact',
+  );
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
