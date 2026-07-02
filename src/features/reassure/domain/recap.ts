@@ -12,8 +12,8 @@
  */
 
 import type { CareEvent } from '@/features/logging/domain/types';
-import { nightWindowFor } from './nightWindow';
-import type { ReassureNightRecap } from './types';
+import { currentContextWindowFor } from './nightWindow';
+import type { NightWindow, ReassureNightRecap } from './types';
 
 /**
  * UI label for the note preset. The recap itself counts canonical
@@ -32,8 +32,11 @@ function eventAnchor(event: CareEvent): string {
   return event.startedAt ?? event.occurredAt;
 }
 
-export function buildReassureRecap(events: CareEvent[], now: number): ReassureNightRecap {
-  const window = nightWindowFor(now);
+export function buildReassureRecap(
+  events: CareEvent[],
+  now: number,
+  window: NightWindow = currentContextWindowFor(now),
+): ReassureNightRecap {
   const { startMs, endMs } = window;
 
   let feedCount = 0;
@@ -107,7 +110,12 @@ function plural(count: number, singular: string, pluralForm?: string): string {
  * clinician-owned Phase-2 concern, never template text.
  */
 export function recapReadText(recap: ReassureNightRecap): string {
-  const opener = recap.window.label === 'tonight' ? 'Since 6pm' : 'For the 6pm-10am window';
+  const opener =
+    recap.window.label === 'tonight'
+      ? 'Since 6pm'
+      : recap.window.label === 'today'
+        ? 'Since 10am'
+        : 'For the 6pm-10am window';
 
   if (recap.isEmpty) {
     return `${opener} there are no saved logs yet. Your recap builds itself from every feed, sleep, diaper, or note you save.`;
@@ -138,5 +146,14 @@ export function recapReadText(recap: ReassureNightRecap): string {
 
 /** Short label for the recap chip — descriptive source note, never a verdict. */
 export function recapWindowLabel(recap: ReassureNightRecap): string {
-  return recap.window.label === 'tonight' ? 'Since 6pm' : 'Morning recap';
+  if (recap.window.label === 'tonight') return 'Since 6pm';
+  if (recap.window.label === 'today') return 'Since 10am';
+  return 'Morning recap';
+}
+
+/** Section title for the active Reassure recap card. */
+export function recapHeading(recap: ReassureNightRecap): string {
+  if (recap.window.label === 'tonight') return "Based on tonight's logs";
+  if (recap.window.label === 'today') return "Today's context";
+  return 'Morning recap';
 }

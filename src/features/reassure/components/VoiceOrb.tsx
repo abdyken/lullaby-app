@@ -47,18 +47,19 @@ function MicIcon() {
   );
 }
 
-function KeyboardIcon() {
+function MicOffIcon() {
   return (
     <Svg width={28} height={28} viewBox="0 0 24 24" fill="none">
       <Path
-        d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"
+        d="M9 5a3 3 0 0 1 5.2-2M15 8.5V11a3 3 0 0 1-.5 1.7M5 11a7 7 0 0 0 9.1 6.7M19 11a7 7 0 0 1-1.2 3.9M12 18v4M8 22h8"
         stroke={colors.sleep}
-        strokeWidth={1.8}
+        strokeWidth={2}
+        strokeLinecap="round"
       />
       <Path
-        d="M7 9h.01M11 9h.01M15 9h.01M7 13h.01M11 13h.01M15 13h.01M8 17h8"
+        d="M4 4l16 16"
         stroke={colors.sleep}
-        strokeWidth={1.8}
+        strokeWidth={2.1}
         strokeLinecap="round"
       />
     </Svg>
@@ -228,7 +229,7 @@ export function VoiceOrb({ state, reduceMotion, onPress, interimText }: Props) {
             shadowOffset: { width: 0, height: 10 },
             elevation: 10,
           }}>
-          {degraded ? <KeyboardIcon /> : <MicIcon />}
+          {degraded ? <MicOffIcon /> : <MicIcon />}
           <Text
             numberOfLines={2}
             adjustsFontSizeToFit

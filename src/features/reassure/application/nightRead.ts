@@ -76,7 +76,12 @@ export function useNightRead(recap: ReassureNightRecap): string | null {
   const nightKey = nightKeyFor(recap.window.startMs);
   const cacheKey = babyId == null ? null : `${CACHE_PREFIX}:${babyId}:${nightKey}`;
   const eligible =
-    supabase != null && signedIn && babyId != null && canUseLlmNightRead(isPro) && !recap.isEmpty;
+    recap.window.label !== 'today' &&
+    supabase != null &&
+    signedIn &&
+    babyId != null &&
+    canUseLlmNightRead(isPro) &&
+    !recap.isEmpty;
 
   useEffect(() => {
     if (!eligible || babyId == null || cacheKey == null) return;

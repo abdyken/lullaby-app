@@ -117,17 +117,26 @@ export function AskCard({ surfaceMode, onAsk, inputRef }: Props) {
             accessibilityRole="button"
             accessibilityLabel={chip.flagged ? `${chip.label}. Urgent example.` : chip.label}
             onPress={() => onAsk(chip.ask, 'chip')}
+            hitSlop={6}
             style={({ pressed }) => ({
               borderWidth: 1.5,
-              borderColor: chip.flagged ? 'rgba(224,87,75,0.28)' : palette.line,
+              borderColor: chip.flagged
+                ? 'rgba(224,87,75,0.36)'
+                : night
+                  ? 'rgba(255,255,255,0.14)'
+                  : colors.line,
               backgroundColor: chip.flagged
                 ? night
                   ? 'rgba(224,87,75,0.16)'
                   : colors.alertTint
-                : palette.card,
-              paddingHorizontal: 13,
-              paddingVertical: 8,
+                : night
+                  ? 'rgba(255,255,255,0.07)'
+                  : colors.surface,
+              minHeight: 36,
+              paddingHorizontal: 14,
+              paddingVertical: 9,
               borderRadius: radii.pill,
+              justifyContent: 'center',
               transform: [{ scale: pressed ? 0.95 : 1 }],
             })}>
             <Text

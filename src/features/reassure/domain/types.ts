@@ -31,8 +31,8 @@ export type NightWindow = {
   startMs: number;
   /** inclusive end of the window (ms epoch) */
   endMs: number;
-  /** 'tonight' while the night is live; 'last-night' for the morning recap */
-  label: 'tonight' | 'last-night';
+  /** 'tonight' while live, 'today' for daytime context, 'last-night' for an intentional morning recap */
+  label: 'tonight' | 'today' | 'last-night';
 };
 
 /** Code-computed tallies over the parent's saved logs for the window. */
