@@ -4513,6 +4513,14 @@ const STARTUP_DIAGNOSTICS_SRC = readFileSync(
   new URL('../src/lib/startupDiagnostics.ts', import.meta.url),
   'utf8',
 );
+const LOGGING_PROVIDER_SRC = readFileSync(
+  new URL('../src/features/logging/state/LoggingProvider.tsx', import.meta.url),
+  'utf8',
+);
+const TOPIC_ACCORDION_SRC = readFileSync(
+  new URL('../src/features/reassure/components/TopicAccordion.tsx', import.meta.url),
+  'utf8',
+);
 
 // Core-logging leaves that must stay free of any Pro dependency.
 const CORE_LOGGING_SRCS: Array<[string, string]> = [
@@ -4528,7 +4536,7 @@ const CORE_LOGGING_SRCS: Array<[string, string]> = [
   ],
   [
     'features/logging/state/LoggingProvider.tsx',
-    readFileSync(new URL('../src/features/logging/state/LoggingProvider.tsx', import.meta.url), 'utf8'),
+    LOGGING_PROVIDER_SRC,
   ],
   [
     'features/logging/domain/rules.ts',
@@ -4598,6 +4606,8 @@ check('ST1. the app-shell startup gate owns v2 hydration before the tab navigato
   assert.ok(gateUse !== -1 && tabs !== -1 && gateUse < tabs, 'the startup gate must wrap Tabs');
   const gateBody = TABS_LAYOUT_SRC.slice(gateFn, TABS_LAYOUT_SRC.indexOf('export default function TabsLayout'));
   assert.ok(gateBody.includes('useLogging()'), 'the gate must read logging hydration from useLogging');
+  assert.ok(gateBody.includes('useLocalEvents()'), 'the gate must read event hydration from useLocalEvents');
+  assert.ok(gateBody.includes('eventsHydrated'), 'the gate must wait for event hydration');
   assert.ok(gateBody.includes('return <AuthTransition />'), 'the gate owns the full-screen loading screen');
 });
 
@@ -4641,6 +4651,47 @@ check('ST5. startup diagnostics are dev-only and routed through one helper', () 
       name === 'features/logging/state/LoggingProvider.tsx' && src.includes('logStartupStep'),
     ),
     'event and logging providers should log their hydrate milestones',
+  );
+});
+
+check('ST6. auth status transitions are reasoned and duplicate same-user sessions do not reprovision', () => {
+  assert.ok(AUTH_PROVIDER_SRC.includes('setAuthStatus'), 'AuthProvider should centralize auth status transitions');
+  assert.ok(AUTH_PROVIDER_SRC.includes('reason: \'initial\''), 'initial auth status log should include a reason');
+  assert.ok(AUTH_PROVIDER_SRC.includes('provisioningRef'), 'AuthProvider should guard in-flight provisioning');
+  assert.ok(AUTH_PROVIDER_SRC.includes('provisionedUserIdRef'), 'AuthProvider should remember provisioned users');
+  assert.ok(
+    AUTH_PROVIDER_SRC.includes('statusRef.current === next'),
+    'duplicate status transitions should be suppressed',
+  );
+  assert.ok(
+    AUTH_PROVIDER_SRC.includes('provisionedUserIdRef.current === userId'),
+    'same-user session emissions after provisioning should be ignored',
+  );
+});
+
+check('ST7. logging v2 waits for event hydration and merges the restored event source', () => {
+  assert.ok(
+    LOGGING_PROVIDER_SRC.includes('eventsHydrated') && LOGGING_PROVIDER_SRC.includes('!enabled || !scope || !eventsHydrated'),
+    'LoggingProvider hydrate should wait until LocalEventProvider has restored events',
+  );
+  assert.ok(
+    LOGGING_PROVIDER_SRC.includes('mapLegacyEvents(restoredEvents)'),
+    'LoggingProvider should map restored legacy/Supabase events into CareEvent shape',
+  );
+  assert.ok(
+    LOGGING_PROVIDER_SRC.includes('mergeExternalLoggingEvents'),
+    'LoggingProvider should merge restored events into v2 selectors',
+  );
+});
+
+check('ST8. LayoutAnimation is not enabled through the Android New Architecture no-op path', () => {
+  assert.ok(
+    TOPIC_ACCORDION_SRC.includes('nativeFabricUIManager'),
+    'TopicAccordion should detect Fabric before enabling legacy LayoutAnimation',
+  );
+  assert.ok(
+    TOPIC_ACCORDION_SRC.includes("Platform.OS === 'android' && !isFabric"),
+    'TopicAccordion should skip setLayoutAnimationEnabledExperimental under Fabric',
   );
 });
 

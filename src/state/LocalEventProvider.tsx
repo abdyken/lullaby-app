@@ -208,6 +208,7 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
     logStartupStep('events hydrate start', {
       signedIn: authUserId != null,
       babyReady: authBabyReady,
+      reason: authUserId != null ? 'signed-in' : 'local-only',
     });
     (async () => {
       const repository = await resolveRepository({
@@ -259,6 +260,8 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
       logStartupStep('events hydrate ready', {
         mode: repository.mode,
         restored: saved != null,
+        eventCount: (saved ?? stateRef.current).events.length,
+        reason: 'repository-load-complete',
       });
     })();
     return () => {

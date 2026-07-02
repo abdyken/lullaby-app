@@ -32,6 +32,51 @@ import {
 /** Family + child + caregiver scope for the reads (mirrors `ActiveSessionsQuery`). */
 export type LoggingScope = ActiveSessionsQuery;
 
+const ms = (iso: string): number => Date.parse(iso);
+
+function isSameLocalDay(aMs: number, bMs: number): boolean {
+  const a = new Date(aMs);
+  const b = new Date(bMs);
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function belongsToChildTimeline(event: CareEvent, childId: string): boolean {
+  if (event.type === 'pump') return true;
+  return event.childId === childId;
+}
+
+function isTimelineVisible(event: CareEvent): boolean {
+  return event.status !== 'deleted' && event.status !== 'cancelled';
+}
+
+function isActiveInContext(event: CareEvent, scope: LoggingScope): boolean {
+  if (event.status !== 'active' || event.familyId !== scope.familyId) return false;
+  if (event.type === 'pump') return event.subjectUserId === scope.userId;
+  return event.childId === scope.childId;
+}
+
+function occurredAtMs(event: CareEvent): number {
+  return ms(event.occurredAt);
+}
+
+function activeStartedAtMs(event: CareEvent): number {
+  return ms(event.startedAt ?? event.occurredAt);
+}
+
+export function mergeLoggingEventsById(...groups: (readonly CareEvent[])[]): CareEvent[] {
+  const byId = new Map<string, CareEvent>();
+  for (const group of groups) {
+    for (const event of group) {
+      if (!byId.has(event.id)) byId.set(event.id, event);
+    }
+  }
+  return [...byId.values()];
+}
+
 /** Read today's events and active sessions together. */
 async function readState(
   repo: LoggingRepository,
@@ -64,6 +109,45 @@ function detectClockAnomaly(state: LoggingState, now: number): LoggingState {
         ),
       )
     : state;
+}
+
+/**
+ * Merge events restored by the legacy/Supabase event provider into the v2 store
+ * shape. During the migration window this keeps the v2 Today/History selectors
+ * pointed at the same restored event source as the visible app shell.
+ */
+export function mergeExternalLoggingEvents(
+  state: LoggingState,
+  externalEvents: readonly CareEvent[],
+  scope: LoggingScope,
+  clock: Clock,
+): LoggingState {
+  const now = clock.now();
+  const externalToday = externalEvents
+    .filter((event) => event.familyId === scope.familyId)
+    .filter((event) => belongsToChildTimeline(event, scope.childId))
+    .filter(isTimelineVisible)
+    .filter((event) => isSameLocalDay(occurredAtMs(event), now));
+  const externalActive = externalEvents.filter((event) => isActiveInContext(event, scope));
+  const currentActive: CareEvent[] = [];
+  if (state.activeSleep) currentActive.push(state.activeSleep);
+  if (state.activeBreastFeed) currentActive.push(state.activeBreastFeed);
+  if (state.activePump) currentActive.push(state.activePump);
+
+  let next = applyTodayEvents(
+    state,
+    mergeLoggingEventsById(state.todayEvents, externalToday).sort(
+      (a, b) => occurredAtMs(b) - occurredAtMs(a),
+    ),
+  );
+  next = applyActiveSessions(
+    next,
+    mergeLoggingEventsById(currentActive, externalActive).sort(
+      (a, b) => activeStartedAtMs(a) - activeStartedAtMs(b),
+    ),
+    scope.userId,
+  );
+  return detectClockAnomaly(next, now);
 }
 
 /**

@@ -33,8 +33,10 @@ import { baby as seedBaby, caregivers as seedCaregivers } from '@/data/mock';
 import { hapticSave, hapticUndo } from '@/lib/haptics';
 import { logStartupStep } from '@/lib/startupDiagnostics';
 import { useAuth } from '@/state/AuthProvider';
+import { useLocalEvents } from '@/state/LocalEventProvider';
 
 import { isLoggingV2Enabled } from '../config/featureFlags';
+import { mapLegacyEvents } from '../data/LegacyLoggingMapper';
 import { createDeviceLoggingRepository } from '../data/loggingStorage';
 import type { LoggingRepository } from '../data/LoggingRepository';
 import type { LoggingError } from '../domain/errors';
@@ -75,7 +77,13 @@ import {
   type SaveCompletedSleepInput,
   type StartSleepInput,
 } from '../application';
-import { hydrateLoggingState, reconcileLoggingState, type LoggingScope } from './loggingHydration';
+import {
+  hydrateLoggingState,
+  mergeExternalLoggingEvents,
+  mergeLoggingEventsById,
+  reconcileLoggingState,
+  type LoggingScope,
+} from './loggingHydration';
 import {
   clearError as clearErrorTransition,
   createInitialLoggingState,
@@ -183,6 +191,7 @@ function useLoggingActor(): LoggingActor | null {
 export function LoggingProvider({ children }: { children: ReactNode }) {
   const enabled = isLoggingV2Enabled();
   const actor = useLoggingActor();
+  const { events: restoredEvents, isHydrated: eventsHydrated } = useLocalEvents();
 
   // Device-backed repository, stable for the provider's lifetime. It is a thin,
   // stateless wrapper over AsyncStorage, so even if the memo were ever discarded
@@ -197,6 +206,10 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+  const restoredCareEventsRef = useRef<CareEvent[]>([]);
+  useEffect(() => {
+    restoredCareEventsRef.current = eventsHydrated ? mapLegacyEvents(restoredEvents) : [];
+  }, [eventsHydrated, restoredEvents]);
 
   // Serialize mutations + block double-taps during the short write phase (plan §10).
   const mutatingRef = useRef(false);
@@ -229,29 +242,44 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
   // Launch hydrate + foreground reconcile — only when enabled and an actor is
   // resolved. Disabled or no actor → no I/O at all (the MVP path is untouched).
   useEffect(() => {
-    if (!enabled || !scope) return;
+    if (!enabled || !scope || !eventsHydrated) return;
     let cancelled = false;
     logStartupStep('logging v2 hydrate start', {
       childReady: scope.childId.length > 0,
       caregiverReady: scope.userId.length > 0,
+      eventsHydrated,
     });
 
     (async () => {
-      const next = await hydrateLoggingState(repo, scope, clock);
+      const hydratedState = await hydrateLoggingState(repo, scope, clock);
+      const next = mergeExternalLoggingEvents(
+        hydratedState,
+        restoredCareEventsRef.current,
+        scope,
+        clock,
+      );
       if (!cancelled) {
         setState(next);
         logStartupStep('logging v2 hydrate ready', {
           todayEvents: next.todayEvents.length,
+          restoredEvents: restoredCareEventsRef.current.length,
           activeSleep: next.activeSleep != null,
           activeFeed: next.activeBreastFeed != null,
           activePump: next.activePump != null,
+          source: 'events-provider',
         });
       }
     })();
 
     const unsubscribe = subscribeForeground(() => {
       void (async () => {
-        const next = await reconcileLoggingState(repo, scope, clock, stateRef.current);
+        const reconciledState = await reconcileLoggingState(repo, scope, clock, stateRef.current);
+        const next = mergeExternalLoggingEvents(
+          reconciledState,
+          restoredCareEventsRef.current,
+          scope,
+          clock,
+        );
         if (!cancelled) setState(next);
       })();
     });
@@ -260,12 +288,18 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       unsubscribe();
     };
-  }, [enabled, scope, repo, clock]);
+  }, [enabled, scope, repo, clock, eventsHydrated]);
 
   // Re-read events + active sessions after a mutation, preserving UI-only state.
   const refresh = useCallback(async () => {
     if (!scope) return;
-    const next = await reconcileLoggingState(repo, scope, clock, stateRef.current);
+    const reconciledState = await reconcileLoggingState(repo, scope, clock, stateRef.current);
+    const next = mergeExternalLoggingEvents(
+      reconciledState,
+      restoredCareEventsRef.current,
+      scope,
+      clock,
+    );
     setState(next);
   }, [repo, scope, clock]);
 
@@ -530,7 +564,8 @@ export function LoggingProvider({ children }: { children: ReactNode }) {
   const loadInsightsHistory = useCallback(
     async (nowMs = clock.now()) => {
       if (!enabled || !scope) return [];
-      return getInsightsSevenDayHistory(repo, scope, nowMs);
+      const storedEvents = await getInsightsSevenDayHistory(repo, scope, nowMs);
+      return mergeLoggingEventsById(storedEvents, restoredCareEventsRef.current);
     },
     [enabled, repo, scope, clock],
   );
