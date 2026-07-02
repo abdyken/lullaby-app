@@ -265,6 +265,15 @@ import type { InsightsViewModel } from '../src/features/insights/types';
 import { REDFLAGS, matchesRedFlag } from '../src/features/reassure/domain/redflags';
 import { normalizeAsk, route } from '../src/features/reassure/domain/router';
 import { classifyScope } from '../src/features/reassure/domain/scope';
+// Pediatrician triage-call contact — pure, RN-free helpers (device I/O + hook
+// live in application/, which import react-native and can't load here).
+import {
+  PEDIATRICIAN_PHONE_KEY,
+  hasDialablePhone,
+  normalizePediatricianPhone,
+  parsePediatricianPhone,
+  telUrlFor,
+} from '../src/features/reassure/domain/pediatricianContact';
 import {
   DAY_CONTEXT_START_HOUR,
   NIGHT_RECAP_END_HOUR,
@@ -6320,6 +6329,111 @@ check('X23. audit privacy: minimized parent text, token usage, retention TTL, ze
     assert.ok(new RegExp(`^\\s{2}${col}\\s`, 'm').test(auditSql), `reassure_audit has "${col}"`);
   }
   assert.ok(auditSql.includes("interval '90 days'"), 'the retention TTL is defined');
+});
+
+// §PC — the Reassure triage "Call pediatrician" phone action (local + private).
+const RX_ANSWERCARD_SRC = readFileSync(
+  new URL('../src/features/reassure/components/AnswerCard.tsx', import.meta.url),
+  'utf8',
+);
+const RX_PED_DOMAIN_SRC = readFileSync(
+  new URL('../src/features/reassure/domain/pediatricianContact.ts', import.meta.url),
+  'utf8',
+);
+const RX_PED_STORE_SRC = readFileSync(
+  new URL('../src/features/reassure/application/pediatricianStore.ts', import.meta.url),
+  'utf8',
+);
+const RX_PED_HOOK_SRC = readFileSync(
+  new URL('../src/features/reassure/application/usePediatricianPhone.ts', import.meta.url),
+  'utf8',
+);
+
+check('PC1. a saved pediatrician number becomes a real tel: dial action', () => {
+  // The dialable form keeps a leading + but strips visual separators.
+  assert.equal(telUrlFor('+1 (555) 123-4567'), 'tel:+15551234567');
+  assert.equal(telUrlFor('555 123 4567'), 'tel:5551234567');
+  // The triage card feeds the SAVED number straight into Linking.openURL.
+  assert.ok(
+    RX_ANSWERCARD_SRC.includes('Linking.openURL(telUrlFor(phone))'),
+    'the call button dials the stored number via telUrlFor',
+  );
+});
+
+check('PC2. with no number, triage offers add-number — it never fakes a call', () => {
+  assert.ok(RX_ANSWERCARD_SRC.includes('Add pediatrician number'), 'offers the add-number action');
+  assert.ok(RX_ANSWERCARD_SRC.includes('setEditingNumber(true)'), 'add opens the inline setup sheet');
+  assert.ok(RX_ANSWERCARD_SRC.includes('phone != null'), 'the primary action branches on a saved number');
+  // The old placeholder (an empty `tel:` with no number) must be gone.
+  assert.ok(
+    !RX_ANSWERCARD_SRC.includes("openURL('tel:')") && !RX_ANSWERCARD_SRC.includes('openURL(`tel:`)'),
+    'the fake empty-dial placeholder is removed',
+  );
+});
+
+check('PC3. the emergency action is information-only and never auto-dials', () => {
+  // Exactly one dial site in the whole card, and it is the pediatrician number.
+  const dialSites = RX_ANSWERCARD_SRC.split('Linking.openURL').length - 1;
+  assert.equal(dialSites, 1, 'AnswerCard dials in exactly one place');
+  assert.ok(!RX_ANSWERCARD_SRC.includes('tel:'), 'no hardcoded tel: literal anywhere in the card');
+  // Emergency only reveals calm guidance — no country number is dialed.
+  assert.ok(RX_ANSWERCARD_SRC.includes('setShowEmergencyInfo(true)'), 'emergency reveals info only');
+  assert.ok(
+    RX_ANSWERCARD_SRC.includes("onTriageAction('emergency-info')"),
+    'emergency reports a coarse enum, not a dial',
+  );
+});
+
+check('PC4. phone normalization allows +, digits, spaces, dashes, parentheses', () => {
+  assert.equal(normalizePediatricianPhone('  Dr. +1 (555) 123-4567 please  '), '+1 (555) 123-4567');
+  // Every allowed class survives; letters and stray symbols are dropped.
+  const kept = normalizePediatricianPhone('+1 (555) 123-4567');
+  for (const ch of ['+', '(', ')', '-', ' ', '5']) {
+    assert.ok(kept.includes(ch), `normalization keeps "${ch}"`);
+  }
+  assert.ok(!/[a-z]/i.test(normalizePediatricianPhone('call 5 now')), 'letters are stripped');
+  assert.equal(normalizePediatricianPhone('5  5   5'), '5 5 5', 'duplicate whitespace collapses');
+});
+
+check('PC5. the number is never sent to analytics, logs, Supabase, or an LLM', () => {
+  for (const [name, src] of [
+    ['store', RX_PED_STORE_SRC],
+    ['hook', RX_PED_HOOK_SRC],
+    ['domain', RX_PED_DOMAIN_SRC],
+  ] as const) {
+    assert.ok(!src.includes('@/lib/supabase') && !src.includes("from '@supabase"), `${name} imports no Supabase client`);
+    assert.ok(
+      !src.includes('trackEvent') && !src.includes('useAnalytics') && !src.includes('lib/analytics'),
+      `${name} wires no analytics`,
+    );
+    assert.ok(!src.includes('console.'), `${name} writes no log line`);
+    assert.ok(!src.includes('fetch('), `${name} makes no network call`);
+    assert.ok(!src.includes('anthropic'), `${name} reaches no LLM`);
+  }
+  // The number lives in local AsyncStorage under one namespaced key — nowhere else.
+  assert.ok(
+    RX_PED_STORE_SRC.includes("from '@react-native-async-storage/async-storage'"),
+    'the store persists to local AsyncStorage',
+  );
+  assert.ok(PEDIATRICIAN_PHONE_KEY.startsWith('lullaby.'), 'stored under a local namespaced key');
+  // The card never hands the raw number to the analytics-bearing callback.
+  assert.ok(!/onTriageAction\([^)]*phone/.test(RX_ANSWERCARD_SRC), 'onTriageAction never receives the number');
+});
+
+check('PC6. the reassure router still routes triage vs. non-triage correctly', () => {
+  assert.deepEqual(route('She feels really hot'), { kind: 'triage' });
+  assert.deepEqual(route('no wet diaper since lunch'), { kind: 'triage' });
+  assert.notEqual(route('is hiccups normal').kind, 'triage', 'a benign topic ask is not triaged');
+});
+
+check('PC7. local storage parse handles empty/corrupt values calmly', () => {
+  for (const bad of [null, undefined, '', '   ', '()- ', 'not a phone']) {
+    assert.equal(parsePediatricianPhone(bad), null, `"${String(bad)}" parses to null (no crash)`);
+    assert.equal(hasDialablePhone(normalizePediatricianPhone(bad)), false);
+  }
+  // A real number round-trips untouched.
+  assert.equal(parsePediatricianPhone('+1 555'), '+1 555');
+  assert.ok(hasDialablePhone('+1 555'));
 });
 
 runAsyncChecks()

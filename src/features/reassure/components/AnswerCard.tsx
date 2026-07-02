@@ -10,11 +10,13 @@
  * keyframes; skipped entirely under reduce-motion.
  */
 import { useEffect, useState } from 'react';
-import { Animated, Easing, Linking, Pressable, Text, View } from 'react-native';
+import { Animated, Easing, Linking, Pressable, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path } from 'react-native-svg';
 
 import { AnswerBlocks } from '@/features/reassure/components/AnswerBlocks';
+import { usePediatricianPhone } from '@/features/reassure/application/usePediatricianPhone';
+import { telUrlFor } from '@/features/reassure/domain/pediatricianContact';
 import {
   GUIDES,
   KB,
@@ -29,6 +31,16 @@ import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/the
 /* UX copy (not medical) — still listed in docs/reassure-content-review.md. */
 const EMERGENCY_INFO =
   'Emergency numbers differ by country (for example 911 or 112). If baby is struggling to breathe, can’t be woken, or is turning blue, call yours right away.';
+
+/* Pediatrician-number action labels — local UX copy (not medical), never sent
+ * anywhere. The number itself is stored only on-device (see usePediatricianPhone). */
+const ADD_NUMBER_ACTION = 'Add pediatrician number';
+const UPDATE_NUMBER_ACTION = 'Update saved number';
+const SAVE_NUMBER_ACTION = 'Save number';
+const CANCEL_ACTION = 'Cancel';
+const NUMBER_INPUT_LABEL = 'Pediatrician phone number';
+const NUMBER_INPUT_PLACEHOLDER = '+1 555 123 4567';
+const NUMBER_INPUT_HELP = 'Saved on this device only — never shared.';
 
 export type TriageAction = 'pediatrician' | 'emergency-info';
 
@@ -56,6 +68,13 @@ function PhoneIcon() {
 export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTriageAction }: Props) {
   const palette = surfaces[surfaceMode];
   const [showEmergencyInfo, setShowEmergencyInfo] = useState(false);
+
+  // Pediatrician number: loaded locally, never sent anywhere. `ready` guards the
+  // brief pre-load window so the triage card doesn't flash the wrong action.
+  const { phone, ready: phoneReady, save: savePhone } = usePediatricianPhone();
+  const [editingNumber, setEditingNumber] = useState(false);
+  const [draftNumber, setDraftNumber] = useState('');
+  const [callFallback, setCallFallback] = useState<string | null>(null);
 
   // Lazy initializer keeps the Animated.Value stable across renders (the same
   // React-Compiler-safe pattern BrandSplashGate uses).
@@ -257,30 +276,187 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
               </Text>
             </View>
             <View style={{ gap: 9, paddingTop: 4 }}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={TRIAGE_COPY.primaryAction}
-                onPress={() => {
-                  onTriageAction('pediatrician');
-                  // Opens the dialer; no pediatrician number is stored yet
-                  // (open question in SUMMARY.md). Failure is non-fatal.
-                  Linking.openURL('tel:').catch(() => {});
-                }}
-                style={({ pressed }) => ({
-                  backgroundColor: colors.alert,
-                  borderRadius: 14,
-                  paddingVertical: 14,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                  transform: [{ scale: pressed ? 0.98 : 1 }],
-                })}>
-                <PhoneIcon />
-                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.white }}>
-                  {TRIAGE_COPY.primaryAction}
+              {/* Primary action: dial the SAVED number, or — when none exists —
+                  open the inline add-number sheet. It never pretends it can call
+                  with no number. A failed dialer open is non-fatal (calm fallback). */}
+              {!phoneReady ? (
+                <View
+                  style={{
+                    backgroundColor:
+                      surfaceMode === 'night' ? 'rgba(224,87,75,0.16)' : colors.alertTint,
+                    borderRadius: 14,
+                    paddingVertical: 14,
+                    opacity: 0.5,
+                  }}
+                />
+              ) : phone != null ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={TRIAGE_COPY.primaryAction}
+                  onPress={() => {
+                    onTriageAction('pediatrician');
+                    setCallFallback(null);
+                    // Opens the OS dialer with the parent's saved number.
+                    Linking.openURL(telUrlFor(phone)).catch(() => {
+                      setCallFallback(
+                        `Couldn’t open your phone’s dialer. You can call ${phone} directly.`,
+                      );
+                    });
+                  }}
+                  style={({ pressed }) => ({
+                    backgroundColor: colors.alert,
+                    borderRadius: 14,
+                    paddingVertical: 14,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    transform: [{ scale: pressed ? 0.98 : 1 }],
+                  })}>
+                  <PhoneIcon />
+                  <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.white }}>
+                    {TRIAGE_COPY.primaryAction}
+                  </Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={ADD_NUMBER_ACTION}
+                  onPress={() => {
+                    setDraftNumber('');
+                    setEditingNumber(true);
+                  }}
+                  style={({ pressed }) => ({
+                    backgroundColor:
+                      surfaceMode === 'night' ? 'rgba(224,87,75,0.16)' : colors.alertTint,
+                    borderRadius: 14,
+                    borderWidth: 1.5,
+                    borderStyle: 'dashed',
+                    borderColor: colors.alert,
+                    paddingVertical: 13,
+                    alignItems: 'center',
+                    transform: [{ scale: pressed ? 0.98 : 1 }],
+                  })}>
+                  <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.alert }}>
+                    {ADD_NUMBER_ACTION}
+                  </Text>
+                </Pressable>
+              )}
+
+              {/* Calm fallback shown only when the dialer refused to open. */}
+              {callFallback != null ? (
+                <Text
+                  accessibilityLiveRegion="polite"
+                  style={{
+                    fontFamily: fonts.body,
+                    fontSize: 12.5,
+                    lineHeight: 19,
+                    color: palette.inkSoft,
+                    paddingHorizontal: 2,
+                  }}>
+                  {callFallback}
                 </Text>
-              </Pressable>
+              ) : null}
+
+              {/* Fix a wrong number without leaving triage. */}
+              {phoneReady && phone != null && !editingNumber ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={UPDATE_NUMBER_ACTION}
+                  onPress={() => {
+                    setDraftNumber(phone);
+                    setEditingNumber(true);
+                  }}
+                  style={{ alignItems: 'center', paddingVertical: 2 }}>
+                  <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, color: palette.inkSoft }}>
+                    {UPDATE_NUMBER_ACTION}
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              {/* Inline setup sheet — the smallest clean local settings surface.
+                  Stored on-device only via savePhone (usePediatricianPhone). */}
+              {editingNumber ? (
+                <View
+                  style={{
+                    backgroundColor:
+                      surfaceMode === 'night' ? 'rgba(255,255,255,0.06)' : colors.surfaceSoft,
+                    borderRadius: radii.small,
+                    padding: 13,
+                    gap: 10,
+                  }}>
+                  <TextInput
+                    accessibilityLabel={NUMBER_INPUT_LABEL}
+                    value={draftNumber}
+                    onChangeText={setDraftNumber}
+                    placeholder={NUMBER_INPUT_PLACEHOLDER}
+                    placeholderTextColor={palette.inkFaint}
+                    keyboardType="phone-pad"
+                    autoFocus
+                    style={{
+                      fontFamily: fonts.body,
+                      fontSize: 15,
+                      color: palette.ink,
+                      backgroundColor: palette.card,
+                      borderWidth: 1.5,
+                      borderColor: palette.line,
+                      borderRadius: radii.small,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                    }}
+                  />
+                  <Text
+                    style={{
+                      fontFamily: fonts.body,
+                      fontSize: 11.5,
+                      lineHeight: 16,
+                      color: palette.inkFaint,
+                    }}>
+                    {NUMBER_INPUT_HELP}
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 9 }}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={SAVE_NUMBER_ACTION}
+                      onPress={() => {
+                        void savePhone(draftNumber).then((saved) => {
+                          setEditingNumber(false);
+                          if (saved != null) setCallFallback(null);
+                        });
+                      }}
+                      style={({ pressed }) => ({
+                        flex: 1,
+                        backgroundColor: colors.alert,
+                        borderRadius: 12,
+                        paddingVertical: 12,
+                        alignItems: 'center',
+                        transform: [{ scale: pressed ? 0.98 : 1 }],
+                      })}>
+                      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13.5, color: colors.white }}>
+                        {SAVE_NUMBER_ACTION}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={CANCEL_ACTION}
+                      onPress={() => setEditingNumber(false)}
+                      style={({ pressed }) => ({
+                        paddingHorizontal: 16,
+                        paddingVertical: 12,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transform: [{ scale: pressed ? 0.98 : 1 }],
+                      })}>
+                      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13.5, color: palette.inkSoft }}>
+                        {CANCEL_ACTION}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null}
+
+              {/* Emergency — INFORMATION ONLY. Never auto-dials; no country number
+                  is hardcoded as an action. Tapping only reveals calm guidance. */}
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={TRIAGE_COPY.secondaryAction}
