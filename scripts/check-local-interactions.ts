@@ -281,8 +281,15 @@ import {
 import { isSpeechAvailable } from '../src/features/reassure/application/speech';
 import {
   classifyVoiceRecognitionError,
-  resolveVoiceTranscript,
+  nextLowVolumeSampleCount,
+  shouldShowLowVolumeHint,
 } from '../src/features/reassure/application/useVoiceInput';
+import {
+  REASSURE_VOICE_CONTEXTUAL_STRINGS,
+  normalizeVoiceTranscript,
+  resolveVoiceTranscript,
+  selectVoiceTranscriptCandidate,
+} from '../src/features/reassure/domain/voiceTranscript';
 import { EXAMPLE_CHIPS, KB, REASSURE_CONTENT, TOPIC_ORDER } from '../src/features/reassure/content/kb';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
@@ -4710,6 +4717,10 @@ const USE_VOICE_INPUT_SRC = readFileSync(
   new URL('../src/features/reassure/application/useVoiceInput.ts', import.meta.url),
   'utf8',
 );
+const SPEECH_SRC = readFileSync(
+  new URL('../src/features/reassure/application/speech.ts', import.meta.url),
+  'utf8',
+);
 const TOPIC_ACCORDION_SRC = readFileSync(
   new URL('../src/features/reassure/components/TopicAccordion.tsx', import.meta.url),
   'utf8',
@@ -5690,6 +5701,7 @@ const RX_DOMAIN_SRCS: Record<string, string> = Object.fromEntries(
     'domain/types.ts',
     'domain/redflags.ts',
     'domain/router.ts',
+    'domain/voiceTranscript.ts',
     'domain/nightWindow.ts',
     'domain/recap.ts',
     'content/kb.ts',
@@ -5800,9 +5812,58 @@ check('X17c. voice fallback states are explicit and unavailable voice focuses th
   assert.equal(classifyVoiceRecognitionError('no_match'), 'no_match');
   assert.equal(classifyVoiceRecognitionError('speech timeout'), 'no_match');
   assert.equal(classifyVoiceRecognitionError('network'), 'error');
-  assert.equal(resolveVoiceTranscript('', 'quiet hiccups'), 'quiet hiccups');
-  assert.equal(resolveVoiceTranscript('final hiccups', 'quiet hiccups'), 'final hiccups');
+  for (const term of [
+    'hiccups',
+    'spit-up',
+    'spit up',
+    'grunting',
+    'squirming',
+    "won't settle",
+    'hard to wake',
+    'feels hot',
+    'temperature',
+    'trouble breathing',
+    'green vomit',
+    'feed',
+    'bottle',
+    'breastfeed',
+    'diaper',
+    'gas',
+    'sleep',
+    'awake',
+  ]) {
+    assert.ok(REASSURE_VOICE_CONTEXTUAL_STRINGS.includes(term), `voice context includes "${term}"`);
+  }
+  assert.equal(normalizeVoiceTranscript('hick ups'), 'hiccups');
+  assert.equal(normalizeVoiceTranscript('hic up'), 'hiccup');
+  assert.equal(normalizeVoiceTranscript('spit out'), 'spit up');
+  assert.equal(normalizeVoiceTranscript('spit app'), 'spit up');
+  assert.equal(normalizeVoiceTranscript('hard awake'), 'hard to wake');
+  assert.equal(normalizeVoiceTranscript('heart awake'), 'hard to wake');
+  assert.equal(normalizeVoiceTranscript('wont settle'), "won't settle");
+  assert.equal(normalizeVoiceTranscript('not waking'), 'hard to wake');
+  assert.equal(
+    selectVoiceTranscriptCandidate([
+      { transcript: 'what stroller should I buy', confidence: 0.96 },
+      { transcript: 'hick ups after feed', confidence: 0.61 },
+    ])?.route.kind,
+    'topic',
+  );
+  assert.equal(
+    selectVoiceTranscriptCandidate([
+      { transcript: 'hiccups after feed', confidence: 0.99 },
+      { transcript: 'heart awake', confidence: 0.2 },
+    ])?.route.kind,
+    'triage',
+  );
+  assert.equal(resolveVoiceTranscript([], [{ transcript: 'quiet hick ups', confidence: 0.5 }])?.transcript, 'quiet hiccups');
+  assert.equal(resolveVoiceTranscript([{ transcript: 'final hiccups', confidence: 0.4 }], [{ transcript: 'quiet hiccups', confidence: 0.9 }])?.transcript, 'final hiccups');
   assert.equal(resolveVoiceTranscript('', ''), null);
+  assert.equal(nextLowVolumeSampleCount(0, -1), 1);
+  assert.equal(nextLowVolumeSampleCount(3, -0.2), 4);
+  assert.equal(nextLowVolumeSampleCount(3, 1), 0);
+  assert.equal(shouldShowLowVolumeHint(3), false);
+  assert.equal(shouldShowLowVolumeHint(4), true);
   for (const label of [
     'Tap to talk',
     'Listening...',
@@ -5824,8 +5885,21 @@ check('X17c. voice fallback states are explicit and unavailable voice focuses th
     'hook exposes retry and uses one safe start path');
   assert.ok(USE_VOICE_INPUT_SRC.includes('cleanupActiveSession()') && USE_VOICE_INPUT_SRC.includes('sessionRef.current?.abort()'),
     'active speech session/listeners are cleaned before retry and on teardown');
+  assert.ok(USE_VOICE_INPUT_SRC.includes('onVolumeChange') && USE_VOICE_INPUT_SRC.includes('setVolumeHint'),
+    'low volume only sets a hint in the hook');
+  assert.ok(
+    USE_VOICE_INPUT_SRC.includes('Try speaking a little closer') &&
+      REASSURE_SCREEN_SRC.includes('voice.volumeHint'),
+    'low-volume hint is visible but subtle',
+  );
   assert.ok(USE_VOICE_INPUT_SRC.includes("state === 'unavailable' || state === 'permission_denied'"),
     'only unavailable/permission states block orb retry');
+  assert.ok(SPEECH_SRC.includes('maxAlternatives: REASSURE_VOICE_MAX_ALTERNATIVES'), 'speech asks for multiple alternatives');
+  assert.ok(SPEECH_SRC.includes('contextualStrings: REASSURE_VOICE_CONTEXTUAL_STRINGS'), 'speech passes Reassure context strings');
+  assert.ok(SPEECH_SRC.includes("EXTRA_LANGUAGE_MODEL: 'web_search'"), 'Android uses web_search language model');
+  assert.ok(SPEECH_SRC.includes('EXTRA_MASK_OFFENSIVE_WORDS: false'), 'Android does not mask safety phrases');
+  assert.ok(SPEECH_SRC.includes('EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS'), 'Android complete silence length is set');
+  assert.ok(SPEECH_SRC.includes("mod.addListener('volumechange'"), 'speech listens for optional volume events');
   assert.ok(REASSURE_SCREEN_SRC.includes("onTranscript: (text) => ask(text, 'voice')"),
     'successful transcript feeds the same local ask path');
   assert.ok(REASSURE_SCREEN_SRC.includes("source === 'text' || source === 'voice'"),
