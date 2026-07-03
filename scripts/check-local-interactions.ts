@@ -67,6 +67,15 @@ import {
   LOGGING_STORAGE_KEY,
   isGuestDataPreserved,
 } from '../src/data/guestData';
+// Account deletion — the local-data RESET contract (mirror of guestData). Unlike
+// every other auth transition, a verified account deletion CLEARS local-first
+// data so a later sign-in with the same identity starts genuinely fresh.
+import {
+  ACCOUNT_LOCAL_DATA_KEYS,
+  ACCOUNT_LOCAL_DATA_PREFIXES,
+  ACCOUNT_RESET_PRESERVED_KEYS,
+  selectAccountDeletionKeys,
+} from '../src/data/accountReset';
 import {
   ONBOARDING_COMPLETE_KEY,
   isForceOnboardingEnabled,
@@ -1608,13 +1617,23 @@ check('GP4. AuthProvider never bulk-clears or removes a guest-owned store', () =
 });
 
 check('GP5. signOut clears only the Supabase session, never local-first data', () => {
-  // Isolate the signOut callback body (declaration → the next callback, clearError).
+  // Isolate the signOut callback body (declaration → the deleteAccount doc
+  // comment that immediately follows it). deleteAccount sits between signOut and
+  // clearError and DOES legitimately wipe local data on a verified delete — its
+  // doc comment even names the wipe helper — so the boundary must stop at that
+  // comment, otherwise the guard would read the delete path as a sign-out wipe.
   const start = AUTH_PROVIDER_SRC.indexOf('const signOut = useCallback');
-  const end = AUTH_PROVIDER_SRC.indexOf('const clearError', start);
+  const end = AUTH_PROVIDER_SRC.indexOf('// Delete account —', start);
   assert.ok(start !== -1 && end !== -1 && end > start, 'could not locate the signOut callback');
   const signOutBody = AUTH_PROVIDER_SRC.slice(start, end);
   assert.ok(signOutBody.includes('supabase.auth.signOut()'), 'signOut must clear the Supabase session');
-  for (const forbidden of ['clearLocalEventStorage', 'removeItem', 'multiRemove', 'AsyncStorage']) {
+  for (const forbidden of [
+    'clearLocalEventStorage',
+    'clearLocalAppDataAfterAccountDeletion', // the delete-account wipe must never run on a plain sign-out
+    'removeItem',
+    'multiRemove',
+    'AsyncStorage',
+  ]) {
     assert.ok(!signOutBody.includes(forbidden), `signOut must not reference ${forbidden} (would touch guest data)`);
   }
 });
@@ -7023,18 +7042,33 @@ check('DA2. the delete_account RPC is self-scoped and locked to signed-in caller
   assert.ok(src.includes('grant execute on function public.delete_account() to authenticated'), 'signed-in self-service only');
 });
 
-check('DA3. deleteAccount drops the local session only after the server delete succeeds', () => {
-  const rpcAt = AUTH_PROVIDER_SRC.indexOf('await deleteAccountRemote()');
-  const localSignOutAt = AUTH_PROVIDER_SRC.indexOf("signOut({ scope: 'local' })");
-  assert.ok(rpcAt !== -1, 'the provider calls the sync-layer RPC wrapper');
-  assert.ok(localSignOutAt !== -1, "the follow-up sign-out is scope 'local' (the server user no longer exists)");
-  assert.ok(rpcAt < localSignOutAt, 'server delete precedes the local session drop');
+check('DA3. deleteAccount wipes local data then drops the session, only after the server delete', () => {
   const body = AUTH_PROVIDER_SRC.slice(
     AUTH_PROVIDER_SRC.indexOf('const deleteAccount'),
     AUTH_PROVIDER_SRC.indexOf('const clearError'),
   );
-  assert.ok(body.includes('return false'), 'a failed RPC resolves false so the UI can stay honest');
-  assert.ok(!body.includes('clearLocalEventStorage'), 'local-first stores survive deletion (same hygiene as signOut)');
+  const rpcAt = body.indexOf('await deleteAccountRemote()');
+  // The failure-path return is the FIRST `return false` AFTER the RPC call — not
+  // the `if (!supabase) return false` guard that precedes it.
+  const failReturnAt = rpcAt === -1 ? -1 : body.indexOf('return false', rpcAt);
+  const localWipeAt = body.indexOf('clearLocalAppDataAfterAccountDeletion(');
+  const localSignOutAt = body.indexOf("signOut({ scope: 'local' })");
+  assert.ok(rpcAt !== -1, 'the provider calls the sync-layer RPC wrapper first');
+  assert.ok(failReturnAt !== -1, 'a failed RPC resolves false so the UI can stay honest');
+  assert.ok(localWipeAt !== -1, 'a verified delete wipes local-first data (the fresh-restart fix)');
+  assert.ok(localSignOutAt !== -1, "the follow-up sign-out is scope 'local' (the server user no longer exists)");
+  // Order: RPC → (on failure) return false BEFORE any wipe → local wipe → session drop.
+  assert.ok(rpcAt < failReturnAt, 'the failure return sits after the RPC call');
+  assert.ok(
+    failReturnAt < localWipeAt,
+    'the failure path returns BEFORE the wipe — a failed delete clears nothing',
+  );
+  assert.ok(localWipeAt < localSignOutAt, 'local data is cleared before (and around) the session drop');
+  // The in-memory account decision is reset so we land on account-entry, not local-only.
+  assert.ok(
+    body.includes('prefersLocalRef.current = false'),
+    'the sticky prefers-local flag is dropped so applySession(null) lands on account entry',
+  );
   assert.ok(
     !body.includes('setErrorMessage('),
     'no provider errorMessage — it would resurface as a stale note on the account surfaces later',
@@ -7053,6 +7087,146 @@ check('DA4. a failed deletion surfaces the manual email fallback, never a fake s
     !SYNC_ACCOUNT_SRC.includes('SERVICE_ROLE'),
     'no service-role key anywhere near the client deletion path',
   );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DR. Delete Account → FULL local reset (fix/delete-account-full-local-reset).
+//
+// The reported bug: after deleting the account and signing back in with the same
+// Google account, the app restored the old baby name/logs — because a verified
+// server delete used to preserve the local stores (same hygiene as sign-out).
+// The fix: a verified deletion now ALSO wipes this device's local-first data via
+// the pure `@/data/accountReset` contract + `@/data/accountResetStorage` wipe, so
+// a fresh sign-in is genuinely fresh. Sign-out still preserves everything (GP*).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ACCOUNT_RESET_STORAGE_SRC = readFileSync(
+  new URL('../src/data/accountResetStorage.ts', import.meta.url),
+  'utf8',
+);
+
+// A realistic full AsyncStorage keyset: the guest stores, the onboarding
+// gate/draft, the account decision, the private Reassure prefs, per-baby/night
+// caches, per-context cursors — plus the device theme (which must SURVIVE).
+function seedFullDeviceSnapshot(): Record<string, string> {
+  return {
+    ...seedGuestSnapshot(),
+    'lullaby.onboarding.v2.complete': 'true',
+    'lullaby.onboarding.v2.draft': JSON.stringify({ babyName: 'Aria', birthDate: '2026-05-01' }),
+    'lullaby/auth/prefers-local/v1': 'true',
+    'lullaby.coach.firstLog.v1.dismissed': 'true',
+    'lullaby.reassure.aiNightReadConsent.v1': 'granted',
+    'lullaby.reassure.pediatricianPhone.v1': '+1 555 123 4567',
+    'lullaby/reassure/night-read/v1:local-baby:2026-06-16': 'a soft note about Aria’s night',
+    'lullaby/handoff-cursor/local': '1718500000000',
+    'lullaby/handoff-cursor/user-1:local-baby': '1718500000000',
+    'lullaby.surfaceMode': 'night', // device config, NOT account data → survives
+  };
+}
+
+// Apply the real selector to model exactly what the device wipe removes.
+function simulateAccountDeletionWipe(before: Record<string, string>): Record<string, string> {
+  const toRemove = new Set(selectAccountDeletionKeys(Object.keys(before)));
+  const after: Record<string, string> = {};
+  for (const [key, value] of Object.entries(before)) {
+    if (!toRemove.has(key)) after[key] = value;
+  }
+  return after;
+}
+
+check('DR1. the reset key set is a superset of the guest stores + onboarding + account decision', () => {
+  const keys = ACCOUNT_LOCAL_DATA_KEYS as readonly string[];
+  // Every guest-owned store (baby + both event stores) is cleared on deletion —
+  // the inverse of the preservation contract that protects them on sign-out.
+  for (const guestKey of GUEST_OWNED_STORAGE_KEYS) {
+    assert.ok(keys.includes(guestKey), `${guestKey} must be cleared on account deletion`);
+  }
+  // …plus the onboarding gate/draft and the sticky account decision.
+  assert.ok(keys.includes('lullaby.onboarding.v2.complete'), 'onboarding must re-run after deletion');
+  assert.ok(keys.includes('lullaby.onboarding.v2.draft'), 'no stale draft may re-prefill the old baby');
+  assert.ok(keys.includes('lullaby/auth/prefers-local/v1'), 'the account decision resets to account-entry');
+  // The device theme is NOT account data → it is deliberately preserved.
+  assert.ok(!keys.includes('lullaby.surfaceMode'), 'device theme is not swept into the account wipe');
+  assert.deepEqual([...ACCOUNT_RESET_PRESERVED_KEYS], ['lullaby.surfaceMode']);
+});
+
+check('DR2. the selector clears every user key from a full snapshot and keeps only device config', () => {
+  const before = seedFullDeviceSnapshot();
+  const removed = new Set(selectAccountDeletionKeys(Object.keys(before)));
+  // Prefix-keyed stores (night-read cache, handoff cursors) are matched + cleared.
+  assert.ok(removed.has('lullaby/reassure/night-read/v1:local-baby:2026-06-16'), 'per-night AI cache cleared by prefix');
+  assert.ok(removed.has('lullaby/handoff-cursor/local'), 'local cursor cleared by prefix');
+  assert.ok(removed.has('lullaby/handoff-cursor/user-1:local-baby'), 'per-account cursor cleared by prefix');
+  // The private Reassure prefs (the parent's own data) are cleared.
+  assert.ok(removed.has('lullaby.reassure.pediatricianPhone.v1'), "the parent's own phone number is cleared");
+  assert.ok(removed.has('lullaby.reassure.aiNightReadConsent.v1'), 'AI consent resets for the fresh account');
+  assert.ok(removed.has('lullaby.coach.firstLog.v1.dismissed'), 'the first-log coach re-arms for the fresh baby');
+  // Exactly one key survives: the device theme.
+  const after = simulateAccountDeletionWipe(before);
+  assert.deepEqual(Object.keys(after), ['lullaby.surfaceMode']);
+  assert.equal(after['lullaby.surfaceMode'], 'night');
+  // At least one prefix exists so DR2 can't pass vacuously.
+  assert.ok((ACCOUNT_LOCAL_DATA_PREFIXES as readonly string[]).length >= 1);
+});
+
+check('DR3. deletion clears the local baby profile AND the logs (so re-login restores neither)', () => {
+  const before = seedFullDeviceSnapshot();
+  // Precondition: the guest snapshot really holds a restorable baby named "Aria".
+  assert.equal(parseLocalBaby(before[LOCAL_BABY_STORAGE_KEY])?.baby.name, 'Aria');
+  const beforeEvents = parsePersistedState(before[LOCAL_EVENTS_STORAGE_KEY]);
+  assert.ok(beforeEvents !== null && beforeEvents.events.length > 0, 'there are local logs to lose');
+
+  const after = simulateAccountDeletionWipe(before);
+  // The baby profile store is gone → nothing to restore.
+  assert.equal(after[LOCAL_BABY_STORAGE_KEY], undefined, 'local baby profile is erased');
+  assert.equal(parseLocalBaby(after[LOCAL_BABY_STORAGE_KEY] ?? null), null, 'no old baby can be re-hydrated');
+  // Both event stores are gone → no old logs/timeline.
+  assert.equal(after[LOCAL_EVENTS_STORAGE_KEY], undefined, 'legacy local night is erased');
+  assert.equal(after[LOGGING_STORAGE_KEY], undefined, 'logging-v2 snapshot is erased');
+  // The preservation predicate would (correctly) report this as data loss —
+  // proving the wipe is real, and that it is the OPPOSITE of the sign-out path.
+  assert.ok(!isGuestDataPreserved(before, after));
+});
+
+check('DR4. deletion resets onboarding so a fresh baby setup is required and never re-prefilled', () => {
+  const before = seedFullDeviceSnapshot();
+  // Precondition: onboarding was complete and a draft named the old baby.
+  assert.equal(before['lullaby.onboarding.v2.complete'], 'true');
+  assert.equal(JSON.parse(before['lullaby.onboarding.v2.draft']).babyName, 'Aria');
+
+  const after = simulateAccountDeletionWipe(before);
+  assert.equal(after['lullaby.onboarding.v2.complete'], undefined, 'onboarding gate reopens → setup runs again');
+  assert.equal(after['lullaby.onboarding.v2.draft'], undefined, 'no draft survives to re-prefill the old name/date');
+  // The account decision is cleared too, so the next launch resolves to
+  // account-entry, not a local-only rehydrate of the (now empty) baby.
+  assert.equal(after['lullaby/auth/prefers-local/v1'], undefined, 'the sticky local-first flag is cleared');
+});
+
+check('DR5. a FAILED remote delete clears nothing (order-guarded in the provider)', () => {
+  // The runtime order is guarded in DA3 (the failure path returns BEFORE the
+  // wipe). Here we pin the structural contract: the ONLY caller of the local
+  // wipe is deleteAccount, and it is invoked exactly once (never on sign-out /
+  // any other transition), so nothing can clear local data outside that path.
+  const wipeCalls = AUTH_PROVIDER_SRC.match(/clearLocalAppDataAfterAccountDeletion\s*\(/g) ?? [];
+  assert.equal(wipeCalls.length, 1, 'the local wipe is invoked exactly once, in deleteAccount only');
+  // The single call site lives inside the deleteAccount callback (not signOut or
+  // any other transition) — GP5 separately proves signOut never references it.
+  const deleteBody = AUTH_PROVIDER_SRC.slice(
+    AUTH_PROVIDER_SRC.indexOf('const deleteAccount'),
+    AUTH_PROVIDER_SRC.indexOf('const clearError'),
+  );
+  assert.ok(
+    /clearLocalAppDataAfterAccountDeletion\s*\(/.test(deleteBody),
+    'the wipe call sits inside deleteAccount',
+  );
+});
+
+check('DR6. the device wipe scans the keyset and batch-removes via the pure selector, best-effort', () => {
+  const src = ACCOUNT_RESET_STORAGE_SRC;
+  assert.ok(src.includes('AsyncStorage.getAllKeys()'), 'it scans the live keyset (covers prefix-keyed stores)');
+  assert.ok(src.includes('selectAccountDeletionKeys('), 'it removes exactly what the pure contract selects');
+  assert.ok(src.includes('AsyncStorage.multiRemove('), 'it removes them in a single batch');
+  assert.ok(src.includes('try {') && src.includes('catch'), 'best-effort — a failed wipe never traps the parent');
 });
 
 runAsyncChecks()

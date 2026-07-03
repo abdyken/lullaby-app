@@ -77,6 +77,25 @@ behavior was required for Step 08 — the foundation was already correct (see th
 recorded decision "AppState refresh + sign-out needs NO local cache clear"). Step
 08 adds the *contract* (`guestData.ts`) and the *regression guard* (`GP1–GP6`).
 
+### The one deliberate exception: Delete Account
+
+Deleting the account (Apple 5.1.1(v)) is **not** one of the five transitions
+above and is the single case that intentionally does the OPPOSITE — it erases
+local-first data. After the self-scoped `delete_account` RPC *verifiably* removes
+the server account, `AuthProvider.deleteAccount()` calls
+`clearLocalAppDataAfterAccountDeletion()` (device wipe in
+`src/data/accountResetStorage.ts`, key contract in `src/data/accountReset.ts`),
+so a later sign-in — even with the same identity — starts genuinely fresh (no old
+baby name, no old logs, baby setup re-runs). This is the mirror of the
+preservation contract: `ACCOUNT_LOCAL_DATA_KEYS` is a **superset** of
+`GUEST_OWNED_STORAGE_KEYS` plus the onboarding gate/draft, the account decision
+(`prefers-local`), and the private Reassure prefs; only device config with no user
+identity (`lullaby.surfaceMode` theme) survives. Ordering is the safety story: a
+**failed** RPC clears nothing and returns `false` (the manual email fallback), so
+a failure can never look like success. Sign-out is unchanged — it still preserves
+everything (`GP5` now also forbids the delete-wipe helper inside `signOut`).
+Coverage: `DR1–DR6` in `scripts/check-local-interactions.ts`.
+
 ---
 
 ## 3. Regression coverage (`GP1–GP6`)

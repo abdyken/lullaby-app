@@ -34,9 +34,10 @@ import { useAnalytics } from '@/lib/useAnalytics';
 import { useAuth } from '@/state/AuthProvider';
 import { usePro } from '@/state/ProProvider';
 
+import { NIGHT_READ_CACHE_PREFIX } from './nightReadKeys';
 import { useAiNightReadConsent } from './useAiNightReadConsent';
 
-const CACHE_PREFIX = 'lullaby/reassure/night-read/v1';
+const CACHE_PREFIX = NIGHT_READ_CACHE_PREFIX;
 const FETCH_TIMEOUT_MS = 3_000;
 
 /** The night's key = the local calendar date the window OPENED on. */
