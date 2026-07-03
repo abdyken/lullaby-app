@@ -15,10 +15,11 @@
  * imports the subscription SDK, and carries no external payment link or web
  * payment flow. Purchase / restore run through usePro(); this file is presentational.
  */
-import { Modal, Pressable, Text, View } from 'react-native';
+import { Linking, Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PrimaryActionButton } from '@/components/PrimaryActionButton';
+import { resolvePrivacyPolicyUrl, resolveTermsUrl } from '@/lib/appLinks';
 import { usePro } from '@/state/ProProvider';
 import { colors, fonts, radii, shadows } from '@/theme';
 
@@ -47,6 +48,27 @@ const RESTORE_NOTE = 'Restore recovers a subscription you already purchased.';
 const NOT_MEDICAL = 'Not medical advice.';
 const STORE_MANAGED = 'Subscriptions are billed through your App Store / Play Store account.';
 const STORE_MANAGE = 'Cancel or manage anytime in your store account settings.';
+
+// App Store / Play review-safe legal links. Labels only — the destinations come
+// from appLinks (env EXPO_PUBLIC_TERMS_URL / EXPO_PUBLIC_PRIVACY_POLICY_URL with
+// safe fallbacks), so no URL is ever hardcoded in this file.
+const TERMS_LABEL = 'Terms of Use';
+const PRIVACY_LABEL = 'Privacy Policy';
+
+/**
+ * Open a legal link. Single, crash-safe openURL site (mirrors settings.tsx): a
+ * missing browser or a bad env value must never crash the paywall — it degrades
+ * to a no-op instead.
+ */
+function openLegalLink(url: string): void {
+  try {
+    void Linking.openURL(url).catch(() => {
+      // Calm: opening a link should never surface an error on the paywall.
+    });
+  } catch {
+    // Calm: never let a link tap crash the paywall.
+  }
+}
 
 /** A friendly plan name from the RevenueCat package type (falls back to title). */
 function planLabel(pkg: ProPackageView): string {
@@ -303,6 +325,43 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
             <Text style={{ fontFamily: fonts.body, fontSize: 11.5, lineHeight: 16, color: colors.inkFaint }}>
               {STORE_MANAGED}
             </Text>
+          </View>
+
+          {/* Terms + Privacy — always visible, in every paywall state (required
+              for App Store / Play review, especially when Pro is live). */}
+          <View style={{ marginTop: 12, flexDirection: 'row', gap: 18 }}>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel={TERMS_LABEL}
+              onPress={() => openLegalLink(resolveTermsUrl())}
+              hitSlop={8}
+              style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}>
+              <Text
+                style={{
+                  fontFamily: fonts.body,
+                  fontSize: 11.5,
+                  color: colors.sleep,
+                  textDecorationLine: 'underline',
+                }}>
+                {TERMS_LABEL}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel={PRIVACY_LABEL}
+              onPress={() => openLegalLink(resolvePrivacyPolicyUrl())}
+              hitSlop={8}
+              style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}>
+              <Text
+                style={{
+                  fontFamily: fonts.body,
+                  fontSize: 11.5,
+                  color: colors.sleep,
+                  textDecorationLine: 'underline',
+                }}>
+                {PRIVACY_LABEL}
+              </Text>
+            </Pressable>
           </View>
 
           <View style={{ marginTop: 18, alignItems: 'center' }}>
