@@ -30,6 +30,7 @@ import {
 
 import { Screen } from '@/components/Screen';
 import { AiConsentCard } from '@/features/reassure/components/AiConsentCard';
+import { AiReadNote } from '@/features/reassure/components/AiReadNote';
 import { AnswerCard, type TriageAction } from '@/features/reassure/components/AnswerCard';
 import { AskCard } from '@/features/reassure/components/AskCard';
 import { ReassureHero } from '@/features/reassure/components/ReassureHero';
@@ -126,7 +127,13 @@ export default function ReassureScreen() {
     () => buildReassureRecap(recapSource.events, recapSource.now),
     [recapSource],
   );
-  const { read: nightRead, needsConsent, grantConsent, declineConsent } = useNightRead(recap);
+  const {
+    read: nightRead,
+    status: nightReadStatus,
+    needsConsent,
+    grantConsent,
+    declineConsent,
+  } = useNightRead(recap);
   const currentRecapHeading = recapHeading(recap);
 
   const scrollToAnswer = useCallback(
@@ -404,6 +411,11 @@ export default function ReassureScreen() {
       {/* tonight recap, grounded in the saved logs */}
       <Kicker text={currentRecapHeading} color={palette.inkFaint} />
       <RecapCard surfaceMode={mode} recap={recap} readOverride={nightRead} />
+
+      {/* Honest label under the read: an 'AI-phrased' badge when the AI read is
+          showing, or a calm 'AI read isn't available' note when we tried and it
+          didn't come through. Renders nothing while idle/loading. */}
+      <AiReadNote surfaceMode={mode} status={nightReadStatus} />
 
       {/* one-time AI consent notice — only for AI-eligible parents who have not
           yet decided. The recap above is already fully rendered without AI. */}
