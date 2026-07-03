@@ -6658,6 +6658,142 @@ check('X24e. consent never leaks: no phone, no analytics, no LLM in the consent 
   );
 });
 
+// ---------------------------------------------------------------------------
+// NR1–NR5: night-read release-readiness. The real deployed calls (2026-07-02
+// audit) all ended in guardrail_block: valid JSON, short, end_turn — but every
+// response reached for the word "okay" ("that's okay"), which is judgement
+// vocabulary the night read has no source text to exempt, so it was a VOCAB
+// block. The fix steers the prompt away from those words WITHOUT weakening the
+// guardrail. These checks pin both halves: the guardrail still blocks medical
+// wording, and a prompt-following safe read now passes.
+// ---------------------------------------------------------------------------
+
+check('NR1. the read that shipped as guardrail_block is a VOCAB block ("okay"); a prompt-following read passes', () => {
+  // Verbatim from a real reassure_audit row that resolved guardrail_block.
+  const shipped =
+    "It looks like you haven't logged anything yet tonight, and that's okay. If you need support or have concerns about your baby, your pediatrician is always there to help.";
+  assert.ok(shipped.length <= RX_LLM.NIGHT_READ_MAX_CHARS, 'fixture: it was under the length cap');
+  const blocked = RX_LLM.validateLlmOutput(JSON.stringify({ read: shipped }), 'read', {
+    maxChars: RX_LLM.NIGHT_READ_MAX_CHARS,
+  });
+  assert.ok(
+    !blocked.ok && blocked.reason === 'vocab',
+    'the shipped read blocked on judgement vocab, not parse/length',
+  );
+  assert.ok(/\bokay\b/i.test(shipped), 'fixture: the culprit word is "okay"');
+
+  // A sparse-night read that follows the fixed prompt — reflects the (absent)
+  // counts, gentle uncertainty, a general pediatrician pointer, NO judgement word.
+  const safeSparse =
+    'Tonight is quiet in Lullaby so far — no feeds, diaper changes, or spit-ups are logged, and no sleep has been recorded yet. If anything feels off, trust your instincts and reach out to your pediatrician.';
+  // A read that restates real tallies, same safe register.
+  const safeData =
+    'So far tonight you have logged 3 feeds, 2 diaper changes, and one 90-minute stretch of sleep. If anything feels off, trust your instincts and reach out to your pediatrician.';
+  for (const read of [safeSparse, safeData]) {
+    const verdict = RX_LLM.validateLlmOutput(JSON.stringify({ read }), 'read', {
+      maxChars: RX_LLM.NIGHT_READ_MAX_CHARS,
+    });
+    assert.ok(verdict.ok, `a safe, prompt-following read passes the guardrail: ${read}`);
+  }
+});
+
+check('NR2. medical / diagnostic / false-reassurance wording is still blocked by the guardrail', () => {
+  for (const bad of [
+    'Your baby looks perfectly healthy and this is a completely normal night.',
+    'Everything is fine — nothing concerning here.',
+    'This is a safe amount of sleep for a newborn.',
+    'That is a reassuring number of wet diapers.',
+  ]) {
+    const verdict = RX_LLM.validateLlmOutput(JSON.stringify({ read: bad }), 'read', {
+      maxChars: RX_LLM.NIGHT_READ_MAX_CHARS,
+    });
+    assert.ok(!verdict.ok && verdict.reason === 'vocab', `blocked: ${bad}`);
+  }
+});
+
+check('NR3. the night-read prompt names the forbidden judgement words so the model is steered, not only caught', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const content = require('../supabase/functions/_shared/reassureContent') as {
+    NIGHT_READ_SYSTEM_PROMPT: string;
+  };
+  const prompt = content.NIGHT_READ_SYSTEM_PROMPT.toLowerCase();
+  assert.ok(prompt.includes('forbidden'), 'the prompt carries an explicit forbidden-words rule');
+  // The exact culprit ("okay") plus a representative sample of the shared ban.
+  for (const word of ['okay', 'normal', 'healthy', 'fine', 'reassuring', 'safe']) {
+    assert.ok(prompt.includes(word), `the prompt lists "${word}" as forbidden`);
+  }
+  assert.ok(prompt.includes('never diagnose'), 'the prompt still forbids diagnosis');
+  assert.ok(prompt.includes('pediatrician'), 'the only allowed guidance stays the pediatrician pointer');
+  assert.ok(prompt.includes('single "read" string'), 'the prompt matches the single-key schema (guardrail unchanged)');
+});
+
+check('NR4. every code-built prompt fact is red-flag-clean AND judgement-vocab-clean (nothing to smuggle)', () => {
+  const bands = ['0-4 weeks', '1-3 months', 'over 12 months', 'unknown age'];
+  const tallySets = [
+    { feeds: 0, diapers: 0, spitUps: 0, longestSleepMin: null, sleepRunning: false },
+    { feeds: 3, diapers: 2, spitUps: 1, longestSleepMin: 90, sleepRunning: false },
+    { feeds: 12, diapers: 9, spitUps: 4, longestSleepMin: 1, sleepRunning: true },
+  ];
+  for (const band of bands) {
+    for (const t of tallySets) {
+      const facts = RX_CORE.buildPromptFacts(t, band);
+      assert.ok(!matchesRedFlag(normalizeAsk(facts)), `prompt facts red-flag-clean: ${facts}`);
+      assert.ok(!RX_LLM.judgementVocabRegex().test(facts), `prompt facts vocab-clean: ${facts}`);
+    }
+  }
+});
+
+check('NR5. cost control: cache-hit returns before any model call; a blocked read caches nothing and falls back', () => {
+  const night = RX_EDGE_SRCS['reassure-night-read'];
+  const cacheHitIx = night.indexOf('if (cached?.read)');
+  const clientIx = night.indexOf('new Anthropic(');
+  assert.ok(
+    cacheHitIx > -1 && clientIx > -1 && cacheHitIx < clientIx,
+    'a cache hit short-circuits BEFORE the Anthropic client is constructed (no re-spend)',
+  );
+  // Only a real (non-null) read is ever written to the once-per-night cache.
+  assert.ok(
+    night.indexOf('if (read == null)') < night.indexOf('.upsert('),
+    'the null-read fallback returns before the cache upsert — failures cache nothing',
+  );
+  assert.ok(
+    night.includes('.upsert({ baby_id: babyId, night_key: nightKey, read'),
+    'the cache stores only a validated read',
+  );
+  // A discarded answer audits guardrail_block and falls back; the SDK is built
+  // with 0 retries, so a block is one call, never an auto-retry loop.
+  assert.ok(
+    night.includes("outcome = verdict.reason === 'parse' ? 'parse_fail' : 'guardrail_block'"),
+    'a discarded answer audits guardrail_block',
+  );
+  assert.ok(night.includes('maxRetries: LLM_MAX_RETRIES'), 'the SDK is constructed with 0 retries');
+});
+
+check('NR6. the honest AI/fallback label is wired and keeps the non-medical disclaimer visible', () => {
+  const noteSrc = readFileSync(
+    new URL('../src/features/reassure/components/AiReadNote.tsx', import.meta.url),
+    'utf8',
+  );
+  // A successful AI read is clearly labelled AS an AI read, and stays non-medical.
+  assert.ok(/AI-phrased/i.test(noteSrc), 'a successful AI read is labelled AI-phrased');
+  assert.ok(/not medical advice/i.test(noteSrc), 'the AI label keeps "not medical advice" visible');
+  assert.ok(/never a diagnosis/i.test(noteSrc), 'the AI label keeps "never a diagnosis" visible');
+  // The failure copy is calm and honest — points at the local read, never an error.
+  assert.ok(noteSrc.includes('available right now'), 'the unavailable note is calm and honest');
+  assert.ok(
+    noteSrc.includes('the local read based on your logs'),
+    'the unavailable note points at the local read, not a technical failure',
+  );
+  // The screen renders it, driven by the hook status; the hook models all four states.
+  assert.ok(
+    RX_REASSURE_SCREEN_SRC.includes('<AiReadNote surfaceMode={mode} status={nightReadStatus} />'),
+    'the reassure screen renders the honest label under the recap',
+  );
+  for (const s of ['idle', 'loading', 'ai', 'unavailable']) {
+    assert.ok(RX_NIGHTREAD_HOOK_SRC.includes(`'${s}'`), `the hook models the "${s}" status`);
+  }
+});
+
 // §PC — the Reassure triage "Call pediatrician" phone action (local + private).
 const RX_ANSWERCARD_SRC = readFileSync(
   new URL('../src/features/reassure/components/AnswerCard.tsx', import.meta.url),

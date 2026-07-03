@@ -2,7 +2,14 @@
 
 > Companion to `docs/reassure-ai-layer-spec.md` (the contract) and
 > `docs/reassure-content-review.md` (the clinician sign-off manifest).
-> Last updated: 2026-07-02.
+> Last updated: 2026-07-04.
+>
+> **2026-07-04 (branch `fix/reassure-ai-night-read-release-ready`).** Root-caused
+> and fixed the "every real call ends in `guardrail_block`, zero successful cached
+> reads" state — see **§ Night read: why every call blocked, and the fix** below.
+> The output guardrail was NOT weakened; the prompt was steered away from the words
+> it forbids. Added an honest UI label (AI-phrased vs local fallback) and smoke
+> checks NR1–NR6.
 
 ## What the AI layer is
 
@@ -10,7 +17,7 @@ Two bounded LLM calls — never an agent, never a router:
 
 | Job | Function | Purpose | Status |
 |---|---|---|---|
-| 1 · Night Read | `supabase/functions/reassure-night-read` | One calm, strictly descriptive read over code-computed night tallies | **Built + verified.** Live for Pro users once deployed (placeholder prompts — see gates below) |
+| 1 · Night Read | `supabase/functions/reassure-night-read` | One calm, strictly descriptive read over code-computed night tallies | **Built + verified; prompt steered past the vocab guardrail 2026-07-04 (redeploy required).** Live for Pro+consented users once deployed (placeholder prompts — see gates below) |
 | 2 · Topic Polish | `supabase/functions/reassure-topic-polish` | Rephrase ONE clinician-owned KB line in the parent's tone | **Built + verified, DARK.** Server exists; zero client wiring (enforced by smoke §X22) |
 
 All safety lives in code around the model:
@@ -157,6 +164,117 @@ length (never the full text), and every row expires via `expires_at`
      and unknown topic → `{kind:'oos'}`, both with **no** Anthropic call in
      the function logs.
 
+## Night read: why every call blocked, and the fix
+
+**Symptom (2026-07-02 → 2026-07-04).** `reassure-night-read` was deployed with
+the kill-switch on and a valid `ANTHROPIC_API_KEY`, and Haiku *did* run — but
+every row in `reassure_audit` came back `outcome='guardrail_block'` and
+`reassure_night_reads` stayed empty, so the app only ever showed the local read.
+
+**Root cause — a vocabulary block, not parse/length.** Every blocked response
+was valid JSON with a `read` key, `stop_reason='end_turn'`, ~45–57 output tokens
+(far under the 200 cap) and well under 360 chars — so it passed parse and length.
+The old prompt only told the model to be "warm", so on a sparse night it reflexively
+wrote *"that's **okay**…"* every single time. `okay` is in the shared
+`JUDGEMENT_VOCAB`; the night read has no `sourceText` to exempt anything, so **any**
+judgement word is treated as an introduced medical claim → `validateLlmOutput`
+returns `{reason:'vocab'}` → `outcome='guardrail_block'` → local fallback. The
+guardrail did exactly its job; the prompt just never gave the model a way to pass it.
+
+**Fix — steer the prompt, never loosen the guardrail.** `NIGHT_READ_SYSTEM_PROMPT`
+(`_shared/reassureContent.ts`) now lists the forbidden judgement words verbatim
+(normal, okay, fine, healthy, reassuring, safe, …), tells the model to restate only
+the counts, keeps the single allowed guidance (the general pediatrician pointer),
+requires gentle uncertainty when data is sparse, and caps at two–three short
+sentences. The response schema is unchanged (single `read` string) and
+`validateLlmOutput` is byte-for-byte unchanged, so the "model can't smuggle medical
+content" gate is exactly as strict as before — smoke NR2 still blocks
+diagnosis/normal/fine/safe/reassuring wording. NR1 pins the real blocked sample as a
+vocab block *and* that a prompt-following read now passes; NR3 pins the prompt's
+forbidden-word list.
+
+> **Because the function's source changed, `reassure-night-read` must be
+> redeployed** for the fix to take effect (see the deploy runbook above). Until it
+> is redeployed the old prompt is live and calls keep blocking.
+
+**Honest UI.** `useNightRead` now returns a coarse `status`
+(`idle | loading | ai | unavailable`) and the Reassure screen renders
+`AiReadNote` under the recap: an "AI-phrased read" badge + the standing "general
+information, not medical advice, never a diagnosis" line when the AI read is showing,
+or a calm *"AI read isn't available right now — here's the local read based on your
+logs."* when we attempted and got nothing. Idle/loading render nothing (no spinner).
+A blocked/failed attempt is never dressed up as success, and a non-Pro / no-consent
+state is never shown as an AI failure (those stay `idle`). Smoke NR6 pins it.
+
+## AI night read — end-to-end test posture & manual verification
+
+**One successful safe read needs ALL of these true at once** (unchanged gates):
+
+| Layer | Requirement |
+|---|---|
+| App env (dev build only) | `EXPO_PUBLIC_PRO_ENABLED=1` **and** `EXPO_PUBLIC_PRO_DEV_ENTITLEMENT=1` (grants `isPro` without a purchase — `__DEV__`-gated, ignored by release binaries). Real Supabase URL + anon key set. See `docs/release-env.md` → *Local Pro QA*. |
+| Production | `EXPO_PUBLIC_PRO_DEV_ENTITLEMENT=0`; real Pro comes only from a RevenueCat purchase. |
+| Client gates | signed-in user · a linked baby · a non-empty night recap (not the `today` window) · **explicit consent** — tap "Turn on AI read" in the one-time `AiConsentCard`. |
+| Server secrets (Supabase → Edge Functions → Secrets) | `ANTHROPIC_API_KEY` present · `REASSURE_NIGHT_READ_ENABLED=1` (exact) · `REASSURE_MODEL` optional (default `claude-haiku-4-5-20251001`) · service vars already present. |
+| Deterministic-local guarantees | red-flag/triage input never reaches the model; no cached successful read already exists for this baby+night. |
+
+**Deploy the changed function** (function code changed on this branch):
+
+```sh
+supabase functions deploy reassure-night-read     # do NOT deploy reassure-topic-polish
+supabase functions list                            # reassure-night-read → ACTIVE
+supabase secrets list                              # ANTHROPIC_API_KEY, REASSURE_MODEL, REASSURE_NIGHT_READ_ENABLED present (names only)
+supabase functions logs reassure-night-read --tail # watch the [reassure-audit] line during the test
+```
+
+**Trigger exactly one test call from the UI:**
+
+1. Dev build with the *Local Pro QA* env above; sign in; make sure the linked baby
+   has at least one feed/diaper/sleep logged tonight (a non-empty recap).
+2. Open the **Reassure** tab → tap **Turn on AI read** on the consent card.
+3. Within ~3 s the recap read swaps to the AI-phrased text and the **AI-phrased
+   read** badge appears. If it stays on the local read with the *"AI read isn't
+   available right now"* note, the call fell back — check the audit row's `outcome`.
+4. The function log prints one `[reassure-audit] kind=night-read outcome=llm … usage={…}` line.
+
+**SQL verification** (Supabase SQL editor / `execute_sql`):
+
+```sql
+-- 1. latest audit row for this baby — expect outcome='llm', a stop_reason,
+--    and a usage block with input_tokens/output_tokens.
+select created_at, outcome, model, stop_reason, latency_ms,
+       usage->>'input_tokens'  as input_tokens,
+       usage->>'output_tokens' as output_tokens
+from public.reassure_audit
+where kind = 'night-read'
+order by created_at desc
+limit 1;
+
+-- 2. latest successful cached night read — expect exactly one row per baby+night.
+select baby_id, night_key, model, left(read, 120) as read_preview, created_at
+from public.reassure_night_reads
+order by created_at desc
+limit 1;
+
+-- 3. token usage / cost roll-up across recent calls.
+select outcome, count(*) as calls,
+       sum((usage->>'input_tokens')::int)  as input_tokens,
+       sum((usage->>'output_tokens')::int) as output_tokens
+from public.reassure_audit
+where kind = 'night-read' and created_at > now() - interval '1 day'
+group by outcome order by calls desc;
+```
+
+**Confirm the second open costs nothing.** Re-open the Reassure tab (or another
+caregiver of the same baby opens it) for the same night: the read renders from the
+`reassure_night_reads` PK cache (and the client's AsyncStorage cache) with **no new
+`reassure_audit` row and no Anthropic call** — the `(baby_id, night_key)` primary
+key is the once-per-night rate limit. Query 2 should still show a single row and
+query 1's `created_at` should not advance. A `guardrail_block`/fallback caches
+nothing (by design, so a fixed prompt or re-enabled kill-switch takes effect on the
+next open); with 0 SDK retries and the 8 s/3 s timeouts, a block is one call, never
+an auto-retry loop.
+
 ## Rollback
 
 The night-read layer is fail-safe by construction: the client renders the
@@ -223,3 +341,10 @@ does not break Reassure.
   branch precedes any Anthropic construction/call (`outcome='disabled'`, no
   token spend); consent state never leaks to phone/analytics/LLM, and topic
   polish / parent-answer stay dark.
+- NR1–NR6 — release readiness: the real shipped read is a vocab block ("okay")
+  and a prompt-following read passes (NR1); medical/diagnostic/false-reassurance
+  wording is still blocked (NR2); the prompt names the forbidden words and keeps
+  the single-`read` schema (NR3); every code-built prompt fact is red-flag- and
+  vocab-clean (NR4); cache-hit returns before any model call and a blocked read
+  caches nothing / doesn't retry (NR5); the honest AI/fallback label is wired and
+  keeps the non-medical disclaimer visible (NR6).
