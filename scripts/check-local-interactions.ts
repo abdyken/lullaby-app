@@ -1653,6 +1653,10 @@ const TONIGHT_SRC = readFileSync(
   new URL('../src/app/(tabs)/index.tsx', import.meta.url),
   'utf8',
 );
+const HANDOFF_CARD_SRC = readFileSync(
+  new URL('../src/components/HandoffCard.tsx', import.meta.url),
+  'utf8',
+);
 const BABY_HEADER_SRC = readFileSync(
   new URL('../src/components/BabyHeader.tsx', import.meta.url),
   'utf8',
@@ -1765,6 +1769,34 @@ check('AE8. public account entry copy is truthful for local-only Shape A', () =>
     ]) {
       assert.ok(!src.includes(stale), `${name} must not advertise unavailable account/sync/sharing copy`);
     }
+  }
+});
+
+check('AE9. Tonight handoff copy is local-only and caregiver invites are inactive for Shape A', () => {
+  assert.ok(
+    HANDOFF_CARD_SRC.includes('Tonight’s log is saved on this device.'),
+    'HandoffCard must say the log is saved on this device',
+  );
+  assert.ok(HANDOFF_CARD_SRC.includes('Updated just now.'), 'HandoffCard must use local update copy');
+  for (const stale of [
+    'Syncing…',
+    'Synced just now',
+    'shared with your caregivers',
+    'stay in sync',
+    'Both caregivers are ready',
+  ]) {
+    assert.ok(!HANDOFF_CARD_SRC.includes(stale), `HandoffCard must not render stale copy: ${stale}`);
+  }
+
+  const settingsSrc = readFileSync(new URL('../src/app/settings.tsx', import.meta.url), 'utf8');
+  for (const [name, src] of [
+    ['AccountSheet', ACCOUNT_SHEET_SRC],
+    ['Settings', settingsSrc],
+  ] as const) {
+    assert.ok(src.includes('Caregiver invites'), `${name} keeps a future-facing invite row`);
+    assert.ok(src.includes('Coming later. This build keeps logs on this device.'), `${name} says invite is later`);
+    assert.ok(!src.includes('<InviteCaregiverSheet'), `${name} must not mount the active invite sheet`);
+    assert.ok(!src.includes('setInviteOpen'), `${name} must not open the active invite flow`);
   }
 });
 
@@ -5043,6 +5075,22 @@ check('W7. fake-door preview survives: preview mode resolves and the interest an
   assert.ok(/coming soon/i.test(UPGRADE_CARD_SRC), 'UpgradeCard keeps its coming-soon copy');
   assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('upgrade_card_tapped'"), 'ProPreviewCard fires upgrade_card_tapped');
   assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('export_tapped'"), 'ProPreviewCard fires export_tapped');
+});
+
+check('W7b. Pro public copy stays future-facing for Apple review', () => {
+  for (const [name, src] of [
+    ['UpgradeCard.tsx', UPGRADE_CARD_SRC],
+    ['ProPreviewCard.tsx', PRO_PREVIEW_CARD_SRC],
+    ['PaywallSheet.tsx', PAYWALL_SHEET_SRC],
+  ] as const) {
+    assert.ok(
+      src.includes('Fuller history') || src.includes('gentle weekly recaps') || src.includes('Export-ready summaries'),
+      `${name} keeps softened future-facing Pro copy`,
+    );
+    for (const stale of ['doctor-ready', 'more caregivers', 'share with your pediatrician']) {
+      assert.ok(!src.includes(stale), `${name} must not include stale Pro claim: ${stale}`);
+    }
+  }
 });
 
 check('W8. analytics stays privacy-safe: still no client SELECT, fake-door events kept', () => {

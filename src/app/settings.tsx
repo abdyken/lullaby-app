@@ -15,7 +15,6 @@ import { Linking, Platform, Pressable, ScrollView, StatusBar, Switch, Text, View
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { InviteCaregiverSheet } from '@/components/auth/InviteCaregiverSheet';
 import {
   buildSupportMailtoUrl,
   resolvePrivacyPolicyUrl,
@@ -134,7 +133,6 @@ export default function SettingsScreen() {
   const email = session?.user.email ?? null;
   const signedIn = session != null;
   const configured = isSupabaseConfigured;
-  const [inviteOpen, setInviteOpen] = useState(false);
 
   const appVersion = Constants.expoConfig?.version ?? '1.0.0';
   const buildNumber = Constants.nativeBuildVersion ?? null;
@@ -261,23 +259,30 @@ export default function SettingsScreen() {
                   Account features are signed in here. This Apple-review build keeps logs local-first.
                 </Text>
 
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Invite caregiver"
-                  onPress={() => setInviteOpen(true)}
-                  style={({ pressed }) => ({
+                <View
+                  accessibilityLabel="Caregiver invites coming later"
+                  style={{
                     marginTop: 14,
-                    minHeight: 48,
-                    alignItems: 'center',
+                    minHeight: 58,
                     justifyContent: 'center',
                     borderRadius: radii.medium,
                     backgroundColor: colors.sleepTint,
-                    opacity: pressed ? 0.7 : 1,
-                  })}>
+                    paddingHorizontal: 14,
+                  }}>
                   <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.sleep }}>
-                    Invite caregiver
+                    Caregiver invites
                   </Text>
-                </Pressable>
+                  <Text
+                    style={{
+                      fontFamily: fonts.body,
+                      fontSize: 12,
+                      lineHeight: 17,
+                      color: palette.inkSoft,
+                      marginTop: 2,
+                    }}>
+                    Coming later. This build keeps logs on this device.
+                  </Text>
+                </View>
 
                 <Pressable
                   accessibilityRole="button"
@@ -529,8 +534,6 @@ export default function SettingsScreen() {
           </SettingsCard>
         </View>
       </ScrollView>
-
-      {signedIn && inviteOpen && <InviteCaregiverSheet onClose={() => setInviteOpen(false)} />}
     </>
   );
 }
