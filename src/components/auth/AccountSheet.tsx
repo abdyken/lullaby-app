@@ -91,7 +91,7 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
                   color: colors.inkFaint,
                   marginTop: 8,
                 }}>
-                Your night log is shared with your caregivers on this baby.
+                Account features are signed in here. This Apple-review build keeps logs local-first.
               </Text>
 
               {/* Low-emphasis invite entry point (Supabase ready mode only). */}
@@ -139,7 +139,7 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
             <>
               <Text
                 style={{ fontFamily: fonts.body, fontSize: 13, color: colors.inkSoft, marginTop: 4 }}>
-                Back up and sync your logs.
+                You{'’'}re using Lullaby locally.
               </Text>
               <Text
                 style={{
@@ -188,8 +188,8 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
                     color: colors.inkFaint,
                     marginTop: 16,
                   }}>
-                  Account backup and sync turn on once this build is connected to its account
-                  service.
+                  Accounts are not set up in this build yet. Your baby and logs stay on this
+                  phone.
                 </Text>
               )}
             </>
