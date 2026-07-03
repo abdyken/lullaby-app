@@ -12,7 +12,14 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const PREFIX = 'lullaby/handoff-cursor/';
+/**
+ * Key prefix for every handoff cursor. Exported so the account-deletion contract
+ * (`./accountReset`) can match + clear all cursors by prefix without duplicating
+ * the string. A plain constant (no React/AsyncStorage), so pure importers are
+ * unaffected.
+ */
+export const HANDOFF_CURSOR_PREFIX = 'lullaby/handoff-cursor/';
+const PREFIX = HANDOFF_CURSOR_PREFIX;
 
 /** The cursor context used in local-only demo mode (no per-caregiver scoping). */
 export const LOCAL_CURSOR_CONTEXT = 'local';

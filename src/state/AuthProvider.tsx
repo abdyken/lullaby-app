@@ -35,6 +35,7 @@ import {
   type CreateLocalBabyInput,
   type LocalBabyRecord,
 } from '@/data/localBaby';
+import { clearLocalAppDataAfterAccountDeletion } from '@/data/accountResetStorage';
 import { clearLocalEventStorage } from '@/data/localStorage';
 import { baby as seedBaby, caregivers as seedCaregivers } from '@/data/mock';
 import { clearOnboardingDraft } from '@/components/onboarding/onboardingStorage';
@@ -47,6 +48,7 @@ import { isGoogleSignInConfigured } from '@/lib/googleAuth';
 import { hapticSuccess } from '@/lib/haptics';
 import { logStartupStep } from '@/lib/startupDiagnostics';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { PREFERS_LOCAL_STORAGE_KEY } from '@/state/authStorageKeys';
 import { resolveNoSessionStatus } from '@/state/authStatusResolver';
 import {
   acceptInvite,
@@ -200,13 +202,16 @@ type AuthContextValue = {
   signOut: () => Promise<void>;
   /**
    * Permanently delete the signed-in account (Apple 5.1.1(v)) via the
-   * self-scoped `delete_account` RPC, then drop the local session. Resolves
-   * true only when the server verifiably deleted the account; false on any
-   * failure so the calling screen can show its own calm fallback (we set no
-   * provider errorMessage here — the caller stays signed in on failure, and a
-   * stored provider error would resurface as a stale note on the account
-   * surfaces after an unrelated later sign-out). Local-first data is preserved
-   * exactly like signOut.
+   * self-scoped `delete_account` RPC, then — only on a verified server delete —
+   * wipe this device's local-first data (baby, logs, onboarding gate/draft,
+   * account decision, private Reassure prefs) and drop the local session, so a
+   * later sign-in with the same identity starts genuinely fresh. Resolves true
+   * only when the server verifiably deleted the account; false on any failure,
+   * in which case NOTHING local is cleared and the caller shows its own calm
+   * fallback (we set no provider errorMessage here — the caller stays signed in
+   * on failure, and a stored provider error would resurface as a stale note on
+   * the account surfaces after an unrelated later sign-out). Unlike signOut,
+   * which preserves local-first data, this is the one transition that clears it.
    */
   deleteAccount: () => Promise<boolean>;
   clearError: () => void;
@@ -236,16 +241,6 @@ function isAppleCancel(error: unknown): boolean {
     (error as { code?: unknown }).code === 'ERR_REQUEST_CANCELED'
   );
 }
-
-/**
- * Persisted "this guest chose to keep using Lullaby locally" flag. Set when
- * "Continue locally" is tapped on the account-entry surface so a *configured*
- * build doesn't re-show that surface on the next cold launch (local-first is
- * sticky, not a per-launch nag). Namespaced + versioned like the other local
- * stores; it only matters while there is no session — evaluate() owns the
- * signed-in path and ignores it.
- */
-const PREFERS_LOCAL_STORAGE_KEY = 'lullaby/auth/prefers-local/v1';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const configured = isSupabaseConfigured && supabase != null;
@@ -927,26 +922,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Delete account — the self-scoped `delete_account` RPC removes the
   // auth.users row (cascading the profile, created babies + their shared
   // history, authored events, and invites — see the migration's header).
-  // Ordering: the server delete MUST succeed before any local sign-out, so a
-  // failed RPC leaves the parent signed in and able to retry. The follow-up
-  // sign-out uses scope 'local' — the account row is already gone, so a global
-  // sign-out would call the server with a dead user's token and fail — and the
-  // resulting SIGNED_OUT flows through the normal applySession(null) path
-  // (honoring a standing continue-locally preference). Local-first stores
-  // (local events / local baby / logging-v2) are deliberately untouched, same
-  // hygiene rules as signOut above.
+  //
+  // Ordering is the whole safety story:
+  //  1. The server delete MUST succeed first. A failed RPC clears NOTHING and
+  //     returns false, so the parent stays signed in with all data intact and
+  //     the caller shows the manual email fallback — a failure can never look
+  //     like success.
+  //  2. Only after a verified server delete do we wipe local-first data. Unlike
+  //     signOut (which deliberately preserves the local baby / logs), a full
+  //     account deletion is the ONE transition that erases them — plus the
+  //     onboarding gate/draft, the sticky account decision, and the private
+  //     Reassure prefs/caches — so a later sign-in, even with the same Google
+  //     identity, starts genuinely fresh and never restores the old baby. The
+  //     WHICH lives in the pure `@/data/accountReset` contract; the device wipe
+  //     is `clearLocalAppDataAfterAccountDeletion`. Device theme is kept.
+  //  3. Then drop the local session (scope 'local' — the account row is already
+  //     gone, so a global sign-out would call the server with a dead user's
+  //     token and fail) and route via applySession(null). We also drop the
+  //     sticky "prefers local" flag in memory so we land on the account-entry
+  //     surface, not back in local-only on a now-empty baby.
   const deleteAccount = useCallback(async (): Promise<boolean> => {
     if (!supabase) return false;
     setBusy(true);
     try {
       await deleteAccountRemote();
     } catch (e) {
-      // Recoverable — the account still exists; the caller shows the manual
-      // "email us and we'll remove it" fallback. Dev-only warn, never a LogBox.
+      // Recoverable — the account still exists, so nothing local is cleared; the
+      // caller shows the manual "email us and we'll remove it" fallback. Dev-only
+      // warn, never a LogBox.
       authWarn(`deleteAccount: ${messageFrom(e, 'rpc failed')}`);
       if (mounted.current) setBusy(false);
       return false;
     }
+    // Server delete verified — now the full local reset (see step 2 above).
+    await clearLocalAppDataAfterAccountDeletion();
+    // The persisted prefers-local flag was just cleared; drop the in-memory copy
+    // too so applySession(null) resolves to 'signed-out' (account entry), not a
+    // rehydrated local-only session on the wiped baby.
+    prefersLocalRef.current = false;
     try {
       await supabase.auth.signOut({ scope: 'local' });
     } catch {
