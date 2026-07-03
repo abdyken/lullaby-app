@@ -318,10 +318,10 @@ export default function SettingsScreen() {
                         lineHeight: 18,
                         color: palette.inkSoft,
                       }}>
-                      This permanently deletes your account and every log you{'’'}ve added. If you
-                      created your baby{'’'}s profile, it and its shared history are removed for
-                      all caregivers too. Anything saved only on this phone stays here. This can
-                      {'’'}t be undone.
+                      This permanently deletes your online account and erases this baby{'’'}s
+                      profile and every log from this phone. If you created your baby{'’'}s
+                      profile, it and its shared history are removed for all caregivers too. This
+                      can{'’'}t be undone.
                     </Text>
                     <Pressable
                       accessibilityRole="button"
