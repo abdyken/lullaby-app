@@ -6811,6 +6811,26 @@ check('RE6. dev entitlement stays __DEV__-gated through resolveDevProEntitlement
   );
 });
 
+check('RE7. Restore is reachable everywhere and crash-safe when RevenueCat is unconfigured', () => {
+  // ProProvider.restorePurchases short-circuits with a calm message (never an SDK
+  // call) when RevenueCat was never configured — so Restore cannot crash a build
+  // that enables Pro without keys / the native module, or while signed out.
+  assert.ok(
+    PRO_PROVIDER_SRC.includes('isRevenueCatConfigured'),
+    'restore guards on whether RevenueCat is actually configured',
+  );
+  assert.ok(
+    /errorCode:\s*'not_configured'/.test(PRO_PROVIDER_SRC),
+    'the unconfigured restore path reports a coarse not_configured code',
+  );
+  // The PaywallSheet Restore control is reachable in every state — disabled only
+  // while a restore is in flight — so an Apple reviewer can always tap it.
+  assert.ok(
+    /disabled=\{isRestoring\}/.test(PAYWALL_SHEET_SRC),
+    'Restore is tappable regardless of paywall status (only disabled mid-restore)',
+  );
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SL. Settings links — privacy policy / terms / support rows (Apple review).
 //

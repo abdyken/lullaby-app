@@ -48,6 +48,7 @@ import {
   getRevenueCatCustomerInfo,
   getRevenueCatOffering,
   hasActiveRevenueCatEntitlement,
+  isRevenueCatConfigured,
   logOutRevenueCat,
   purchaseRevenueCatPackage,
   restoreRevenueCatPurchases,
@@ -232,6 +233,17 @@ export function ProProvider({ children }: { children: ReactNode }) {
     setIsRestoring(true);
     setRestoreError(null);
     track('restore_started', { surface: 'paywall' });
+    // Apple-review safety: Restore is reachable from every paywall state and must
+    // never crash when RevenueCat is disabled/unconfigured. If the SDK was never
+    // configured (missing key, unsupported platform, native module absent, or the
+    // user is signed out) degrade to a calm message instead of calling into an
+    // unconfigured SDK.
+    if (!isRevenueCatConfigured()) {
+      setRestoreError('Subscriptions are not available in this version yet.');
+      track('restore_failed', { surface: 'paywall', errorCode: 'not_configured', cancelled: false });
+      setIsRestoring(false);
+      return;
+    }
     const outcome = await restoreRevenueCatPurchases();
     if (outcome.ok) {
       const entitled = hasActiveRevenueCatEntitlement(outcome.customerInfo, entitlementId);
