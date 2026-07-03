@@ -5112,6 +5112,17 @@ check('W7b. Pro public copy stays future-facing for Apple review', () => {
   }
 });
 
+check('W7c. Pro cards show a calm active state to subscribers (no upsell nudge)', () => {
+  // An already-entitled parent must never be nudged to buy what they already
+  // have. Both AccountSheet and Insights entry cards branch on the live isPro
+  // entitlement and render a calm active state instead of the upsell CTA.
+  assert.ok(UPGRADE_CARD_SRC.includes('isPro'), 'UpgradeCard reads the live Pro entitlement');
+  assert.ok(/is active/i.test(UPGRADE_CARD_SRC), 'UpgradeCard shows an active status to subscribers');
+  assert.ok(/unlocked/i.test(UPGRADE_CARD_SRC), 'UpgradeCard tells subscribers their features are unlocked');
+  assert.ok(PRO_PREVIEW_CARD_SRC.includes('isPro ? null'), 'ProPreviewCard hides the upsell CTA for subscribers');
+  assert.ok(/unlocked/i.test(PRO_PREVIEW_CARD_SRC), 'ProPreviewCard shows an active state to subscribers');
+});
+
 check('W8. analytics stays privacy-safe: still no client SELECT, fake-door events kept', () => {
   assert.ok(ANALYTICS_SRC.includes('analytics_events'), 'analytics still targets analytics_events');
   assert.ok(!/\.select\s*\(/.test(ANALYTICS_SRC), 'analytics must never .select() from analytics_events');
