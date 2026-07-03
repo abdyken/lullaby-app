@@ -11,11 +11,17 @@
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useState, type ReactNode } from 'react';
-import { Platform, Pressable, ScrollView, StatusBar, Switch, Text, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StatusBar, Switch, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { InviteCaregiverSheet } from '@/components/auth/InviteCaregiverSheet';
+import {
+  buildSupportMailtoUrl,
+  resolvePrivacyPolicyUrl,
+  resolveSupportEmail,
+  resolveTermsUrl,
+} from '@/lib/appLinks';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/state/AuthProvider';
 import { useTheme } from '@/state/ThemeProvider';
@@ -26,6 +32,60 @@ function BackGlyph({ color }: { color: string }) {
     <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
       <Path d="M14.5 5.5 8 12l6.5 6.5" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
+  );
+}
+
+function ExternalGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9 6h9v9M18 6 6.5 17.5"
+        stroke={color}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/**
+ * A tappable external-destination row inside a SettingsCard: label (+ optional
+ * subtitle) on the left, an outward arrow on the right.
+ */
+function LinkRow({
+  palette,
+  label,
+  subtitle,
+  onPress,
+}: {
+  palette: SurfacePalette;
+  label: string;
+  subtitle?: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="link"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        minHeight: 48,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        opacity: pressed ? 0.6 : 1,
+      })}>
+      <View style={{ flex: 1, paddingRight: 12 }}>
+        <Text style={{ fontFamily: fonts.body, fontSize: 14, color: palette.ink }}>{label}</Text>
+        {subtitle ? (
+          <Text style={{ fontFamily: fonts.body, fontSize: 12, color: palette.inkFaint, marginTop: 2 }}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
+      <ExternalGlyph color={palette.inkFaint} />
+    </Pressable>
   );
 }
 
@@ -77,8 +137,37 @@ export default function SettingsScreen() {
   const [inviteOpen, setInviteOpen] = useState(false);
 
   const appVersion = Constants.expoConfig?.version ?? '1.0.0';
+  const buildNumber = Constants.nativeBuildVersion ?? null;
   const statusBarInset = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
   const topInset = Math.max(insets.top, statusBarInset);
+
+  // Legal/support destinations — env-configurable with safe placeholder
+  // fallbacks (src/lib/appLinks.ts), so these rows always have somewhere to go.
+  const privacyUrl = resolvePrivacyPolicyUrl();
+  const termsUrl = resolveTermsUrl();
+  const supportEmail = resolveSupportEmail();
+
+  // When a device can't open a destination (no browser / no mail app), show a
+  // calm inline note with the address instead of failing silently or crashing.
+  const [legalNotice, setLegalNotice] = useState<string | null>(null);
+  const [supportNotice, setSupportNotice] = useState<string | null>(null);
+  const openExternal = async (url: string, onFail: () => void) => {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      onFail();
+    }
+  };
+  const handleOpenLegal = (url: string) => {
+    setLegalNotice(null);
+    void openExternal(url, () => setLegalNotice(`Couldn’t open the link. You can visit ${url} in your browser.`));
+  };
+  const handleContactSupport = () => {
+    setSupportNotice(null);
+    void openExternal(buildSupportMailtoUrl({ email: supportEmail, appVersion }), () =>
+      setSupportNotice(`Couldn’t open your mail app. You can write to us at ${supportEmail}.`),
+    );
+  };
 
   // Both account actions land on a surface UNDER this screen (AuthGate swaps the
   // tab shell's content), so pop back first — same order as AccountSheet's
@@ -275,6 +364,43 @@ export default function SettingsScreen() {
               Your logs are stored on this phone. Lullaby doesn{'’'}t sell your data or share it
               with anyone.
             </Text>
+            <View style={{ height: 1, backgroundColor: palette.line, marginTop: 12 }} />
+            <LinkRow palette={palette} label="Privacy Policy" onPress={() => handleOpenLegal(privacyUrl)} />
+            <View style={{ height: 1, backgroundColor: palette.line }} />
+            <LinkRow palette={palette} label="Terms of Use" onPress={() => handleOpenLegal(termsUrl)} />
+            {legalNotice && (
+              <Text style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: 18, color: palette.inkFaint }}>
+                {legalNotice}
+              </Text>
+            )}
+          </SettingsCard>
+        </View>
+
+        {/* ---- Support ---- */}
+        <View style={{ marginTop: 18 }}>
+          <SectionLabel palette={palette}>Support</SectionLabel>
+          <SettingsCard palette={palette}>
+            <LinkRow
+              palette={palette}
+              label="Contact support"
+              subtitle={supportEmail}
+              onPress={handleContactSupport}
+            />
+            {supportNotice && (
+              <Text style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: 18, color: palette.inkFaint }}>
+                {supportNotice}
+              </Text>
+            )}
+            <Text
+              style={{
+                fontFamily: fonts.body,
+                fontSize: 12,
+                lineHeight: 18,
+                color: palette.inkFaint,
+                marginTop: 6,
+              }}>
+              Questions, a bug, or an idea for a calmer night — we read every note.
+            </Text>
           </SettingsCard>
         </View>
 
@@ -285,7 +411,7 @@ export default function SettingsScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <Text style={{ fontFamily: fonts.body, fontSize: 14, color: palette.ink }}>Version</Text>
               <Text style={{ fontFamily: fonts.body, fontSize: 13, color: palette.inkFaint }}>
-                {appVersion}
+                {buildNumber ? `${appVersion} (${buildNumber})` : appVersion}
               </Text>
             </View>
             <View style={{ height: 1, backgroundColor: palette.line, marginVertical: 12 }} />
