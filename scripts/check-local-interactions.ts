@@ -67,6 +67,15 @@ import {
   LOGGING_STORAGE_KEY,
   isGuestDataPreserved,
 } from '../src/data/guestData';
+// Account deletion — the local-data RESET contract (mirror of guestData). Unlike
+// every other auth transition, a verified account deletion CLEARS local-first
+// data so a later sign-in with the same identity starts genuinely fresh.
+import {
+  ACCOUNT_LOCAL_DATA_KEYS,
+  ACCOUNT_LOCAL_DATA_PREFIXES,
+  ACCOUNT_RESET_PRESERVED_KEYS,
+  selectAccountDeletionKeys,
+} from '../src/data/accountReset';
 import {
   ONBOARDING_COMPLETE_KEY,
   isForceOnboardingEnabled,
@@ -236,6 +245,18 @@ import {
   buildInviteShareMessage,
   resolveAppInstallUrl,
 } from '../src/components/auth/inviteShareMessage';
+// Settings links (privacy / terms / support) — the pure env-or-placeholder
+// resolvers behind the Settings screen's link rows. Dependency-free leaf,
+// covered directly in §SL.
+import {
+  buildSupportMailtoUrl,
+  DEFAULT_PRIVACY_POLICY_URL,
+  DEFAULT_SUPPORT_EMAIL,
+  DEFAULT_TERMS_URL,
+  resolvePrivacyPolicyUrl,
+  resolveSupportEmail,
+  resolveTermsUrl,
+} from '../src/lib/appLinks';
 // Pro foundation (Phase 1) — pure config + gate leaves. proConfig reads only
 // process.env (and re-exports the preview flag); proGates is a dependency-free
 // predicate leaf. Both are safe to load here and are covered directly in §W.
@@ -262,6 +283,7 @@ import { buildWeeklyExportText } from '../src/features/insights/buildWeeklyExpor
 import type { InsightsViewModel } from '../src/features/insights/types';
 // Reassure v2 — the pure triage router / red-flag guardrail / night-window
 // recap leaves. All are react-native-free by design (source-scanned in §X).
+import { clinicalContentVisible } from '../src/features/reassure/domain/contentGate';
 import { REDFLAGS, matchesRedFlag } from '../src/features/reassure/domain/redflags';
 import { normalizeAsk, route } from '../src/features/reassure/domain/router';
 import { classifyScope } from '../src/features/reassure/domain/scope';
@@ -1595,13 +1617,23 @@ check('GP4. AuthProvider never bulk-clears or removes a guest-owned store', () =
 });
 
 check('GP5. signOut clears only the Supabase session, never local-first data', () => {
-  // Isolate the signOut callback body (declaration → the next callback, clearError).
+  // Isolate the signOut callback body (declaration → the deleteAccount doc
+  // comment that immediately follows it). deleteAccount sits between signOut and
+  // clearError and DOES legitimately wipe local data on a verified delete — its
+  // doc comment even names the wipe helper — so the boundary must stop at that
+  // comment, otherwise the guard would read the delete path as a sign-out wipe.
   const start = AUTH_PROVIDER_SRC.indexOf('const signOut = useCallback');
-  const end = AUTH_PROVIDER_SRC.indexOf('const clearError', start);
+  const end = AUTH_PROVIDER_SRC.indexOf('// Delete account —', start);
   assert.ok(start !== -1 && end !== -1 && end > start, 'could not locate the signOut callback');
   const signOutBody = AUTH_PROVIDER_SRC.slice(start, end);
   assert.ok(signOutBody.includes('supabase.auth.signOut()'), 'signOut must clear the Supabase session');
-  for (const forbidden of ['clearLocalEventStorage', 'removeItem', 'multiRemove', 'AsyncStorage']) {
+  for (const forbidden of [
+    'clearLocalEventStorage',
+    'clearLocalAppDataAfterAccountDeletion', // the delete-account wipe must never run on a plain sign-out
+    'removeItem',
+    'multiRemove',
+    'AsyncStorage',
+  ]) {
     assert.ok(!signOutBody.includes(forbidden), `signOut must not reference ${forbidden} (would touch guest data)`);
   }
 });
@@ -1638,6 +1670,10 @@ const ACCOUNT_SHEET_SRC = readFileSync(
 );
 const TONIGHT_SRC = readFileSync(
   new URL('../src/app/(tabs)/index.tsx', import.meta.url),
+  'utf8',
+);
+const HANDOFF_CARD_SRC = readFileSync(
+  new URL('../src/components/HandoffCard.tsx', import.meta.url),
   'utf8',
 );
 const BABY_HEADER_SRC = readFileSync(
@@ -1678,6 +1714,10 @@ check('AE4. the account entry keeps "Continue locally" and a calm state when Sup
   assert.ok(
     ACCOUNT_ENTRY_SRC.includes('isSupabaseConfigured'),
     'the entry must adapt to an unconfigured build, not hide silently',
+  );
+  assert.ok(
+    ACCOUNT_ENTRY_SRC.includes('Accounts are not set up in this build yet'),
+    'unconfigured account entry must plainly say accounts are unavailable in this build',
   );
 });
 
@@ -1722,6 +1762,61 @@ check('AE7. the main app has an explicit, labeled account entry (not only the ba
   );
   // …and Tonight actually wires it.
   assert.ok(TONIGHT_SRC.includes('onAccount='), 'Tonight must wire the dedicated account entry');
+});
+
+check('AE8. public account entry copy is truthful for local-only Shape A', () => {
+  for (const honest of ['Saved on this device', 'Optional account', 'Privacy-first']) {
+    assert.ok(ACCOUNT_ENTRY_SRC.includes(honest), `account entry has honest chip: ${honest}`);
+  }
+  for (const [name, src] of [
+    ['AccountEntryScreen', ACCOUNT_ENTRY_SRC],
+    ['AccountSheet', ACCOUNT_SHEET_SRC],
+    ['AuthScreen', readFileSync(new URL('../src/components/auth/AuthScreen.tsx', import.meta.url), 'utf8')],
+    ['InviteCaregiverSheet', readFileSync(new URL('../src/components/auth/InviteCaregiverSheet.tsx', import.meta.url), 'utf8')],
+    ['Settings', readFileSync(new URL('../src/app/settings.tsx', import.meta.url), 'utf8')],
+  ] as const) {
+    for (const stale of [
+      '<ValueChip label="Backup" />',
+      '<ValueChip label="Sync" />',
+      '<ValueChip label="Caregiver sharing" />',
+      'back up your baby',
+      'pick up on another device',
+      'Back up and sync your logs',
+      'Account backup and sync turn on',
+      'Your night log is shared with your caregivers on this baby',
+      'so you both keep the same night log',
+    ]) {
+      assert.ok(!src.includes(stale), `${name} must not advertise unavailable account/sync/sharing copy`);
+    }
+  }
+});
+
+check('AE9. Tonight handoff copy is local-only and caregiver invites are inactive for Shape A', () => {
+  assert.ok(
+    HANDOFF_CARD_SRC.includes('Tonight’s log is saved on this device.'),
+    'HandoffCard must say the log is saved on this device',
+  );
+  assert.ok(HANDOFF_CARD_SRC.includes('Updated just now.'), 'HandoffCard must use local update copy');
+  for (const stale of [
+    'Syncing…',
+    'Synced just now',
+    'shared with your caregivers',
+    'stay in sync',
+    'Both caregivers are ready',
+  ]) {
+    assert.ok(!HANDOFF_CARD_SRC.includes(stale), `HandoffCard must not render stale copy: ${stale}`);
+  }
+
+  const settingsSrc = readFileSync(new URL('../src/app/settings.tsx', import.meta.url), 'utf8');
+  for (const [name, src] of [
+    ['AccountSheet', ACCOUNT_SHEET_SRC],
+    ['Settings', settingsSrc],
+  ] as const) {
+    assert.ok(src.includes('Caregiver invites'), `${name} keeps a future-facing invite row`);
+    assert.ok(src.includes('Coming later. This build keeps logs on this device.'), `${name} says invite is later`);
+    assert.ok(!src.includes('<InviteCaregiverSheet'), `${name} must not mount the active invite sheet`);
+    assert.ok(!src.includes('setInviteOpen'), `${name} must not open the active invite flow`);
+  }
 });
 
 // OC. OAuth / auth deep-link callback route. Supabase redirects Google sign-in
@@ -5001,6 +5096,22 @@ check('W7. fake-door preview survives: preview mode resolves and the interest an
   assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('export_tapped'"), 'ProPreviewCard fires export_tapped');
 });
 
+check('W7b. Pro public copy stays future-facing for Apple review', () => {
+  for (const [name, src] of [
+    ['UpgradeCard.tsx', UPGRADE_CARD_SRC],
+    ['ProPreviewCard.tsx', PRO_PREVIEW_CARD_SRC],
+    ['PaywallSheet.tsx', PAYWALL_SHEET_SRC],
+  ] as const) {
+    assert.ok(
+      src.includes('Fuller history') || src.includes('gentle weekly recaps') || src.includes('Export-ready summaries'),
+      `${name} keeps softened future-facing Pro copy`,
+    );
+    for (const stale of ['doctor-ready', 'more caregivers', 'share with your pediatrician']) {
+      assert.ok(!src.includes(stale), `${name} must not include stale Pro claim: ${stale}`);
+    }
+  }
+});
+
 check('W8. analytics stays privacy-safe: still no client SELECT, fake-door events kept', () => {
   assert.ok(ANALYTICS_SRC.includes('analytics_events'), 'analytics still targets analytics_events');
   assert.ok(!/\.select\s*\(/.test(ANALYTICS_SRC), 'analytics must never .select() from analytics_events');
@@ -6622,6 +6733,73 @@ check('PC7. local storage parse handles empty/corrupt values calmly', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// RG. Reassure draft-content release gate (Apple review safety posture)
+//
+// REASSURE_CONTENT.status is the clinician sign-off flag. Until it flips to
+// 'approved', the placeholder clinical KB blocks must stay out of public
+// builds; dev builds keep them for QA. Triage escalation and the non-medical
+// guides are never gated — pointing at a real professional is always safe.
+// ─────────────────────────────────────────────────────────────────────────────
+
+check('RG1. the pure gate: dev builds see draft content, public builds need approval', () => {
+  assert.equal(clinicalContentVisible(true), true, 'dev builds keep draft content visible for QA');
+  assert.equal(
+    clinicalContentVisible(false),
+    REASSURE_CONTENT.status === 'approved',
+    'public builds show clinical KB content only after clinician sign-off',
+  );
+});
+
+check('RG2. both clinical render sites consult the gate; triage stays ungated', () => {
+  for (const [name, src] of [
+    ['AnswerCard', RX_ANSWERCARD_SRC],
+    ['reassure screen', RX_REASSURE_SCREEN_SRC],
+  ] as const) {
+    assert.ok(
+      src.includes('clinicalContentVisible(__DEV__)'),
+      `${name} consults the gate with the real __DEV__`,
+    );
+  }
+  // The clinical KB blocks render only behind the gate…
+  assert.ok(
+    RX_ANSWERCARD_SRC.includes("result.kind === 'topic' && showClinical"),
+    'AnswerCard shows the clinical answer blocks only when the gate allows',
+  );
+  // …the gated replacement is a pediatrician pointer, not silence…
+  assert.ok(
+    RX_ANSWERCARD_SRC.includes("result.kind === 'topic' && !showClinical"),
+    'a gated topic still gets a calm bounded card',
+  );
+  // …and the triage branch has no gate anywhere near it (escalation is never hidden).
+  assert.ok(
+    RX_ANSWERCARD_SRC.includes("result.kind === 'triage' ?") &&
+      !RX_ANSWERCARD_SRC.includes("result.kind === 'triage' && showClinical"),
+    'triage renders unconditionally',
+  );
+  // The topic accordion (all-KB surface) is gated on the screen.
+  assert.ok(
+    RX_REASSURE_SCREEN_SRC.includes('showClinical ? (') &&
+      RX_REASSURE_SCREEN_SRC.includes('<TopicAccordion'),
+    'the Common-tonight accordion renders only behind the gate',
+  );
+});
+
+check('RG3. the Reassure screen states plainly that it is not medical advice', () => {
+  assert.ok(
+    RX_REASSURE_SCREEN_SRC.includes('not medical advice'),
+    'the screen carries an explicit not-medical-advice statement',
+  );
+  assert.ok(
+    RX_REASSURE_SCREEN_SRC.includes('General information, not medical advice.'),
+    'the quiet persistent disclaimer is intact',
+  );
+  assert.ok(
+    RX_REASSURE_SCREEN_SRC.includes('doesn’t diagnose or treat'),
+    'the bounded-promise card is intact',
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // RE. Release env hygiene — .env.example safe beta defaults (docs/release-env.md)
 //
 // Beta posture: Pro is OFF unless a build explicitly enables it AND provides
@@ -6653,6 +6831,9 @@ check('RE1. .env.example documents the full EXPO_PUBLIC env surface', () => {
     'EXPO_PUBLIC_REVENUECAT_OFFERING_ID',
     'EXPO_PUBLIC_THEME_REVEAL_DURATION_MS',
     'EXPO_PUBLIC_APP_INSTALL_URL',
+    'EXPO_PUBLIC_PRIVACY_POLICY_URL',
+    'EXPO_PUBLIC_TERMS_URL',
+    'EXPO_PUBLIC_SUPPORT_EMAIL',
   ];
   for (const name of required) {
     assert.ok(envExampleValue(name) !== null, `.env.example must document ${name}=`);
@@ -6726,6 +6907,326 @@ check('RE6. dev entitlement stays __DEV__-gated through resolveDevProEntitlement
     PRO_PROVIDER_SRC.includes('resolveDevProEntitlement(__DEV__)'),
     'ProProvider passes the real __DEV__',
   );
+});
+
+check('RE7. Restore is reachable everywhere and crash-safe when RevenueCat is unconfigured', () => {
+  // ProProvider.restorePurchases short-circuits with a calm message (never an SDK
+  // call) when RevenueCat was never configured — so Restore cannot crash a build
+  // that enables Pro without keys / the native module, or while signed out.
+  assert.ok(
+    PRO_PROVIDER_SRC.includes('isRevenueCatConfigured'),
+    'restore guards on whether RevenueCat is actually configured',
+  );
+  assert.ok(
+    /errorCode:\s*'not_configured'/.test(PRO_PROVIDER_SRC),
+    'the unconfigured restore path reports a coarse not_configured code',
+  );
+  // The PaywallSheet Restore control is reachable in every state — disabled only
+  // while a restore is in flight — so an Apple reviewer can always tap it.
+  assert.ok(
+    /disabled=\{isRestoring\}/.test(PAYWALL_SHEET_SRC),
+    'Restore is tappable regardless of paywall status (only disabled mid-restore)',
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SL. Settings links — privacy policy / terms / support rows (Apple review).
+//
+// The Settings screen must always offer a Privacy Policy link, a Terms link,
+// and a support contact. Destinations are env-configurable with safe
+// placeholder fallbacks (src/lib/appLinks.ts), and opening one must never be
+// able to crash the screen when a device has no browser / mail app.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SETTINGS_SCREEN_SRC = readFileSync(new URL('../src/app/settings.tsx', import.meta.url), 'utf8');
+const APP_LINKS_SRC = readFileSync(new URL('../src/lib/appLinks.ts', import.meta.url), 'utf8');
+
+check('SL1. link resolvers fall back to placeholders on unset/blank and trim overrides', () => {
+  assert.equal(resolvePrivacyPolicyUrl(undefined), DEFAULT_PRIVACY_POLICY_URL);
+  assert.equal(resolvePrivacyPolicyUrl(''), DEFAULT_PRIVACY_POLICY_URL);
+  assert.equal(resolvePrivacyPolicyUrl('   '), DEFAULT_PRIVACY_POLICY_URL);
+  assert.equal(resolvePrivacyPolicyUrl('  https://example.test/privacy  '), 'https://example.test/privacy');
+  assert.equal(resolveTermsUrl(undefined), DEFAULT_TERMS_URL);
+  assert.equal(resolveTermsUrl('  https://example.test/terms  '), 'https://example.test/terms');
+  assert.equal(resolveSupportEmail(undefined), DEFAULT_SUPPORT_EMAIL);
+  assert.equal(resolveSupportEmail('  care@example.test  '), 'care@example.test');
+  // The placeholders themselves are well-formed destinations, never empty.
+  assert.match(DEFAULT_PRIVACY_POLICY_URL, /^https:\/\//);
+  assert.match(DEFAULT_TERMS_URL, /^https:\/\//);
+  assert.match(DEFAULT_SUPPORT_EMAIL, /^[^@\s]+@[^@\s]+$/);
+});
+
+check('SL2. the support mailto carries only the address and an app-version subject', () => {
+  const url = buildSupportMailtoUrl({ email: 'care@example.test', appVersion: '1.2.3' });
+  assert.ok(url.startsWith('mailto:care@example.test?subject='), 'mailto + subject shape');
+  assert.ok(url.includes(encodeURIComponent('Lullaby feedback (v1.2.3)')), 'subject names the app version');
+  assert.ok(!/body=/.test(url), 'no prefilled body — nothing from the device rides along');
+});
+
+check('SL3. Settings renders privacy/terms/support rows through the guarded opener', () => {
+  for (const row of ['Privacy Policy', 'Terms of Use', 'Contact support']) {
+    assert.ok(SETTINGS_SCREEN_SRC.includes(`label="${row}"`), `Settings has a ${row} row`);
+  }
+  for (const resolver of ['resolvePrivacyPolicyUrl()', 'resolveTermsUrl()', 'resolveSupportEmail()']) {
+    assert.ok(SETTINGS_SCREEN_SRC.includes(resolver), `destinations come from ${resolver}`);
+  }
+  // Every open goes through the single try/catch wrapper with an inline
+  // fallback — Linking.openURL is never called bare.
+  const openSites = SETTINGS_SCREEN_SRC.split('Linking.openURL').length - 1;
+  assert.equal(openSites, 1, 'exactly one Linking.openURL site (inside openExternal)');
+  assert.match(
+    SETTINGS_SCREEN_SRC,
+    /try\s*\{\s*await Linking\.openURL\(url\);\s*\}\s*catch\s*\{/,
+    'the opener catches failure instead of crashing',
+  );
+});
+
+check('SL4. no store URL, secret, or payment reference rides into the link surfaces', () => {
+  for (const src of [APP_LINKS_SRC, SETTINGS_SCREEN_SRC]) {
+    for (const banned of ['apps.apple.com', 'itunes.apple.com', 'play.google.com', 'testflight.apple.com']) {
+      assert.ok(!src.includes(banned), `must not hardcode ${banned}`);
+    }
+    for (const secret of ['ANTHROPIC_API_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'ANON_KEY']) {
+      assert.ok(!src.includes(secret), `must not reference ${secret}`);
+    }
+  }
+  assert.ok(!/Stripe|checkout/i.test(APP_LINKS_SRC), 'no payment link sneaks into appLinks');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §DA. Delete account (Apple 5.1.1(v)) — Settings offers honest in-app account
+// deletion: an armed two-step confirm, a self-scoped definer RPC, the local
+// session dropped only AFTER the server verifiably deleted the account, and a
+// manual email fallback on failure. Local-first stores survive, same as
+// sign-out.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DELETE_ACCOUNT_MIGRATION_SRC = readFileSync(
+  new URL('../supabase/migrations/20260703060000_delete_account.sql', import.meta.url),
+  'utf8',
+);
+const SYNC_ACCOUNT_SRC = readFileSync(new URL('../src/sync/account.ts', import.meta.url), 'utf8');
+
+check('DA1. Settings arms Delete account behind an explicit second confirm tap', () => {
+  assert.ok(SETTINGS_SCREEN_SRC.includes('accessibilityLabel="Delete account"'), 'the entry row exists');
+  assert.ok(
+    SETTINGS_SCREEN_SRC.includes('accessibilityLabel="Permanently delete account"'),
+    'the destructive tap is a separate, explicit confirm',
+  );
+  assert.ok(
+    SETTINGS_SCREEN_SRC.includes('accessibilityLabel="Keep my account"'),
+    'the confirm block offers a calm way out',
+  );
+  assert.ok(
+    /can\s*\{'’'\}t be undone/.test(SETTINGS_SCREEN_SRC),
+    'the confirm copy states permanence plainly',
+  );
+});
+
+check('DA2. the delete_account RPC is self-scoped and locked to signed-in callers', () => {
+  const src = DELETE_ACCOUNT_MIGRATION_SRC;
+  assert.ok(src.includes('security definer'), 'definer RPC — deleting auth.users needs privilege');
+  assert.ok(src.includes('auth.uid()'), 'the target comes from the token, never a parameter');
+  assert.ok(src.includes('create or replace function public.delete_account()'), 'takes no parameters — cannot target another user');
+  assert.ok(src.includes('if v_uid is null then'), 'anonymous callers are rejected inside the function too');
+  assert.ok(
+    src.includes('delete from public.events where caregiver_id = v_uid'),
+    'authored events are cleared first (events.caregiver_id is NOT NULL with ON DELETE SET NULL)',
+  );
+  assert.ok(
+    src.includes('delete from auth.users where id = v_uid'),
+    'the account row itself is deleted — real deletion, not a soft flag',
+  );
+  assert.ok(src.includes('revoke all on function public.delete_account() from public'), 'not callable by PUBLIC');
+  assert.ok(src.includes('revoke all on function public.delete_account() from anon'), 'not callable anonymously');
+  assert.ok(src.includes('grant execute on function public.delete_account() to authenticated'), 'signed-in self-service only');
+});
+
+check('DA3. deleteAccount wipes local data then drops the session, only after the server delete', () => {
+  const body = AUTH_PROVIDER_SRC.slice(
+    AUTH_PROVIDER_SRC.indexOf('const deleteAccount'),
+    AUTH_PROVIDER_SRC.indexOf('const clearError'),
+  );
+  const rpcAt = body.indexOf('await deleteAccountRemote()');
+  // The failure-path return is the FIRST `return false` AFTER the RPC call — not
+  // the `if (!supabase) return false` guard that precedes it.
+  const failReturnAt = rpcAt === -1 ? -1 : body.indexOf('return false', rpcAt);
+  const localWipeAt = body.indexOf('clearLocalAppDataAfterAccountDeletion(');
+  const localSignOutAt = body.indexOf("signOut({ scope: 'local' })");
+  assert.ok(rpcAt !== -1, 'the provider calls the sync-layer RPC wrapper first');
+  assert.ok(failReturnAt !== -1, 'a failed RPC resolves false so the UI can stay honest');
+  assert.ok(localWipeAt !== -1, 'a verified delete wipes local-first data (the fresh-restart fix)');
+  assert.ok(localSignOutAt !== -1, "the follow-up sign-out is scope 'local' (the server user no longer exists)");
+  // Order: RPC → (on failure) return false BEFORE any wipe → local wipe → session drop.
+  assert.ok(rpcAt < failReturnAt, 'the failure return sits after the RPC call');
+  assert.ok(
+    failReturnAt < localWipeAt,
+    'the failure path returns BEFORE the wipe — a failed delete clears nothing',
+  );
+  assert.ok(localWipeAt < localSignOutAt, 'local data is cleared before (and around) the session drop');
+  // The in-memory account decision is reset so we land on account-entry, not local-only.
+  assert.ok(
+    body.includes('prefersLocalRef.current = false'),
+    'the sticky prefers-local flag is dropped so applySession(null) lands on account entry',
+  );
+  assert.ok(
+    !body.includes('setErrorMessage('),
+    'no provider errorMessage — it would resurface as a stale note on the account surfaces later',
+  );
+});
+
+check('DA4. a failed deletion surfaces the manual email fallback, never a fake success', () => {
+  assert.ok(
+    SETTINGS_SCREEN_SRC.includes('const deleted = await deleteAccount()'),
+    'the screen awaits the verified server result before leaving',
+  );
+  assert.ok(/Couldn’t delete your account just now/.test(SETTINGS_SCREEN_SRC), 'calm failure copy');
+  assert.ok(SETTINGS_SCREEN_SRC.includes('${supportEmail}'), 'the fallback names the real support address');
+  assert.ok(SYNC_ACCOUNT_SRC.includes("rpc('delete_account')"), 'deletion goes through the self-scoped RPC');
+  assert.ok(
+    !SYNC_ACCOUNT_SRC.includes('SERVICE_ROLE'),
+    'no service-role key anywhere near the client deletion path',
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DR. Delete Account → FULL local reset (fix/delete-account-full-local-reset).
+//
+// The reported bug: after deleting the account and signing back in with the same
+// Google account, the app restored the old baby name/logs — because a verified
+// server delete used to preserve the local stores (same hygiene as sign-out).
+// The fix: a verified deletion now ALSO wipes this device's local-first data via
+// the pure `@/data/accountReset` contract + `@/data/accountResetStorage` wipe, so
+// a fresh sign-in is genuinely fresh. Sign-out still preserves everything (GP*).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ACCOUNT_RESET_STORAGE_SRC = readFileSync(
+  new URL('../src/data/accountResetStorage.ts', import.meta.url),
+  'utf8',
+);
+
+// A realistic full AsyncStorage keyset: the guest stores, the onboarding
+// gate/draft, the account decision, the private Reassure prefs, per-baby/night
+// caches, per-context cursors — plus the device theme (which must SURVIVE).
+function seedFullDeviceSnapshot(): Record<string, string> {
+  return {
+    ...seedGuestSnapshot(),
+    'lullaby.onboarding.v2.complete': 'true',
+    'lullaby.onboarding.v2.draft': JSON.stringify({ babyName: 'Aria', birthDate: '2026-05-01' }),
+    'lullaby/auth/prefers-local/v1': 'true',
+    'lullaby.coach.firstLog.v1.dismissed': 'true',
+    'lullaby.reassure.aiNightReadConsent.v1': 'granted',
+    'lullaby.reassure.pediatricianPhone.v1': '+1 555 123 4567',
+    'lullaby/reassure/night-read/v1:local-baby:2026-06-16': 'a soft note about Aria’s night',
+    'lullaby/handoff-cursor/local': '1718500000000',
+    'lullaby/handoff-cursor/user-1:local-baby': '1718500000000',
+    'lullaby.surfaceMode': 'night', // device config, NOT account data → survives
+  };
+}
+
+// Apply the real selector to model exactly what the device wipe removes.
+function simulateAccountDeletionWipe(before: Record<string, string>): Record<string, string> {
+  const toRemove = new Set(selectAccountDeletionKeys(Object.keys(before)));
+  const after: Record<string, string> = {};
+  for (const [key, value] of Object.entries(before)) {
+    if (!toRemove.has(key)) after[key] = value;
+  }
+  return after;
+}
+
+check('DR1. the reset key set is a superset of the guest stores + onboarding + account decision', () => {
+  const keys = ACCOUNT_LOCAL_DATA_KEYS as readonly string[];
+  // Every guest-owned store (baby + both event stores) is cleared on deletion —
+  // the inverse of the preservation contract that protects them on sign-out.
+  for (const guestKey of GUEST_OWNED_STORAGE_KEYS) {
+    assert.ok(keys.includes(guestKey), `${guestKey} must be cleared on account deletion`);
+  }
+  // …plus the onboarding gate/draft and the sticky account decision.
+  assert.ok(keys.includes('lullaby.onboarding.v2.complete'), 'onboarding must re-run after deletion');
+  assert.ok(keys.includes('lullaby.onboarding.v2.draft'), 'no stale draft may re-prefill the old baby');
+  assert.ok(keys.includes('lullaby/auth/prefers-local/v1'), 'the account decision resets to account-entry');
+  // The device theme is NOT account data → it is deliberately preserved.
+  assert.ok(!keys.includes('lullaby.surfaceMode'), 'device theme is not swept into the account wipe');
+  assert.deepEqual([...ACCOUNT_RESET_PRESERVED_KEYS], ['lullaby.surfaceMode']);
+});
+
+check('DR2. the selector clears every user key from a full snapshot and keeps only device config', () => {
+  const before = seedFullDeviceSnapshot();
+  const removed = new Set(selectAccountDeletionKeys(Object.keys(before)));
+  // Prefix-keyed stores (night-read cache, handoff cursors) are matched + cleared.
+  assert.ok(removed.has('lullaby/reassure/night-read/v1:local-baby:2026-06-16'), 'per-night AI cache cleared by prefix');
+  assert.ok(removed.has('lullaby/handoff-cursor/local'), 'local cursor cleared by prefix');
+  assert.ok(removed.has('lullaby/handoff-cursor/user-1:local-baby'), 'per-account cursor cleared by prefix');
+  // The private Reassure prefs (the parent's own data) are cleared.
+  assert.ok(removed.has('lullaby.reassure.pediatricianPhone.v1'), "the parent's own phone number is cleared");
+  assert.ok(removed.has('lullaby.reassure.aiNightReadConsent.v1'), 'AI consent resets for the fresh account');
+  assert.ok(removed.has('lullaby.coach.firstLog.v1.dismissed'), 'the first-log coach re-arms for the fresh baby');
+  // Exactly one key survives: the device theme.
+  const after = simulateAccountDeletionWipe(before);
+  assert.deepEqual(Object.keys(after), ['lullaby.surfaceMode']);
+  assert.equal(after['lullaby.surfaceMode'], 'night');
+  // At least one prefix exists so DR2 can't pass vacuously.
+  assert.ok((ACCOUNT_LOCAL_DATA_PREFIXES as readonly string[]).length >= 1);
+});
+
+check('DR3. deletion clears the local baby profile AND the logs (so re-login restores neither)', () => {
+  const before = seedFullDeviceSnapshot();
+  // Precondition: the guest snapshot really holds a restorable baby named "Aria".
+  assert.equal(parseLocalBaby(before[LOCAL_BABY_STORAGE_KEY])?.baby.name, 'Aria');
+  const beforeEvents = parsePersistedState(before[LOCAL_EVENTS_STORAGE_KEY]);
+  assert.ok(beforeEvents !== null && beforeEvents.events.length > 0, 'there are local logs to lose');
+
+  const after = simulateAccountDeletionWipe(before);
+  // The baby profile store is gone → nothing to restore.
+  assert.equal(after[LOCAL_BABY_STORAGE_KEY], undefined, 'local baby profile is erased');
+  assert.equal(parseLocalBaby(after[LOCAL_BABY_STORAGE_KEY] ?? null), null, 'no old baby can be re-hydrated');
+  // Both event stores are gone → no old logs/timeline.
+  assert.equal(after[LOCAL_EVENTS_STORAGE_KEY], undefined, 'legacy local night is erased');
+  assert.equal(after[LOGGING_STORAGE_KEY], undefined, 'logging-v2 snapshot is erased');
+  // The preservation predicate would (correctly) report this as data loss —
+  // proving the wipe is real, and that it is the OPPOSITE of the sign-out path.
+  assert.ok(!isGuestDataPreserved(before, after));
+});
+
+check('DR4. deletion resets onboarding so a fresh baby setup is required and never re-prefilled', () => {
+  const before = seedFullDeviceSnapshot();
+  // Precondition: onboarding was complete and a draft named the old baby.
+  assert.equal(before['lullaby.onboarding.v2.complete'], 'true');
+  assert.equal(JSON.parse(before['lullaby.onboarding.v2.draft']).babyName, 'Aria');
+
+  const after = simulateAccountDeletionWipe(before);
+  assert.equal(after['lullaby.onboarding.v2.complete'], undefined, 'onboarding gate reopens → setup runs again');
+  assert.equal(after['lullaby.onboarding.v2.draft'], undefined, 'no draft survives to re-prefill the old name/date');
+  // The account decision is cleared too, so the next launch resolves to
+  // account-entry, not a local-only rehydrate of the (now empty) baby.
+  assert.equal(after['lullaby/auth/prefers-local/v1'], undefined, 'the sticky local-first flag is cleared');
+});
+
+check('DR5. a FAILED remote delete clears nothing (order-guarded in the provider)', () => {
+  // The runtime order is guarded in DA3 (the failure path returns BEFORE the
+  // wipe). Here we pin the structural contract: the ONLY caller of the local
+  // wipe is deleteAccount, and it is invoked exactly once (never on sign-out /
+  // any other transition), so nothing can clear local data outside that path.
+  const wipeCalls = AUTH_PROVIDER_SRC.match(/clearLocalAppDataAfterAccountDeletion\s*\(/g) ?? [];
+  assert.equal(wipeCalls.length, 1, 'the local wipe is invoked exactly once, in deleteAccount only');
+  // The single call site lives inside the deleteAccount callback (not signOut or
+  // any other transition) — GP5 separately proves signOut never references it.
+  const deleteBody = AUTH_PROVIDER_SRC.slice(
+    AUTH_PROVIDER_SRC.indexOf('const deleteAccount'),
+    AUTH_PROVIDER_SRC.indexOf('const clearError'),
+  );
+  assert.ok(
+    /clearLocalAppDataAfterAccountDeletion\s*\(/.test(deleteBody),
+    'the wipe call sits inside deleteAccount',
+  );
+});
+
+check('DR6. the device wipe scans the keyset and batch-removes via the pure selector, best-effort', () => {
+  const src = ACCOUNT_RESET_STORAGE_SRC;
+  assert.ok(src.includes('AsyncStorage.getAllKeys()'), 'it scans the live keyset (covers prefix-keyed stores)');
+  assert.ok(src.includes('selectAccountDeletionKeys('), 'it removes exactly what the pure contract selects');
+  assert.ok(src.includes('AsyncStorage.multiRemove('), 'it removes them in a single batch');
+  assert.ok(src.includes('try {') && src.includes('catch'), 'best-effort — a failed wipe never traps the parent');
 });
 
 runAsyncChecks()

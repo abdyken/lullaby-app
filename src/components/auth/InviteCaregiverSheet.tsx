@@ -132,7 +132,7 @@ export function InviteCaregiverSheet({ onClose }: { onClose: () => void }) {
           </Text>
           <Text
             style={{ fontFamily: fonts.body, fontSize: 13, lineHeight: 19, color: colors.inkSoft, marginTop: 4 }}>
-            Share a code with your partner or caregiver so you both keep the same night log.
+            Share a code with your partner or caregiver when account features are enabled.
           </Text>
 
           {/* Role hint */}

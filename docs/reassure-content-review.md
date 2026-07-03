@@ -39,6 +39,7 @@ metadata shape and that the placeholder tags survive while status is draft.
 | 12 | Night-read LLM system prompt | `supabase/functions/_shared/reassureContent.ts` (`NIGHT_READ_SYSTEM_PROMPT`) |
 | 13 | Topic-polish LLM system prompt | same (`TOPIC_POLISH_SYSTEM_PROMPT`) |
 | 14 | Recap read templates (descriptive register) | `src/features/reassure/domain/recap.ts` (`recapReadText`) — guarded by smoke §X12 (no judgement vocabulary) |
+| 15 | Draft-gate review-pending copy (line + pediatrician pointer) | `src/features/reassure/components/AnswerCard.tsx` (`REVIEW_PENDING_LINE` / `REVIEW_PENDING_BODY`) — shown in public builds while status is draft, guarded by smoke §RG |
 
 ## Review process
 
@@ -56,3 +57,4 @@ metadata shape and that the placeholder tags survive while status is draft.
 | Date | Version | Change | Reviewer |
 |------|---------|--------|----------|
 | 2026-07-02 | 2026-07-02 | Initial port from the demo prototype — DRAFT, unreviewed | — |
+| 2026-07-03 | 2026-07-02 | Draft-content release gate: while status is `draft`, public (non-dev) builds hide the clinical KB blocks (topic answers + Common-tonight accordion) behind `domain/contentGate.ts`, replaced by a non-clinical pediatrician pointer; screen subtitle now states "not medical advice". No KB/red-flag strings changed. Smoke §RG1–RG3. | — |

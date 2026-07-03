@@ -1,0 +1,28 @@
+{
+  "task": "02-local-only-truthful-copy",
+  "status": "done",
+  "branch": "fix/apple-p0-02-local-only-truthful-copy-manual",
+  "summary": "Updated public account-entry and account-adjacent copy for Shape A local-only v1. The entry chips no longer advertise Backup, Sync, or Caregiver sharing; account-disabled/unconfigured surfaces now plainly say accounts are not set up in this build yet; nearby auth/account/invite copy avoids promising backup, multi-device pickup, shared logs, or caregiver visibility.",
+  "files_changed": [
+    "src/components/auth/AccountEntryScreen.tsx",
+    "src/components/auth/AuthScreen.tsx",
+    "src/components/auth/AccountSheet.tsx",
+    "src/components/auth/InviteCaregiverSheet.tsx",
+    "src/app/settings.tsx",
+    "src/components/BabyHeader.tsx",
+    "scripts/check-local-interactions.ts",
+    ".claude-night/reports/02-local-only-truthful-copy.status.json"
+  ],
+  "validation": {
+    "npm run typecheck": "passed",
+    "npm run lint": "passed",
+    "npm run check:local-interactions": "passed (389/389)",
+    "git diff --check": "passed"
+  },
+  "notes": [
+    "No sync, backup, or caregiver-sharing feature was built.",
+    "Future feature code was preserved; only public copy and smoke guards changed.",
+    "New smoke check AE8 guards against reintroducing the stale account-entry Backup / Sync / Caregiver sharing claims."
+  ],
+  "apple_review_risk_remaining": []
+}

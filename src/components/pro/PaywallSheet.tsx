@@ -25,12 +25,12 @@ import { colors, fonts, radii, shadows } from '@/theme';
 import type { ProPackageView } from '@/lib/revenueCat';
 
 const TITLE = 'Lullaby Pro';
-const SUBTITLE = 'Keep and share the week, without losing the calm.';
+const SUBTITLE = 'Fuller history, gentle weekly recaps, and export-ready summaries. Coming later.';
 
 const BENEFITS = [
-  'Weekly export you can keep',
-  'Clean summary to share with your pediatrician',
-  'Full-week recap in one place',
+  'Fuller history',
+  'Gentle weekly recaps',
+  'Export-ready summaries',
 ];
 
 // Calm per-state copy.
@@ -41,7 +41,7 @@ const NO_PACKAGES = 'Subscription options aren’t available right now.';
 const ACTIVE = 'You’re all set — Lullaby Pro is active.';
 
 const RESTORE_LABEL = 'Restore purchase';
-const RESTORE_NOTE = 'Restore will be available when subscriptions are configured.';
+const RESTORE_NOTE = 'Restore recovers a subscription you already purchased.';
 
 // Required safety copy — descriptive, non-medical, store-managed billing.
 const NOT_MEDICAL = 'Not medical advice.';
@@ -145,6 +145,11 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
   } = usePro();
 
   const showBadge = !isPro && paywallStatus !== 'ready';
+  // Restore is ALWAYS reachable (Apple review 3.1.1) — the button is only disabled
+  // while a restore is in flight. `canRestore` now drives the helper copy: when the
+  // store is configured + signed-in we show the store-manage line, otherwise a calm
+  // hint. ProProvider.restorePurchases() safely no-ops when RevenueCat is
+  // unconfigured, so tapping it in any state never crashes.
   const canRestore = paywallStatus === 'ready' || paywallStatus === 'unavailable';
 
   return (
@@ -258,9 +263,9 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
             <View style={{ marginTop: 14 }}>
               <Pressable
                 accessibilityRole="button"
-                accessibilityState={{ disabled: !canRestore || isRestoring }}
+                accessibilityState={{ disabled: isRestoring }}
                 accessibilityLabel={RESTORE_LABEL}
-                disabled={!canRestore || isRestoring}
+                disabled={isRestoring}
                 onPress={() => void restorePurchases()}
                 style={({ pressed }) => ({
                   minHeight: 46,
@@ -270,9 +275,9 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
                   backgroundColor: colors.surfaceSoft,
                   borderWidth: 1,
                   borderColor: colors.line,
-                  opacity: !canRestore ? 0.55 : pressed ? 0.8 : 1,
+                  opacity: isRestoring ? 0.55 : pressed ? 0.8 : 1,
                 })}>
-                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13.5, color: canRestore ? colors.sleep : colors.inkFaint }}>
+                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13.5, color: colors.sleep }}>
                   {isRestoring ? 'Restoring…' : RESTORE_LABEL}
                 </Text>
               </Pressable>

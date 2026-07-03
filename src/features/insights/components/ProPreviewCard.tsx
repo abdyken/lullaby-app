@@ -28,9 +28,7 @@ import type { InsightsViewModel } from '../types';
 import { InsightsSectionCard } from './InsightsSectionCard';
 
 const FEATURES = [
-  'Your full history, beyond the last 7 days',
-  'A weekly recap you can keep',
-  'A clean summary to share with your pediatrician',
+  'Fuller history, gentle weekly recaps, and export-ready summaries. Coming later.',
 ];
 
 const CONFIRM = 'Lullaby Pro is coming soon — thanks for the interest.';

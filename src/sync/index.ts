@@ -17,6 +17,7 @@ export { diffEvents, isEmptyChange } from './eventChanges';
 export { localRepository } from './localRepository';
 export { resolveRepository } from './resolveRepository';
 export { getSupabaseSession, onSupabaseAuthChange } from './session';
+export { deleteAccountRemote } from './account';
 export {
   ensureCaregiverSetup,
   getBaby,

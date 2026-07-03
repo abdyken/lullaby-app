@@ -81,6 +81,19 @@ release build. On a dev build it replays the onboarding intro for no-session
 users on every launch, and a guest completing the replay re-creates the local
 baby — use it only on disposable installs for targeted onboarding QA.
 
+## Settings links (privacy / terms / support)
+
+`EXPO_PUBLIC_PRIVACY_POLICY_URL`, `EXPO_PUBLIC_TERMS_URL` and
+`EXPO_PUBLIC_SUPPORT_EMAIL` override the destinations behind the Settings
+screen's Privacy Policy, Terms of Use and Contact support rows. Unset or blank
+falls back to the placeholders documented in `src/lib/appLinks.ts`
+(`https://lullaby.app/privacy`, `https://lullaby.app/terms`,
+`support@lullaby.app`), so the rows always render and never crash — but a
+placeholder that isn't actually hosted is itself an App Store review risk.
+Before submission, either host real pages at the placeholder URLs or set these
+vars to the real hosted URLs and monitored mailbox (§SL smoke checks pin the
+fallback behavior).
+
 ## Server-side variables (never Expo env)
 
 These live in Supabase (edge-function secrets / project config), **never** in

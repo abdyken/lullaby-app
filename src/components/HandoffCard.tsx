@@ -1,15 +1,12 @@
 /**
- * HandoffCard — the P0 partner/handoff card inside Tonight (§3, §4).
+ * HandoffCard — the calm local log card inside Tonight (§3, §4).
  *
- * Answers two calm questions at a glance: "are both parents in the loop?" and
- * "who handled the last relevant event?". It reads the SAME local events as the
- * rest of Tonight and is purely local — it implies nothing about realtime or
- * cloud sync (the copy says "on this device"). Real partner invite + realtime
- * is P1; here we only reflect the local caregiver model.
+ * Reads the SAME local events as the rest of Tonight and keeps the public copy
+ * explicit that the log is saved on this device.
  *
- * Visual language from the mockup's `lb-sync` card: a soft warm gradient
- * (feed-tint → diaper-tint), rounded, calm copy, caregiver chips in their own
- * colors. The chip for whoever logged the newest event is emphasized.
+ * Visual language from the mockup's warm card: a soft gradient (feed-tint →
+ * diaper-tint), rounded, calm copy, caregiver chips in their own colors. The
+ * chip for whoever logged the newest event is emphasized.
  */
 import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, Text, View } from 'react-native';
@@ -46,45 +43,27 @@ type Props = {
   onMarkCaughtUp?: () => void;
 };
 
-/** Quiet one-liner for the live sync state. Null hides the line entirely. */
-function syncStatusLine(status: SyncStatus | undefined): string | null {
-  if (!status) return null;
-  switch (status.kind) {
-    case 'syncing':
-      return 'Syncing…';
-    case 'offline':
-      // Calm + honest: in Supabase mode an unsynced change is held in memory and
-      // re-pushed on the next change/reconnect — it is NOT durably "saved on this
-      // device", so we promise a retry rather than persistence.
-      return 'Offline · will retry';
-    case 'synced':
-      return 'Synced just now';
-    default:
-      return null;
-  }
-}
-
-/** Day: the warm lb-sync gradient. Night: a calm dark navy (low-glare). */
+/** Day: the warm local-log gradient. Night: a calm dark navy (low-glare). */
 const CARD_GRADIENT: Record<SurfaceMode, [string, string]> = {
   day: [colors.feedTint, colors.diaperTint],
   night: ['#2B2A46', '#23303F'],
 };
 
-/** Calm, non-technical sentence for who handled the last event. */
-function handoffSentence(name: string, label: string): string {
+/** Calm, non-technical sentence for the latest local event. */
+function localLogSentence(label: string): string {
   switch (label) {
     case 'feed':
-      return `${name} logged the last feed`;
+      return 'Latest feed saved';
     case 'note':
-      return `${name} logged the last note`;
+      return 'Latest note saved';
     case 'diaper':
-      return `${name} handled the last diaper`;
+      return 'Latest diaper saved';
     case 'sleep':
-      return `${name} handled the last sleep`;
+      return 'Latest sleep saved';
     case 'sleep start':
-      return `${name} started the current sleep`;
+      return 'Current sleep saved';
     default:
-      return `${name} logged the last ${label}`;
+      return 'Latest log saved';
   }
 }
 
@@ -126,10 +105,7 @@ function CaregiverChip({
 export function HandoffCard({
   events,
   caregivers,
-  babyName,
   surfaceMode = 'day',
-  syncMode = 'local-only',
-  syncStatus,
   currentCaregiverId = null,
   since = null,
   now,
@@ -140,16 +116,14 @@ export function HandoffCard({
   const lastCaregiver = caregiverId ? caregivers.find((c) => c.id === caregiverId) : undefined;
   const hasLog = eventLabel != null && lastCaregiver != null;
   const hasAnyEvents = events.length > 0;
-  // Only claim sharing when real sync is active; otherwise stay "on this device".
-  const isShared = syncMode === 'supabase';
-  // Quiet status line, only in shared mode (never in the local demo).
-  const statusLine = isShared ? syncStatusLine(syncStatus) : null;
+  const statusLine = 'Updated just now.';
   // In day the bright gradient pairs with a white chip ring; in night use the
   // card's own dark tone so the chips sit cleanly on the navy surface.
   const chipBorder = surfaceMode === 'night' ? CARD_GRADIENT.night[0] : colors.surface;
   const titleColor = surfaceMode === 'night' ? surfaces.night.ink : colors.ink;
   const eyebrowColor = surfaceMode === 'night' ? surfaces.night.inkSoft : colors.inkSoft;
   const sublineColor = surfaceMode === 'night' ? surfaces.night.inkSoft : colors.inkSoft;
+  const statusColor = surfaceMode === 'night' ? surfaces.night.inkFaint : colors.inkFaint;
   const actionColor = surfaceMode === 'night' ? surfaces.night.ink : colors.sleep;
 
   // The handoff summary takes the title slot once the cursor has loaded and there
@@ -159,27 +133,14 @@ export function HandoffCard({
   const useSummary = cursorReady && hasAnyEvents;
   const showMarkCaughtUp = useSummary && summary.hasNew && onMarkCaughtUp != null;
 
-  // With a single caregiver the "Both caregivers are ready" copy is simply false
-  // (roadmap §9/§14). Show a calm single-caregiver state instead; the full
-  // partner-invite on-ramp stays deferred to Phase 2. Two+ caregivers (the seed
-  // demo / a linked Supabase family) keep the original "both ready" line.
-  const isSolo = caregivers.length <= 1;
-  const readyTitle = isSolo ? 'Your night log is ready' : 'Both caregivers are ready';
+  const readyTitle = 'Your night log is ready';
 
   const title = !hasAnyEvents
     ? readyTitle
-    : useSummary
-      ? summary.text
-      : hasLog
-        ? handoffSentence(lastCaregiver.displayName, eventLabel)
-        : readyTitle;
-  const subline = hasLog
-    ? isShared
-      ? `${babyName}'s night log is shared with your caregivers`
-      : `${babyName}'s night log is up to date on this device`
-    : isShared
-      ? `Tonight's log will stay in sync for your caregivers`
-      : 'The first night log will appear here';
+    : hasLog
+      ? localLogSentence(eventLabel)
+      : readyTitle;
+  const subline = 'Tonight’s log is saved on this device.';
 
   return (
     <LinearGradient
@@ -203,7 +164,7 @@ export function HandoffCard({
               textTransform: 'uppercase',
               color: eyebrowColor,
             }}>
-            Handoff
+            Tonight
           </Text>
           <Text
             style={{ fontFamily: fonts.display, fontSize: 15.5, color: titleColor, marginTop: 5 }}>
@@ -222,27 +183,25 @@ export function HandoffCard({
           {showMarkCaughtUp && (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Mark caught up"
+              accessibilityLabel="Mark reviewed"
               onPress={onMarkCaughtUp}
               hitSlop={8}
               style={({ pressed }) => ({ alignSelf: 'flex-start', marginTop: 8, opacity: pressed ? 0.6 : 1 })}>
               <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12, color: actionColor }}>
-                Mark caught up
+                Mark reviewed
               </Text>
             </Pressable>
           )}
-          {statusLine != null && (
-            <Text
-              style={{
-                fontFamily: fonts.bodyBold,
-                fontSize: 10,
-                letterSpacing: 0.4,
-                color: surfaceMode === 'night' ? surfaces.night.inkFaint : colors.inkFaint,
-                marginTop: 6,
-              }}>
-              {statusLine}
-            </Text>
-          )}
+          <Text
+            style={{
+              fontFamily: fonts.bodyBold,
+              fontSize: 10,
+              letterSpacing: 0.4,
+              color: statusColor,
+              marginTop: 6,
+            }}>
+            {statusLine}
+          </Text>
         </View>
 
         {/* Caregiver chips: paddingLeft offsets the first chip's negative margin */}

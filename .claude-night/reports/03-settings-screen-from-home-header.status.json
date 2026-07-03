@@ -1,0 +1,21 @@
+{
+  "task": "03-settings-screen-from-home-header",
+  "status": "done",
+  "summary": "Added a dedicated Settings screen at src/app/settings.tsx, registered as a root-level Expo Router Stack route (sibling of the (tabs) group), so it is pushed over the four-tab shell — no fifth tab was added. The Tonight header's existing labeled account icon button (BabyHeader onAccount) now pushes /settings via router.push; tapping the baby header itself still opens the existing AccountSheet as the quick sheet, so both surfaces remain reachable. The screen reuses existing theme tokens (surfaces/colors/fonts/radii/shadows from src/theme), follows the committed day/night surface mode, and contains: an Account section mirroring AccountSheet's three states (signed-in with Invite caregiver + Sign out; configured guest with Create account or sign in via goToAccountEntry; unconfigured local build with the calm setup-required note), an Appearance section with a Night mode switch driving the existing ThemeProvider toggle, a Privacy & data section with local-only truthful copy, and an About section with the app version (expo-constants) and the not-medical-advice line. Account actions pop back first (router.back) before signOut/goToAccountEntry so AuthGate can swap the tab-shell surface underneath, matching AccountSheet's close-then-navigate order. The route lives outside ProProvider (which mounts inside the tab shell), so the Pro UpgradeCard is deliberately not rendered on Settings — it remains on AccountSheet and Insights. BabyHeader's button accessibilityLabel was updated to 'Account and settings' (still matches the AE7 smoke-check regex).",
+  "files_changed": [
+    "src/app/settings.tsx",
+    "src/app/_layout.tsx",
+    "src/app/(tabs)/index.tsx",
+    "src/components/BabyHeader.tsx"
+  ],
+  "validation_notes": "npx tsc --noEmit: exit 0 (after regenerating the gitignored .expo/types/router.d.ts typed-routes file via a brief `expo start`, which now includes /settings). npm run lint (expo lint): exit 0, clean. npm run check:local-interactions: all 379 checks passed, including AE7 (explicit labeled account entry in BabyHeader wired from Tonight). No new dependencies; expo-constants was already a direct dependency.",
+  "manual_followups": [
+    "Manually tap through on a device/simulator: Tonight header account icon -> Settings opens; Back returns; Night mode switch runs the circular-reveal theme transition from the Settings screen (verified only by code inspection, not on-device).",
+    "If a future build signs a user in, verify Sign out from Settings pops back to the tab shell and AuthGate swaps to the account-entry surface cleanly.",
+    "Typed routes (.expo/types/router.d.ts) are gitignored and regenerate on `expo start`; any clean-checkout CI running tsc without starting Expo once may not know the /settings route type."
+  ],
+  "apple_review_risk_remaining": [
+    "Settings has no privacy-policy or terms-of-use URL rows (no hosted policy URLs exist in the repo to link to); if App Store review requires an in-app privacy policy link, that content must be created and linked separately.",
+    "No account-deletion affordance (only relevant if account creation ships in the reviewed build; Shape A local-only builds show the guest/local copy with no account features)."
+  ]
+}
