@@ -35,7 +35,7 @@ function AccountGlyph({ color }: { color: string }) {
 }
 
 /**
- * The explicit account/backup entry in the header. A glass icon button mirroring
+ * The explicit account/settings entry in the header. A glass icon button mirroring
  * ThemeIconButton's surface-aware styling, so it reads as a real, tappable
  * affordance (not part of the baby illustration). Labeled for discoverability + a11y.
  */
