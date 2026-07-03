@@ -127,7 +127,7 @@ function SectionLabel({ palette, children }: { palette: SurfacePalette; children
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { mode, isTransitioning, toggleThemeFromPoint } = useTheme();
-  const { session, caregiver, signOut, goToAccountEntry, busy } = useAuth();
+  const { session, caregiver, signOut, goToAccountEntry, deleteAccount, busy } = useAuth();
   const palette = surfaces[mode];
   const isNight = mode === 'night';
 
@@ -179,6 +179,27 @@ export default function SettingsScreen() {
   const handleAccountEntry = () => {
     router.back();
     void goToAccountEntry();
+  };
+
+  // Delete account (Apple 5.1.1(v)) — a two-step, in-place confirm: the row
+  // arms an inline confirm block (no accidental one-tap deletion), and the
+  // confirm awaits the server result before leaving the screen, so a failure
+  // stays visible here with a manual fallback instead of silently vanishing.
+  const [deleteConfirming, setDeleteConfirming] = useState(false);
+  const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
+  const handleDeleteAccount = async () => {
+    setDeleteNotice(null);
+    const deleted = await deleteAccount();
+    if (deleted) {
+      // The account is gone and AuthGate already swapped the surface under this
+      // screen — pop back to land on it (same order rationale as sign out).
+      router.back();
+      return;
+    }
+    setDeleteConfirming(false);
+    setDeleteNotice(
+      `Couldn’t delete your account just now. Please try again, or email ${supportEmail} and we’ll remove it for you.`,
+    );
   };
 
   return (
@@ -279,6 +300,92 @@ export default function SettingsScreen() {
                     Sign out
                   </Text>
                 </Pressable>
+
+                {/* Delete account — armed inline so the destructive step is
+                    always an explicit second tap, never a slip. */}
+                <View style={{ height: 1, backgroundColor: palette.line, marginTop: 14 }} />
+                {deleteConfirming ? (
+                  <View style={{ marginTop: 12 }}>
+                    <Text
+                      style={{
+                        fontFamily: fonts.body,
+                        fontSize: 12,
+                        lineHeight: 18,
+                        color: palette.inkSoft,
+                      }}>
+                      This permanently deletes your account and every log you{'’'}ve added. If you
+                      created your baby{'’'}s profile, it and its shared history are removed for
+                      all caregivers too. Anything saved only on this phone stays here. This can
+                      {'’'}t be undone.
+                    </Text>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Permanently delete account"
+                      accessibilityState={{ busy }}
+                      onPress={() => void handleDeleteAccount()}
+                      disabled={busy}
+                      style={({ pressed }) => ({
+                        marginTop: 12,
+                        minHeight: 48,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: radii.medium,
+                        backgroundColor: colors.alertTint,
+                        opacity: pressed || busy ? 0.6 : 1,
+                      })}>
+                      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.alert }}>
+                        {busy ? 'Deleting…' : 'Permanently delete account'}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Keep my account"
+                      onPress={() => setDeleteConfirming(false)}
+                      disabled={busy}
+                      style={({ pressed }) => ({
+                        marginTop: 8,
+                        minHeight: 44,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: pressed ? 0.6 : 1,
+                      })}>
+                      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, color: palette.inkSoft }}>
+                        Keep my account
+                      </Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Delete account"
+                    onPress={() => {
+                      setDeleteNotice(null);
+                      setDeleteConfirming(true);
+                    }}
+                    disabled={busy}
+                    style={({ pressed }) => ({
+                      marginTop: 6,
+                      minHeight: 44,
+                      justifyContent: 'center',
+                      opacity: pressed ? 0.6 : 1,
+                    })}>
+                    <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.alert }}>
+                      Delete account
+                    </Text>
+                  </Pressable>
+                )}
+                {deleteNotice && (
+                  <Text
+                    style={{
+                      fontFamily: fonts.body,
+                      fontSize: 12,
+                      lineHeight: 18,
+                      color: palette.inkFaint,
+                      marginTop: 8,
+                    }}>
+                    {deleteNotice}
+                  </Text>
+                )}
               </>
             ) : (
               <>

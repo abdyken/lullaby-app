@@ -50,6 +50,7 @@ import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { resolveNoSessionStatus } from '@/state/authStatusResolver';
 import {
   acceptInvite,
+  deleteAccountRemote,
   ensureCaregiverSetup,
   getBaby,
   getBabyCaregivers,
@@ -197,6 +198,17 @@ type AuthContextValue = {
   /** Join an existing baby with an invite code (alternative to completeSetup). */
   joinWithInvite: (fields: JoinFields) => Promise<void>;
   signOut: () => Promise<void>;
+  /**
+   * Permanently delete the signed-in account (Apple 5.1.1(v)) via the
+   * self-scoped `delete_account` RPC, then drop the local session. Resolves
+   * true only when the server verifiably deleted the account; false on any
+   * failure so the calling screen can show its own calm fallback (we set no
+   * provider errorMessage here — the caller stays signed in on failure, and a
+   * stored provider error would resurface as a stale note on the account
+   * surfaces after an unrelated later sign-out). Local-first data is preserved
+   * exactly like signOut.
+   */
+  deleteAccount: () => Promise<boolean>;
   clearError: () => void;
 };
 
@@ -912,6 +924,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Delete account — the self-scoped `delete_account` RPC removes the
+  // auth.users row (cascading the profile, created babies + their shared
+  // history, authored events, and invites — see the migration's header).
+  // Ordering: the server delete MUST succeed before any local sign-out, so a
+  // failed RPC leaves the parent signed in and able to retry. The follow-up
+  // sign-out uses scope 'local' — the account row is already gone, so a global
+  // sign-out would call the server with a dead user's token and fail — and the
+  // resulting SIGNED_OUT flows through the normal applySession(null) path
+  // (honoring a standing continue-locally preference). Local-first stores
+  // (local events / local baby / logging-v2) are deliberately untouched, same
+  // hygiene rules as signOut above.
+  const deleteAccount = useCallback(async (): Promise<boolean> => {
+    if (!supabase) return false;
+    setBusy(true);
+    try {
+      await deleteAccountRemote();
+    } catch (e) {
+      // Recoverable — the account still exists; the caller shows the manual
+      // "email us and we'll remove it" fallback. Dev-only warn, never a LogBox.
+      authWarn(`deleteAccount: ${messageFrom(e, 'rpc failed')}`);
+      if (mounted.current) setBusy(false);
+      return false;
+    }
+    try {
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch {
+      // best-effort — applySession(null) below still swaps the surface
+    }
+    await applySession(null, 'no-session');
+    if (mounted.current) setBusy(false);
+    return true;
+  }, [applySession]);
+
   const clearError = useCallback(() => setErrorMessage(null), []);
 
   const value = useMemo<AuthContextValue>(
@@ -935,6 +980,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       goToAccountEntry,
       joinWithInvite,
       signOut,
+      deleteAccount,
       clearError,
     }),
     [
@@ -957,6 +1003,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       goToAccountEntry,
       joinWithInvite,
       signOut,
+      deleteAccount,
       clearError,
     ],
   );
