@@ -1,23 +1,22 @@
 {
   "task": "10-final-apple-review-smoke-report",
   "status": "done",
-  "summary": "Ran a final read-only audit of the release branch against the actual code (not just prior reports) and created docs/apple-review-readiness.md: a single source of truth for the Shape A local-only v1 App Store submission. It records what tasks 01-09 changed (with verified done/partial status per task), the exact pre-build commands, the remaining human-only tasks, the App Store Connect checklist, and a TestFlight smoke checklist. Verified on the branch: npm run typecheck (tsc --noEmit) exits 0 and npm run check:local-interactions passes all 388 checks. Confirmed key surfaces exist in the merged code (src/app/settings.tsx with Account/Appearance/Privacy&data/Support/About, src/lib/appLinks.ts, contentGate, hardened ProProvider/PaywallSheet, Insights error/loading states, delete_account migration in-repo, iOS mic+speech permission strings in app.json plugin + ios/Lullaby/Info.plist, ATS NSAllowsArbitraryLoads=false, bundle id com.lullaby.app, Pro OFF by default). Surfaced two blockers that did NOT land: task 02 (local-only truthful copy) left the account-entry Backup/Sync/Caregiver-sharing chips over-promising, and task 06 (baby profile edit) has no post-setup edit affordance. Docs-only change; no app code touched.",
+  "summary": "Updated the final Apple-review smoke report after Task 02 landed on branch fix/apple-p0-02-local-only-truthful-copy-manual. docs/apple-review-readiness.md now records Task 02 as done: account-entry chips use Saved on this device / Optional account / Privacy-first, and account/auth/settings/invite copy no longer promises backup, sync, multi-device pickup, shared logs, or caregiver visibility for Shape A local-only v1. AE8 smoke guard was added on that branch. Validation passed there: npm run typecheck, npm run lint, npm run check:local-interactions (389/389), and git diff --check. Remaining blocker still noted: task 06 (baby profile edit) has no post-setup edit affordance. Docs/report-only update; no app code touched.",
   "files_changed": [
     "docs/apple-review-readiness.md",
     ".claude-night/reports/10-final-apple-review-smoke-report.status.json"
   ],
-  "validation_notes": "npm run typecheck -> tsc --noEmit exits 0 (clean). npm run check:local-interactions -> All 388 checks passed. No source files were modified (docs-only task), so lint of app code is unchanged from task 09's green state. Verified via grep/read that the surfaces referenced in the report actually exist in the merged branch, and that eas.json submit.production is still an empty object (submission remains manual, as documented). .env.example is Read-denied by project settings; its contents were confirmed from task 09's report and the §RE smoke checks rather than by reading it.",
+  "validation_notes": "Task 02 branch fix/apple-p0-02-local-only-truthful-copy-manual passed: npm run typecheck -> tsc --noEmit exits 0; npm run lint -> expo lint exits 0; npm run check:local-interactions -> All 389 checks passed, including new AE8; git diff --check -> clean. This update modified only docs/apple-review-readiness.md and this status JSON.",
   "manual_followups": [
     "Host real Privacy Policy and Terms of Use pages (or set EXPO_PUBLIC_PRIVACY_POLICY_URL/_TERMS_URL) before submission; ensure EXPO_PUBLIC_SUPPORT_EMAIL mailbox is monitored.",
     "Decide account posture for the reviewed binary: ship accounts disabled (simplest for Shape A) OR apply supabase/migrations/20260703060000_delete_account.sql so in-app Delete Account works (Apple 5.1.1(v)).",
-    "Trim/reword the account-entry 'Backup / Sync / Caregiver sharing' value chips if accounts ship enabled (task 02 did not land).",
+    "Ensure the submitted build includes fix/apple-p0-02-local-only-truthful-copy-manual so the Task 02 copy changes and AE8 guard are present.",
     "Implement post-setup baby profile edit as a fast-follow (task 06 did not land; only editable during onboarding).",
     "Clinician sign-off: work docs/reassure-content-review.md and flip REASSURE_CONTENT.status to 'approved' to unlock clinical KB in public builds.",
     "Wire eas.json submit.production credentials via EAS secrets before eas submit; complete the App Store Connect app-privacy questionnaire (declare microphone + speech recognition, no data collection/tracking)."
   ],
   "apple_review_risk_remaining": [
     "Privacy/Terms links resolve to placeholder lullaby.app URLs until real pages are hosted and the EXPO_PUBLIC_* URL vars are set - a dead link is an Apple 5.1.1(i) rejection.",
-    "Account-entry copy advertises Backup/Sync/Caregiver sharing while v1 is local-only; only reachable if accounts ship enabled (task 02 gap unresolved).",
     "In-app Delete Account only works after the migration is applied remotely; if accounts ship enabled without it, a reviewer sees the email-request fallback (Apple 5.1.1(v)).",
     "App Store Connect app-privacy declaration and off-repo metadata (description/screenshots/review notes) must accurately reflect local-only + no medical-advice claims - human steps not enforceable in code.",
     "No paywall risk: Pro ships OFF by default so no purchase surface is reachable in the intended submission."
