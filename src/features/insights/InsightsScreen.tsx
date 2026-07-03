@@ -1,6 +1,6 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
-import { Text, useWindowDimensions, View } from 'react-native';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, Text, useWindowDimensions, View } from 'react-native';
 
 import { Screen } from '@/components/Screen';
 import { InsightCard } from '@/features/insights/components/InsightCard';
@@ -28,6 +28,8 @@ const INSIGHTS_BOTTOM_CLEARANCE = Math.round(tabbar.height * 0.4);
 function resolveInsightsNow(): number {
   return Date.now();
 }
+
+type LoadStatus = 'loading' | 'ready' | 'error';
 
 type InsightsStateCopy = {
   sectionTitle: string;
@@ -103,23 +105,35 @@ export function InsightsScreen() {
   const statsGap = isShortDesktop ? 18 : 22;
   const initialViewModel = useMemo(() => buildInsightsViewModel({ events: [], now: resolveInsightsNow() }), []);
   const [loadedViewModel, setLoadedViewModel] = useState<InsightsViewModel | null>(null);
+  // 'loading' until the first successful read; 'error' only when the *first* load
+  // fails (no data to show yet). A refresh failure while data is already on screen
+  // keeps the last good view model instead of wiping it — calmer than an error flash.
+  const [status, setStatus] = useState<LoadStatus>('loading');
+  // Read the latest loaded view model inside `load` without adding it to the
+  // dependency list (which would re-trigger the load every time it updates).
+  const loadedRef = useRef<InsightsViewModel | null>(null);
+  // Monotonic request token: a resolution only wins if it is still the latest
+  // request, so a slow load that finishes after blur or after a retry is ignored.
+  const requestIdRef = useRef(0);
 
   const loadHistory = useCallback((nowMs: number) => loadInsightsHistory(nowMs), [loadInsightsHistory]);
 
-  // Reload on tab focus so backdated logs inside the 7-day window are picked up.
-  // Analytics fire here: insights_opened every visit; the weekly-recap preview and
-  // the once-ever 4-data-days milestone once the parent has enough data.
-  useFocusEffect(
-    useCallback(() => {
-      let cancelled = false;
-      track('insights_opened');
+  // Load the 7-day history and build the view model. Called on tab focus and by
+  // the Retry button. On failure it keeps any previously loaded data on screen and
+  // only surfaces the error UI when there is nothing to fall back to.
+  const load = useCallback(() => {
+    const requestId = (requestIdRef.current += 1);
+    if (!loadedRef.current) setStatus('loading');
 
-      void getInsightsViewModel({
-        loadHistory,
-        nowMs: resolveInsightsNow(),
-      }).then((next) => {
-        if (cancelled) return;
+    void getInsightsViewModel({
+      loadHistory,
+      nowMs: resolveInsightsNow(),
+    })
+      .then((next) => {
+        if (requestId !== requestIdRef.current) return;
+        loadedRef.current = next;
         setLoadedViewModel(next);
+        setStatus('ready');
         if (next.dataDays >= 4) {
           track('insights_recap_available', { dataDays: next.dataDays });
           void fireMilestoneOnce(
@@ -127,12 +141,26 @@ export function InsightsScreen() {
             () => track('reached_4_data_days', { dataDays: next.dataDays }),
           );
         }
+      })
+      .catch((error) => {
+        if (requestId !== requestIdRef.current) return;
+        if (__DEV__) console.warn('[insights] failed to load history', error);
+        setStatus(loadedRef.current ? 'ready' : 'error');
       });
+  }, [loadHistory, track, session?.user.id, baby?.id]);
 
+  // Reload on tab focus so backdated logs inside the 7-day window are picked up.
+  // insights_opened fires once per visit; the recap preview + once-ever 4-data-days
+  // milestone fire from `load` once the parent has enough data. Bumping the request
+  // token on blur invalidates any in-flight load so a late resolution can't win.
+  useFocusEffect(
+    useCallback(() => {
+      track('insights_opened');
+      load();
       return () => {
-        cancelled = true;
+        requestIdRef.current += 1;
       };
-    }, [loadHistory, track, session?.user.id, baby?.id]),
+    }, [load, track]),
   );
 
   const viewModel = loadedViewModel ?? initialViewModel;
@@ -190,6 +218,70 @@ export function InsightsScreen() {
           </View>
         </View>
 
+        {status === 'error' ? (
+          <View
+            style={{
+              marginTop: 2,
+              paddingVertical: 20,
+              paddingHorizontal: 18,
+              borderRadius: radii.medium,
+              borderWidth: bodyMode === 'night' ? 1 : 0,
+              borderColor: bodyPalette.border,
+              backgroundColor: bodyMode === 'night' ? 'rgba(224,87,75,0.14)' : colors.alertTint,
+              ...shadows.card,
+            }}>
+            <Text style={{ fontFamily: fonts.bodyBold, fontSize: 11.5, lineHeight: 15, color: colors.alert }}>
+              Couldn&apos;t load insights
+            </Text>
+            <Text
+              style={{
+                fontFamily: fonts.body,
+                fontSize: 13,
+                lineHeight: 18.5,
+                color: bodyPalette.ink,
+                marginTop: 3,
+              }}>
+              Something went wrong while gathering your last 7 days. Your logs are safe — this only
+              affects the summary.
+            </Text>
+            <Pressable
+              onPress={load}
+              accessibilityRole="button"
+              accessibilityLabel="Retry loading insights"
+              style={({ pressed }) => ({
+                alignSelf: 'flex-start',
+                marginTop: 14,
+                paddingVertical: 9,
+                paddingHorizontal: 18,
+                borderRadius: radii.pill,
+                backgroundColor: colors.feed,
+                opacity: pressed ? 0.85 : 1,
+              })}>
+              <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, color: colors.white }}>Try again</Text>
+            </Pressable>
+          </View>
+        ) : status === 'loading' && !loadedViewModel ? (
+          <View
+            style={{
+              marginTop: 2,
+              paddingVertical: 24,
+              paddingHorizontal: 18,
+              borderRadius: radii.medium,
+              borderWidth: bodyMode === 'night' ? 1 : 0,
+              borderColor: bodyPalette.border,
+              backgroundColor: bodyPalette.card,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 12,
+              ...shadows.card,
+            }}>
+            <ActivityIndicator color={colors.feed} />
+            <Text style={{ fontFamily: fonts.body, fontSize: 13, lineHeight: 18.5, color: bodyPalette.inkSoft }}>
+              Gathering your last 7 days…
+            </Text>
+          </View>
+        ) : (
+          <>
         {stateCopy.intro ? (
           <View
             style={{
@@ -261,6 +353,8 @@ export function InsightsScreen() {
             <ProPreviewCard viewModel={viewModel} />
           </View>
         ) : null}
+          </>
+        )}
 
         <View style={{ height: INSIGHTS_BOTTOM_CLEARANCE }} />
       </View>
