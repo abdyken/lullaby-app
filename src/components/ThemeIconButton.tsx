@@ -1,4 +1,4 @@
-import { Animated, Easing, Pressable, View, type GestureResponderEvent } from 'react-native';
+import { Animated, Dimensions, Easing, Pressable, View, type GestureResponderEvent } from 'react-native';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -6,7 +6,12 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { useTheme } from '@/state/ThemeProvider';
 import { colors, shadows, type SurfaceMode } from '@/theme';
 
-export type ThemeToggleHandler = (pageX?: number, pageY?: number) => void | Promise<void>;
+/** `pressInAt` (ms epoch) lets the provider measure real press→reveal latency in dev. */
+export type ThemeToggleHandler = (
+  pageX?: number,
+  pageY?: number,
+  pressInAt?: number,
+) => void | Promise<void>;
 
 type Props = {
   surfaceMode: SurfaceMode;
@@ -14,6 +19,10 @@ type Props = {
   onPress: ThemeToggleHandler;
   disabled?: boolean;
 };
+
+/** Opacity while the finger is down — the one visible reaction on press-in. No
+ * transform/scale/shadow/layout change, so the button's footprint never moves. */
+const PRESSED_OPACITY = 0.6;
 
 /** Icon swap timing. The real button updates under the native screenshot overlay,
  * then appears already settled as the circular reveal exposes it. */
@@ -88,26 +97,69 @@ export function ThemeIconButton({ surfaceMode, onPress, disabled = false }: Prop
   const { mode: committedMode } = useTheme();
   const isNight = surfaceMode === 'night';
   const buttonRef = useRef<View>(null);
+  // Cached window-space centre of the button, measured on layout so the reveal
+  // origin is available synchronously on tap (no measurement in the tap path).
+  const centerRef = useRef<{ x: number; y: number } | null>(null);
+  // One reveal per gesture: press-in fires it; the trailing onPress (or a stray
+  // second signal for the same touch) is consumed instead of toggling back.
+  const gestureHandledRef = useRef(false);
+  const [pressed, setPressed] = useState(false);
   // 0 = moon (day) … 1 = sun (night). Starts at the currently committed theme.
   const [icon] = useState(() => new Animated.Value(nightAmount(committedMode)));
 
-  const handlePress = (event: GestureResponderEvent) => {
-    if (disabled) return;
-
-    const { pageX, pageY } = event.nativeEvent;
-    if (Number.isFinite(pageX) && Number.isFinite(pageY)) {
-      void onPress(pageX, pageY);
-      return;
-    }
-
+  // Measure and cache the button centre ahead of the tap so we never pay a
+  // measureInWindow round-trip on the critical path.
+  const handleLayout = () => {
     const node = buttonRef.current;
-    if (!node) {
-      void onPress();
+    if (!node) return;
+    node.measureInWindow((x, y, w, h) => {
+      if (Number.isFinite(x) && Number.isFinite(y) && w > 0 && h > 0) {
+        centerRef.current = { x: x + w / 2, y: y + h / 2 };
+      }
+    });
+  };
+
+  // The reveal origin, resolved synchronously: live press point → cached centre →
+  // a safe top-right fallback near where the button lives in the header.
+  const resolveOrigin = (event?: GestureResponderEvent): { x: number; y: number } => {
+    const pageX = event?.nativeEvent.pageX;
+    const pageY = event?.nativeEvent.pageY;
+    if (typeof pageX === 'number' && typeof pageY === 'number' && Number.isFinite(pageX) && Number.isFinite(pageY)) {
+      return { x: pageX, y: pageY };
+    }
+    if (centerRef.current) return centerRef.current;
+    const { width } = Dimensions.get('window');
+    return { x: width - 30, y: 64 };
+  };
+
+  const startReveal = (event: GestureResponderEvent, pressInAt: number) => {
+    const origin = resolveOrigin(event);
+    void onPress(origin.x, origin.y, pressInAt);
+  };
+
+  // Start the reveal on press-in (finger-down), not on release, so the screenshot
+  // capture + theme commit run while the finger is still down. The trailing
+  // onPress for the same touch is consumed by gestureHandledRef.
+  const handlePressIn = (event: GestureResponderEvent) => {
+    if (disabled) return;
+    setPressed(true);
+    gestureHandledRef.current = true;
+    startReveal(event, Date.now());
+  };
+
+  const handlePressOut = () => {
+    setPressed(false);
+  };
+
+  // Fires last for a touch (already handled by press-in → consume) and is the only
+  // signal for an accessibility activation, which never sends press-in.
+  const handlePress = (event: GestureResponderEvent) => {
+    if (gestureHandledRef.current) {
+      gestureHandledRef.current = false;
       return;
     }
-    node.measureInWindow((x, y, w, h) => {
-      void onPress(x + w / 2, y + h / 2);
-    });
+    if (disabled) return;
+    startReveal(event, Date.now());
   };
 
   // The icon follows the committed mode. During native reveal, the old UI is a
@@ -136,10 +188,14 @@ export function ThemeIconButton({ surfaceMode, onPress, disabled = false }: Prop
       ref={buttonRef}
       accessibilityRole="button"
       accessibilityLabel={isNight ? 'Switch to day theme' : 'Switch to night theme'}
+      onLayout={handleLayout}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
       onPress={handlePress}
+      unstable_pressDelay={0}
       disabled={disabled}
       hitSlop={8}
-      style={({ pressed }) => ({
+      style={{
         width: 42,
         height: 42,
         borderRadius: 21,
@@ -151,11 +207,12 @@ export function ThemeIconButton({ surfaceMode, onPress, disabled = false }: Prop
         // surface. Day keeps the soft glass edge it blends into on the light header.
         borderWidth: 1,
         borderColor: isNight ? 'transparent' : 'rgba(255,255,255,0.88)',
-        opacity: disabled ? 0.72 : 1,
-        transform: [{ scale: pressed ? 0.94 : 1 }],
+        // Opacity-only press feedback (no transform/scale/shadow/layout), so the
+        // button reacts within a frame while its footprint stays put.
+        opacity: disabled ? 0.72 : pressed ? PRESSED_OPACITY : 1,
         ...shadows.card,
         shadowColor: isNight ? 'rgb(0,0,0)' : shadows.card.shadowColor,
-      })}>
+      }}>
       <View style={{ width: 24, height: 24, alignItems: 'center', justifyContent: 'center' }}>
         <AnimatedIcon opacity={moonOpacity} scale={moonScale} rotate={moonRotate}>
           <MoonGlyph />

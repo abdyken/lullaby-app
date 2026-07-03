@@ -41,9 +41,22 @@ function devWarn(message: string, error?: unknown): void {
   }
 }
 
+// Cache the dynamic import so it resolves once. Kept as a lazy import (not a
+// static one) so the web/unsupported bundles never pull the native module, but
+// warmed eagerly below so the first real tap never waits on module resolution.
+let modulePromise: Promise<CircularRevealModule> | null = null;
+
 async function loadCircularRevealModule(): Promise<CircularRevealModule> {
-  return (await import('expo-circular-reveal')) as CircularRevealModule;
+  if (!modulePromise) {
+    modulePromise = import('expo-circular-reveal') as Promise<CircularRevealModule>;
+  }
+  return modulePromise;
 }
+
+// Warm the module at startup so it is already resolved by the time the user taps.
+void loadCircularRevealModule().catch(() => {
+  /* no-op: any real failure surfaces on the first prepare/start call */
+});
 
 function assertResult<T extends string>(actual: string, expected: T, functionName: string): T {
   if (actual !== expected) {

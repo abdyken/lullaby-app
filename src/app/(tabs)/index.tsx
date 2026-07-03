@@ -199,11 +199,11 @@ export default function TonightScreen() {
     }
   };
 
-  const handleThemeToggle = (pageX?: number, pageY?: number) => {
+  const handleThemeToggle = (pageX?: number, pageY?: number, pressInAt?: number) => {
     if (isTransitioning) return;
     setFrozenNow(Date.now());
     hapticSave();
-    void toggleThemeFromPoint(pageX, pageY);
+    void toggleThemeFromPoint(pageX, pageY, pressInAt);
   };
 
   // Only Save creates the event + toast; dismissing the sheet logs nothing.
