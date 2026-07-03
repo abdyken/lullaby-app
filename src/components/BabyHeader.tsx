@@ -12,9 +12,10 @@ type Props = {
   caregivers: Caregiver[];
   onPress?: () => void;
   /**
-   * Opens the account / backup surface. Rendered as an explicit, labeled icon
-   * button in the header so the account entry is obvious — the app must not rely
-   * on the user discovering that tapping the baby header opens it.
+   * Opens the account / settings surface (Tonight pushes the dedicated /settings
+   * screen). Rendered as an explicit, labeled icon button in the header so the
+   * entry is obvious — the app must not rely on the user discovering that
+   * tapping the baby header opens the quick account sheet.
    */
   onAccount?: () => void;
   onThemeToggle?: ThemeToggleHandler;
@@ -43,7 +44,7 @@ function AccountIconButton({ surfaceMode, onPress }: { surfaceMode: SurfaceMode;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="Account and backup"
+      accessibilityLabel="Account and settings"
       onPress={onPress}
       hitSlop={8}
       style={({ pressed }) => ({
