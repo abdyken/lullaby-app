@@ -258,7 +258,7 @@ export default function SettingsScreen() {
                     color: palette.inkFaint,
                     marginTop: 6,
                   }}>
-                  Your night log is shared with your caregivers on this baby.
+                  Account features are signed in here. This Apple-review build keeps logs local-first.
                 </Text>
 
                 <Pressable
@@ -419,8 +419,8 @@ export default function SettingsScreen() {
                       color: palette.inkFaint,
                       marginTop: 8,
                     }}>
-                    Account backup and sync turn on once this build is connected to its account
-                    service.
+                    Accounts are not set up in this build yet. Your baby and logs stay on this
+                    phone.
                   </Text>
                 )}
               </>

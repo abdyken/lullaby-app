@@ -1692,6 +1692,10 @@ check('AE4. the account entry keeps "Continue locally" and a calm state when Sup
     ACCOUNT_ENTRY_SRC.includes('isSupabaseConfigured'),
     'the entry must adapt to an unconfigured build, not hide silently',
   );
+  assert.ok(
+    ACCOUNT_ENTRY_SRC.includes('Accounts are not set up in this build yet'),
+    'unconfigured account entry must plainly say accounts are unavailable in this build',
+  );
 });
 
 check('AE5. the account surface is reopenable from Tonight in any build (not gated on Supabase config)', () => {
@@ -1735,6 +1739,33 @@ check('AE7. the main app has an explicit, labeled account entry (not only the ba
   );
   // …and Tonight actually wires it.
   assert.ok(TONIGHT_SRC.includes('onAccount='), 'Tonight must wire the dedicated account entry');
+});
+
+check('AE8. public account entry copy is truthful for local-only Shape A', () => {
+  for (const honest of ['Saved on this device', 'Optional account', 'Privacy-first']) {
+    assert.ok(ACCOUNT_ENTRY_SRC.includes(honest), `account entry has honest chip: ${honest}`);
+  }
+  for (const [name, src] of [
+    ['AccountEntryScreen', ACCOUNT_ENTRY_SRC],
+    ['AccountSheet', ACCOUNT_SHEET_SRC],
+    ['AuthScreen', readFileSync(new URL('../src/components/auth/AuthScreen.tsx', import.meta.url), 'utf8')],
+    ['InviteCaregiverSheet', readFileSync(new URL('../src/components/auth/InviteCaregiverSheet.tsx', import.meta.url), 'utf8')],
+    ['Settings', readFileSync(new URL('../src/app/settings.tsx', import.meta.url), 'utf8')],
+  ] as const) {
+    for (const stale of [
+      '<ValueChip label="Backup" />',
+      '<ValueChip label="Sync" />',
+      '<ValueChip label="Caregiver sharing" />',
+      'back up your baby',
+      'pick up on another device',
+      'Back up and sync your logs',
+      'Account backup and sync turn on',
+      'Your night log is shared with your caregivers on this baby',
+      'so you both keep the same night log',
+    ]) {
+      assert.ok(!src.includes(stale), `${name} must not advertise unavailable account/sync/sharing copy`);
+    }
+  }
 });
 
 // OC. OAuth / auth deep-link callback route. Supabase redirects Google sign-in

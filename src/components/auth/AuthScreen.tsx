@@ -113,7 +113,7 @@ export function AuthScreen({
     <AuthShell
       eyebrow="Lullaby"
       title={isSignUp ? 'Create account' : 'Welcome back'}
-      subtitle={isSignUp ? "Back up your baby's care history." : 'Continue your night log.'}
+      subtitle={isSignUp ? 'Create an optional account for later.' : 'Continue your night log.'}
       footer={
         <View style={{ gap: 10 }}>
           <AuthLink
