@@ -74,9 +74,24 @@ async function fetchNightRead(babyId: string, nightKey: string): Promise<string 
   }
 }
 
+/**
+ * Coarse, honest status for the UI — never a technical error, never a leak of a
+ * blocked-vs-timeout distinction:
+ *   - 'idle'        — the client is not attempting an AI read (not Pro/eligible,
+ *                     no consent, empty night). Show the local read, nothing else.
+ *   - 'loading'     — eligible + consented, the attempt is in flight (≤3s). Still
+ *                     just the local read; no spinner, no caption.
+ *   - 'ai'          — an AI read is showing; label it clearly as AI-phrased.
+ *   - 'unavailable' — we attempted and got no AI read (fallback/blocked/timeout);
+ *                     show a calm "AI read isn't available right now" note.
+ */
+export type NightReadStatus = 'idle' | 'loading' | 'ai' | 'unavailable';
+
 export type NightReadState = {
   /** The AI-phrased read to overlay on the local recap, or null to keep local. */
   read: string | null;
+  /** Coarse, honest status the screen uses to label AI vs the local fallback. */
+  status: NightReadStatus;
   /**
    * True only when the parent is AI-eligible (Pro/dev + signed in + a baby +
    * this night has data) but has NOT yet decided on consent — the signal that
@@ -98,7 +113,11 @@ export function useNightRead(recap: ReassureNightRecap): NightReadState {
   // Keyed by cache key so a read for one night/baby can never leak into
   // another — and so no synchronous setState is needed to "reset" (the return
   // value simply stops matching). All sets below happen in async callbacks.
-  const [read, setRead] = useState<{ key: string; text: string } | null>(null);
+  //   text: string → an AI read is ready.
+  //   text: null   → we attempted (eligible + consented) and there was no AI
+  //                  read for us — the UI can honestly say it's unavailable.
+  //   whole value null → not resolved yet for this key (still loading).
+  const [outcome, setOutcome] = useState<{ key: string; text: string | null } | null>(null);
 
   const babyId = baby?.id ?? null;
   const signedIn = session != null;
@@ -125,13 +144,21 @@ export function useNightRead(recap: ReassureNightRecap): NightReadState {
         const cached = await AsyncStorage.getItem(cacheKey);
         if (cancelled) return;
         if (cached != null && cached.length > 0) {
-          setRead({ key: cacheKey, text: cached });
+          setOutcome({ key: cacheKey, text: cached });
           track('reassure_night_read_shown', { source: 'cache' });
           return;
         }
         const fetched = await fetchNightRead(babyId, nightKey);
-        if (cancelled || fetched == null) return;
-        setRead({ key: cacheKey, text: fetched });
+        if (cancelled) return;
+        if (fetched == null) {
+          // Attempted and came back empty (server fallback / guardrail / timeout).
+          // Record the honest "no AI read" so the UI can show a calm note rather
+          // than silently pretend nothing was tried. Nothing is cached, so a
+          // later open re-attempts once the prompt/kill-switch is fixed.
+          setOutcome({ key: cacheKey, text: null });
+          return;
+        }
+        setOutcome({ key: cacheKey, text: fetched });
         track('reassure_night_read_shown', { source: 'llm' });
         void AsyncStorage.setItem(cacheKey, fetched).catch(() => {});
       } catch {
@@ -144,8 +171,20 @@ export function useNightRead(recap: ReassureNightRecap): NightReadState {
     };
   }, [babyId, cacheKey, eligible, nightKey, track]);
 
+  // Only trust an outcome that belongs to the CURRENT key (a stale one for a
+  // different night/baby simply doesn't match). Not eligible → always 'idle'.
+  const resolved = eligible && outcome !== null && outcome.key === cacheKey ? outcome : null;
+  const status: NightReadStatus = !eligible
+    ? 'idle'
+    : resolved === null
+      ? 'loading'
+      : resolved.text !== null
+        ? 'ai'
+        : 'unavailable';
+
   return {
-    read: eligible && read !== null && read.key === cacheKey ? read.text : null,
+    read: resolved !== null ? resolved.text : null,
+    status,
     // Ask exactly once: eligible-for-AI, consent loaded, and still undecided.
     needsConsent: aiEligible && consent.ready && consent.status === null,
     grantConsent: consent.grant,
