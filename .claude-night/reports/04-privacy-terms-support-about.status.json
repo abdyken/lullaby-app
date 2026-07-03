@@ -1,0 +1,24 @@
+{
+  "task": "04-privacy-terms-support-about",
+  "status": "done",
+  "summary": "Added Privacy Policy and Terms of Use link rows (inside the existing Privacy & data card), a new Support section with a Contact support mailto row (email shown as the row subtitle so the contact is visible even without a mail app), and build info appended to the About version row (expo-constants nativeBuildVersion) on the existing src/app/settings.tsx screen from task 03. Destinations come from a new pure leaf src/lib/appLinks.ts: each is configurable via an optional env var (EXPO_PUBLIC_PRIVACY_POLICY_URL, EXPO_PUBLIC_TERMS_URL, EXPO_PUBLIC_SUPPORT_EMAIL) and falls back to documented placeholders (https://lullaby.app/privacy, https://lullaby.app/terms, support@lullaby.app) when unset/blank — mirroring the resolveAppInstallUrl idiom. All opens go through a single try/catch openExternal wrapper that shows a calm inline note with the raw URL/email on failure, so absent env values or a device with no browser/mail app can never crash the screen. No secrets are involved (public URLs only). .env.example was recreated via the sanctioned rm+Write pattern (it is read-denied by project permissions) preserving the full 13-var documented surface and §RE-pinned safe defaults, plus the 3 new optional vars; docs/release-env.md gained a Settings-links section; and 4 new §SL smoke checks pin the fallback resolvers, the mailto shape (version-only subject, no body), the guarded single Linking.openURL site, and the no-store-URL/no-secret bans, with the 3 new vars added to RE1's required list.",
+  "files_changed": [
+    "src/lib/appLinks.ts",
+    "src/app/settings.tsx",
+    "scripts/check-local-interactions.ts",
+    ".env.example",
+    "docs/release-env.md"
+  ],
+  "validation_notes": "npx tsc --noEmit: clean. npm run lint (expo lint): exit 0. npm run check:local-interactions: all 383 checks passed (379 pre-existing incl. §RE env-example pins against the rewritten .env.example, + 4 new §SL checks). npm run typecheck / npm test do not exist in this project — tsc + expo lint + the smoke suite are the project's verification commands.",
+  "manual_followups": [
+    "Host real Privacy Policy and Terms pages before App Store submission — the placeholder https://lullaby.app/privacy and /terms URLs are not verified to be live; either host pages there or set EXPO_PUBLIC_PRIVACY_POLICY_URL / EXPO_PUBLIC_TERMS_URL to the real hosted URLs on the build machine or EAS profile.",
+    "Ensure support@lullaby.app (or the EXPO_PUBLIC_SUPPORT_EMAIL override) is a real, monitored mailbox.",
+    "Enter the same hosted privacy policy URL in App Store Connect's privacy policy field so the in-app link and the store listing match.",
+    "The developer's local gitignored .env was deliberately not touched; the three new vars are optional and default safely when absent."
+  ],
+  "apple_review_risk_remaining": [
+    "If the placeholder lullaby.app pages are not hosted by submission time, the reviewer gets a dead link — Apple 5.1.1(i)/1.1 requires a functional privacy policy link.",
+    "Account deletion in-app is still absent; it becomes a hard requirement (5.1.1(v)) if account creation ships enabled.",
+    "Paywall-specific Terms/Privacy/auto-renew disclosure (Apple 3.1.2) remains a separate follow-up if/when real Pro is enabled — smoke guards W10/X3 still ban URLs in Pro surfaces."
+  ]
+}
