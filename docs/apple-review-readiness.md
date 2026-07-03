@@ -11,8 +11,8 @@ the App Store Connect + TestFlight checklists to work through before submitting.
 > local-to-account migration. Pro ships **OFF by default**. Keep it that way for
 > the first submission.
 
-_Generated: 2026-07-03. App version `1.0.0`, bundle id `com.lullaby.app` (do not
-change the bundle id)._
+_Generated: 2026-07-03. App version `1.0.0`. iOS bundle id `com.bizhanash.lullaby`,
+Android package `com.lullaby.app` (do not change either)._
 
 ---
 
@@ -50,7 +50,7 @@ is the test infrastructure. Do not assume a Jest/Vitest runner exists.
 
 ### iOS config confirmed in-repo
 
-- **Bundle id:** `com.lullaby.app` (iOS + Android). Do not change it.
+- **Bundle id:** iOS `com.bizhanash.lullaby`, Android package `com.lullaby.app`. Do not change either.
 - **Version:** `1.0.0`.
 - **Permission strings** — only permission-gated native capability is
   `expo-speech-recognition`; both keys present with review-safe copy:
@@ -159,7 +159,7 @@ on this device and updated just now.
 
 ## 6. App Store Connect checklist
 
-- [ ] App record created for bundle id **`com.lullaby.app`** (do not change it).
+- [ ] App record created for iOS bundle id **`com.bizhanash.lullaby`** (do not change it).
 - [ ] Privacy Policy URL entered — **same** hosted URL the app links to (§4.1).
 - [ ] App Privacy ("data safety"): declare **microphone** + **speech recognition**
       usage; **no data collected**, **no tracking** (local-only v1).

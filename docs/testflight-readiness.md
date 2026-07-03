@@ -140,7 +140,7 @@ Full end-to-end script and known limitations live in
 Native config now present:
 
 - [x] **App name** `Lullaby`, **slug** `lullaby`, **scheme** `lullaby`, version `1.0.0`.
-- [x] **iOS bundle identifier** `com.lullaby.app` and **Android package**
+- [x] **iOS bundle identifier** `com.bizhanash.lullaby` and **Android package**
       `com.lullaby.app` set in `app.json`.
 - [x] **`eas.json`** with `development` / `preview` / `production` profiles
       (`appVersionSource: remote`, production `autoIncrement`).
@@ -149,9 +149,10 @@ Native config now present:
 
 Still required (needs accounts/secrets — intentionally not done here):
 
-- [ ] **Confirm the bundle identifier** before the first submission. `com.lullaby.app`
-      is a safe default; change it to the owner's real reverse-DNS now if desired —
-      **it is permanent once registered** in App Store Connect.
+- [ ] **Confirm the bundle identifier** before the first submission. iOS uses
+      `com.bizhanash.lullaby` (Apple Developer did not allow registering
+      `com.lullaby.app`); the Android package remains `com.lullaby.app`.
+      **The iOS bundle id is permanent once registered** in App Store Connect.
 - [ ] **`eas init`** to create the EAS project and inject `extra.eas.projectId`
       (not fabricated here).
 - [ ] **Apple Developer Program** membership + an App Store Connect app record.
