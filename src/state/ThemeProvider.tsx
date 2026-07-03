@@ -25,8 +25,9 @@ type ThemeContextValue = {
   hydrated: boolean;
   /** true while a native reveal is running (guards double-taps) */
   isTransitioning: boolean;
-  /** capture the current window at this point, then commit the opposite mode */
-  toggleThemeFromPoint: (pageX?: number, pageY?: number) => Promise<void>;
+  /** capture the current window at this point, then commit the opposite mode.
+   * `pressInAt` (ms epoch) is dev-only instrumentation for press→reveal latency. */
+  toggleThemeFromPoint: (pageX?: number, pageY?: number, pressInAt?: number) => Promise<void>;
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -70,6 +71,39 @@ function devWarnThemeReveal(message: string, error?: unknown): void {
       console.warn(`[theme-reveal] ${message}`);
     }
   }
+}
+
+type RevealTiming = {
+  /** finger-down, from the button (undefined for the settings switch / a11y tap) */
+  pressInAt?: number;
+  /** toggleThemeFromPoint entry */
+  pressAt: number;
+  /** native screenshot overlay attached and old theme frozen on screen */
+  overlayVisibleAt: number | null;
+  /** the circular hole animation was kicked off */
+  animationStartAt: number | null;
+  /** React committed the new surface mode underneath the overlay */
+  themeCommitAt: number | null;
+};
+
+/**
+ * Dev-only latency instrumentation. `pressInAt` (finger-down) is the reference —
+ * the moment the user perceives their tap — so these numbers reflect real felt
+ * latency. Targets: pressToOverlayMs ≤ 50ms, pressToAnimationStartMs ≤ 70ms.
+ */
+function devLogRevealTiming(t: RevealTiming): void {
+  if (!__DEV__) return;
+  const ref = t.pressInAt ?? t.pressAt;
+  const since = (value: number | null): number | null => (value == null ? null : Math.round(value - ref));
+  console.log('[theme-reveal] timing', {
+    pressInAt: t.pressInAt ?? null,
+    pressAt: t.pressAt,
+    overlayVisibleAt: t.overlayVisibleAt,
+    animationStartAt: t.animationStartAt,
+    themeCommitAt: t.themeCommitAt,
+    pressToOverlayMs: since(t.overlayVisibleAt),
+    pressToAnimationStartMs: since(t.animationStartAt),
+  });
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -119,11 +153,19 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const toggleThemeFromPoint = useCallback(
-    async (pageX?: number, pageY?: number) => {
+    async (pageX?: number, pageY?: number, pressInAt?: number) => {
       if (transitioningRef.current) return;
 
       transitioningRef.current = true;
       setIsTransitioning(true);
+
+      const timing: RevealTiming = {
+        pressInAt,
+        pressAt: Date.now(),
+        overlayVisibleAt: null,
+        animationStartAt: null,
+        themeCommitAt: null,
+      };
 
       const from: SurfaceMode = modeRef.current;
       const next: SurfaceMode = from === 'night' ? 'day' : 'night';
@@ -138,6 +180,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           Number.isFinite(pageY)
         ) {
           await prepareCircularReveal(pageX, pageY);
+          timing.overlayVisibleAt = Date.now();
           nativeRevealPrepared = true;
         }
       } catch (error) {
@@ -150,14 +193,16 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
       setModeState(next);
       modeRef.current = next;
+      timing.themeCommitAt = Date.now();
       devLogThemeReveal('React theme committed', { from, to: next });
-      void persist(next);
 
       try {
         if (nativeRevealPrepared) {
           await doubleRequestAnimationFrame();
+          timing.animationStartAt = Date.now();
           await startCircularReveal(durationMs);
         } else {
+          timing.animationStartAt = Date.now();
           await nextFrame();
         }
       } catch (error) {
@@ -168,6 +213,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       } finally {
         transitioningRef.current = false;
         setIsTransitioning(false);
+        devLogRevealTiming(timing);
+        // Persist last: AsyncStorage is kept entirely off the reveal critical path.
+        // The in-memory mode already drives the UI; the write only survives restart.
+        void persist(next);
       }
     },
     [persist],
