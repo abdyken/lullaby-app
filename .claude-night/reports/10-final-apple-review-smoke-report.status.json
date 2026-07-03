@@ -1,0 +1,31 @@
+{
+  "task": "10-final-apple-review-smoke-report",
+  "status": "done",
+  "summary": "Final Apple Review copy/legal sweep landed on branch fix/apple-final-review-copy-and-links. Handoff/Tonight sync and caregiver-visible copy is fixed: the card now says \"Tonight’s log is saved on this device.\" and \"Updated just now.\" Invite caregiver no longer promises active sharing in Shape A: AccountSheet and Settings show a disabled/future-facing \"Caregiver invites / Coming later\" row and do not mount the active invite sheet. Pro card/paywall copy no longer says doctor-ready summary, more caregivers, or pediatrician-share summary; it uses \"Fuller history, gentle weekly recaps, and export-ready summaries. Coming later.\" Privacy and Terms links continue to resolve from EXPO_PUBLIC_PRIVACY_POLICY_URL and EXPO_PUBLIC_TERMS_URL, with guarded openURL failure handling. Pro remains flag-gated/off for the intended submission; no bundle id, sync implementation, live paywall, or EAS submit path was changed.",
+  "files_changed": [
+    "src/components/HandoffCard.tsx",
+    "src/components/auth/AccountSheet.tsx",
+    "src/app/settings.tsx",
+    "src/components/UpgradeCard.tsx",
+    "src/features/insights/components/ProPreviewCard.tsx",
+    "src/components/pro/PaywallSheet.tsx",
+    "scripts/check-local-interactions.ts",
+    "docs/apple-review-readiness.md",
+    ".claude-night/reports/10-final-apple-review-smoke-report.status.json"
+  ],
+  "validation_notes": "npm run typecheck: exit 0. npm run lint: exit 0, clean. npm run check:local-interactions: All 391 checks passed, including AE9 for handoff/invite copy and W7b for Pro copy. git diff --check: clean.",
+  "manual_followups": [
+    "Privacy Policy and Terms pages must be hosted before submission. If the placeholder lullaby.app URLs are used as fallbacks, those pages must actually exist; otherwise set EXPO_PUBLIC_PRIVACY_POLICY_URL and EXPO_PUBLIC_TERMS_URL in production EAS env.",
+    "Ensure EXPO_PUBLIC_SUPPORT_EMAIL points to a monitored mailbox before submission.",
+    "Decide account posture for the reviewed binary: ship accounts disabled/unconfigured for Shape A, or apply supabase/migrations/20260703060000_delete_account.sql before review so in-app Delete Account works.",
+    "If accounts are enabled, provide reviewer credentials and confirm the Supabase delete-account migration has been applied before App Store review.",
+    "Clinician sign-off: work docs/reassure-content-review.md and flip REASSURE_CONTENT.status to approved to unlock clinical KB in public builds.",
+    "Do not run EAS submit until App Store Connect credentials and manual metadata/review notes are ready."
+  ],
+  "apple_review_risk_remaining": [
+    "Privacy/Terms links are only App Store safe if the configured or fallback pages are live before submission.",
+    "If accounts ship enabled and the delete-account migration is not applied remotely, Apple 5.1.1(v) remains a rejection risk.",
+    "App Store Connect app-privacy declaration and off-repo metadata must accurately reflect local-only behavior and no medical-advice claims.",
+    "No paywall risk for the intended submission as long as EXPO_PUBLIC_PRO_ENABLED stays off."
+  ]
+}

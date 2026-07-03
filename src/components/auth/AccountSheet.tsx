@@ -10,7 +10,6 @@
  * locally" guest, so the surface can show auth state (signed in vs guest). In the
  * unconfigured local demo the header stays inert, so demo behavior is unchanged.
  */
-import { useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -19,8 +18,6 @@ import { getProMode } from '@/lib/proConfig';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/state/AuthProvider';
 import { colors, fonts, radii, shadows } from '@/theme';
-
-import { InviteCaregiverSheet } from './InviteCaregiverSheet';
 
 export function AccountSheet({ onClose }: { onClose: () => void }) {
   const insets = useSafeAreaInsets();
@@ -31,7 +28,6 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
   // configured build gets the upgrade affordance; an unconfigured local build
   // gets a calm setup-required note instead of a button that goes nowhere.
   const configured = isSupabaseConfigured;
-  const [inviteOpen, setInviteOpen] = useState(false);
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
@@ -91,27 +87,33 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
                   color: colors.inkFaint,
                   marginTop: 8,
                 }}>
-                Your night log is shared with your caregivers on this baby.
+                Account features are signed in here. This Apple-review build keeps logs local-first.
               </Text>
 
-              {/* Low-emphasis invite entry point (Supabase ready mode only). */}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Invite caregiver"
-                onPress={() => setInviteOpen(true)}
-                style={({ pressed }) => ({
+              <View
+                accessibilityLabel="Caregiver invites coming later"
+                style={{
                   marginTop: 18,
-                  minHeight: 48,
-                  alignItems: 'center',
+                  minHeight: 58,
                   justifyContent: 'center',
                   borderRadius: radii.medium,
                   backgroundColor: colors.sleepTint,
-                  opacity: pressed ? 0.7 : 1,
-                })}>
+                  paddingHorizontal: 14,
+                }}>
                 <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.sleep }}>
-                  Invite caregiver
+                  Caregiver invites
                 </Text>
-              </Pressable>
+                <Text
+                  style={{
+                    fontFamily: fonts.body,
+                    fontSize: 12,
+                    lineHeight: 17,
+                    color: colors.inkSoft,
+                    marginTop: 2,
+                  }}>
+                  Coming later. This build keeps logs on this device.
+                </Text>
+              </View>
 
               <Pressable
                 accessibilityRole="button"
@@ -139,7 +141,7 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
             <>
               <Text
                 style={{ fontFamily: fonts.body, fontSize: 13, color: colors.inkSoft, marginTop: 4 }}>
-                Back up and sync your logs.
+                You{'’'}re using Lullaby locally.
               </Text>
               <Text
                 style={{
@@ -188,8 +190,8 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
                     color: colors.inkFaint,
                     marginTop: 16,
                   }}>
-                  Account backup and sync turn on once this build is connected to its account
-                  service.
+                  Accounts are not set up in this build yet. Your baby and logs stay on this
+                  phone.
                 </Text>
               )}
             </>
@@ -202,7 +204,6 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
         </View>
       </View>
 
-      {signedIn && inviteOpen && <InviteCaregiverSheet onClose={() => setInviteOpen(false)} />}
     </Modal>
   );
 }

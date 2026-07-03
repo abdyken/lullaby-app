@@ -1,0 +1,25 @@
+{
+  "task": "05-account-logout-delete-account",
+  "status": "done",
+  "summary": "Logout was already reachable (Settings > Account > Sign out, from task 03) and is verified untouched. Added a clear in-app Delete Account path to Settings for signed-in users: a low-emphasis 'Delete account' row that arms an inline two-step confirm (plain-language permanence copy, 'Permanently delete account' in the calm alert tone, 'Keep my account' escape), wired through a new AuthProvider.deleteAccount() -> sync-layer deleteAccountRemote() -> self-scoped Supabase definer RPC public.delete_account() added as migration supabase/migrations/20260703060000_delete_account.sql. The RPC deletes only auth.uid()'s own account: it first deletes the caller's authored events (required because events.caregiver_id is NOT NULL with ON DELETE SET NULL, which would otherwise abort the cascade for an invited caregiver who logged on a partner's baby), unlinks reassure_audit.user_id, then deletes the auth.users row, cascading profile -> created babies -> shared history/invites. Execute is revoked from PUBLIC/anon and granted only to authenticated. The client drops the local session (signOut scope 'local') strictly AFTER the server delete succeeds; on any failure the parent stays signed in and Settings shows an honest inline fallback naming the support email for a manual deletion request — the app never pretends deletion happened. Local-first data on the phone is preserved, same hygiene as sign-out. NOTE: applying the migration to the linked Supabase project was blocked by the session's permission policy (production-migration deny), so the RPC exists in-repo but is NOT yet applied remotely — until it is applied, the in-app flow degrades to the truthful email-request fallback.",
+  "files_changed": [
+    "supabase/migrations/20260703060000_delete_account.sql",
+    "src/sync/account.ts",
+    "src/sync/index.ts",
+    "src/state/AuthProvider.tsx",
+    "src/app/settings.tsx",
+    "scripts/check-local-interactions.ts"
+  ],
+  "validation_notes": "npx tsc --noEmit: clean (exit 0). npm run lint (expo lint): clean (exit 0). npm run check:local-interactions: all 387 checks pass (383 prior + new DA1-DA4 pinning: two-step confirm labels + permanence copy; RPC self-scoping/no-params/anon-rejection/event-pre-delete/grant-only-authenticated; provider ordering server-delete-before-local-signout, no local-store wipe, no stale provider errorMessage; failure path awaits verified result and names the support email; no service-role key in the client path). Existing SL3 guard (exactly one Linking.openURL site in settings.tsx) still passes — no new open sites were added. No npm test script exists in this project (documented previously); the smoke suite is the test infrastructure. End-to-end device verification was not possible overnight (needs a configured build + a signed-in session + the migration applied).",
+  "manual_followups": [
+    "Apply the new migration to the Supabase project before submission: `supabase db push` (or paste supabase/migrations/20260703060000_delete_account.sql into the SQL editor). The MCP apply_migration attempt was denied by the session permission policy, so this MUST be done by a human — until then, in-app deletion fails gracefully to the email-request fallback.",
+    "After applying, QA the full path on a configured build: sign in, log an event, Settings > Delete account > confirm, verify landing on the account-entry surface, verify the auth user + profile + created baby rows are gone, and verify local-first data on the phone survived.",
+    "QA the shared-baby edge: an INVITED caregiver (not the baby's creator) with logged events deletes their account — this is the events.caregiver_id NOT NULL landmine the RPC pre-delete exists for.",
+    "Ensure support@lullaby.app (or the EXPO_PUBLIC_SUPPORT_EMAIL override) is a monitored mailbox, since it is the documented manual deletion-request channel when the RPC path fails."
+  ],
+  "apple_review_risk_remaining": [
+    "If the migration is not applied before submission and the reviewer tests deletion on a configured build, the in-app path visibly falls back to an email request — Apple 5.1.1(v) generally requires in-app deletion to work, so applying the migration is effectively a pre-submission blocker whenever accounts are enabled in the shipped build.",
+    "If Shape A ships unconfigured (no Supabase env), no sign-in/sign-up is functional and no signed-in state exists, so the Delete Account requirement is moot for that binary — but the account-entry surface's wording should stay truthful about accounts being unavailable (covered by task 02).",
+    "Deleting a baby's creator deletes the baby and its shared history for all linked caregivers; the confirm copy states this plainly, but a reviewer or user could still find it surprising — an ownership-transfer flow would be the long-term fix (out of scope for v1)."
+  ]
+}

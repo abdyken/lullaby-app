@@ -4,8 +4,7 @@
  * sign-in wall: local-first stays the default ("Continue locally"), and creating
  * an account / signing in are offered, not forced. This is the direct expression
  * of the auth guardrail: NEVER force account creation — "Continue locally" must
- * remain. The value copy explains what an account adds (backup, sync, sharing
- * later) without over-promising partner/realtime sync.
+ * remain. The value copy stays honest for Shape A: local-only v1.
  *
  * Self-contained two-view surface so the gate stays a one-liner:
  *   intro → the value pitch + three choices (Create account / Continue locally / Sign in)
@@ -42,9 +41,9 @@ function ValueChip({ label }: { label: string }) {
 function ValueChips() {
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-      <ValueChip label="Backup" />
-      <ValueChip label="Sync" />
-      <ValueChip label="Caregiver sharing" />
+      <ValueChip label="Saved on this device" />
+      <ValueChip label="Optional account" />
+      <ValueChip label="Privacy-first" />
     </View>
   );
 }
@@ -103,8 +102,8 @@ function SetupRequiredNote() {
         Accounts are not set up in this build yet
       </Text>
       <Text style={{ fontFamily: fonts.body, fontSize: 13, lineHeight: 19, color: colors.inkSoft }}>
-        Backup and sync turn on once Lullaby is connected to its account service. For now,
-        everything stays safely on this phone.
+        Sign-in and account backup are unavailable here. Everything you log stays safely on
+        this phone.
       </Text>
     </View>
   );
@@ -145,7 +144,7 @@ export function AccountEntryScreen() {
     <AuthShell
       eyebrow="Lullaby"
       title="Save your night log"
-      subtitle="Create an account to back up your baby's care history and pick up on another device."
+      subtitle="Lullaby works without an account. For this build, your baby's care history stays on this phone."
       footer={
         configured ? (
           <AuthLink label="Already have an account? Sign in" onPress={() => openAuth('signIn')} />

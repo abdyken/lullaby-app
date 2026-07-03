@@ -31,7 +31,7 @@ const GRADIENT: Record<SurfaceMode, [string, string]> = {
 
 const TITLE = 'Understand your baby’s rhythm';
 const SUBLINE =
-  'Full history, a gentle weekly recap, a doctor-ready summary, and more caregivers. Coming soon.';
+  'Fuller history, gentle weekly recaps, and export-ready summaries. Coming later.';
 const CTA = 'See what’s included';
 const CONFIRM = 'Thanks — Lullaby Pro is coming soon.';
 
