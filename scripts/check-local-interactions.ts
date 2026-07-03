@@ -5219,6 +5219,26 @@ check('X3. PaywallSheet has no external payment link and does not import the sub
   }
 });
 
+check('X3b. PaywallSheet shows Terms + Privacy links wired through appLinks (no hardcoded URL)', () => {
+  // App Store / Play review requires reachable Terms + Privacy from the purchase
+  // surface. The links must be present, must resolve through the env-configurable
+  // appLinks helpers (EXPO_PUBLIC_TERMS_URL / EXPO_PUBLIC_PRIVACY_POLICY_URL), and
+  // must NOT hardcode a URL (the no-URL ban in X3 stays the proof of that).
+  assert.ok(PAYWALL_SHEET_SRC.includes('Terms of Use'), 'PaywallSheet shows a Terms of Use link');
+  assert.ok(PAYWALL_SHEET_SRC.includes('Privacy Policy'), 'PaywallSheet shows a Privacy Policy link');
+  assert.ok(PAYWALL_SHEET_SRC.includes('resolveTermsUrl'), 'Terms link resolves through appLinks (env-configurable)');
+  assert.ok(
+    PAYWALL_SHEET_SRC.includes('resolvePrivacyPolicyUrl'),
+    'Privacy link resolves through appLinks (env-configurable)',
+  );
+  // Exactly one openURL site, mirroring the settings.tsx crash-safe pattern.
+  assert.equal(
+    PAYWALL_SHEET_SRC.split('Linking.openURL').length - 1,
+    1,
+    'PaywallSheet opens links through a single guarded Linking.openURL site',
+  );
+});
+
 check('X4. ProPaywallHost drives PaywallSheet from usePro and is mounted under ProProvider', () => {
   assert.ok(PRO_PAYWALL_HOST_SRC.includes('usePro'), 'host reads Pro state via usePro');
   assert.ok(PRO_PAYWALL_HOST_SRC.includes('isPaywallOpen'), 'host renders on isPaywallOpen');
