@@ -1,0 +1,9 @@
+{
+  "task": "02-local-only-truthful-copy",
+  "status": "partial",
+  "summary": "WRAPPER-GENERATED: Claude did not produce a valid status JSON. The Claude run failed or hit the pause-cycle cap.",
+  "files_changed": [],
+  "validation_notes": "see .claude-night/logs/02-local-only-truthful-copy.*.log and the git diff on the task branch",
+  "manual_followups": ["Review the task branch diff manually", "Decide whether to merge or drop this branch"],
+  "apple_review_risk_remaining": ["Task outcome unverified - treat this blocker as still open"]
+}
