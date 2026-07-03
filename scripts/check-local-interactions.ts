@@ -6875,6 +6875,87 @@ check('SL4. no store URL, secret, or payment reference rides into the link surfa
   assert.ok(!/Stripe|checkout/i.test(APP_LINKS_SRC), 'no payment link sneaks into appLinks');
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// §DA. Delete account (Apple 5.1.1(v)) — Settings offers honest in-app account
+// deletion: an armed two-step confirm, a self-scoped definer RPC, the local
+// session dropped only AFTER the server verifiably deleted the account, and a
+// manual email fallback on failure. Local-first stores survive, same as
+// sign-out.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DELETE_ACCOUNT_MIGRATION_SRC = readFileSync(
+  new URL('../supabase/migrations/20260703060000_delete_account.sql', import.meta.url),
+  'utf8',
+);
+const SYNC_ACCOUNT_SRC = readFileSync(new URL('../src/sync/account.ts', import.meta.url), 'utf8');
+
+check('DA1. Settings arms Delete account behind an explicit second confirm tap', () => {
+  assert.ok(SETTINGS_SCREEN_SRC.includes('accessibilityLabel="Delete account"'), 'the entry row exists');
+  assert.ok(
+    SETTINGS_SCREEN_SRC.includes('accessibilityLabel="Permanently delete account"'),
+    'the destructive tap is a separate, explicit confirm',
+  );
+  assert.ok(
+    SETTINGS_SCREEN_SRC.includes('accessibilityLabel="Keep my account"'),
+    'the confirm block offers a calm way out',
+  );
+  assert.ok(
+    /can\s*\{'’'\}t be undone/.test(SETTINGS_SCREEN_SRC),
+    'the confirm copy states permanence plainly',
+  );
+});
+
+check('DA2. the delete_account RPC is self-scoped and locked to signed-in callers', () => {
+  const src = DELETE_ACCOUNT_MIGRATION_SRC;
+  assert.ok(src.includes('security definer'), 'definer RPC — deleting auth.users needs privilege');
+  assert.ok(src.includes('auth.uid()'), 'the target comes from the token, never a parameter');
+  assert.ok(src.includes('create or replace function public.delete_account()'), 'takes no parameters — cannot target another user');
+  assert.ok(src.includes('if v_uid is null then'), 'anonymous callers are rejected inside the function too');
+  assert.ok(
+    src.includes('delete from public.events where caregiver_id = v_uid'),
+    'authored events are cleared first (events.caregiver_id is NOT NULL with ON DELETE SET NULL)',
+  );
+  assert.ok(
+    src.includes('delete from auth.users where id = v_uid'),
+    'the account row itself is deleted — real deletion, not a soft flag',
+  );
+  assert.ok(src.includes('revoke all on function public.delete_account() from public'), 'not callable by PUBLIC');
+  assert.ok(src.includes('revoke all on function public.delete_account() from anon'), 'not callable anonymously');
+  assert.ok(src.includes('grant execute on function public.delete_account() to authenticated'), 'signed-in self-service only');
+});
+
+check('DA3. deleteAccount drops the local session only after the server delete succeeds', () => {
+  const rpcAt = AUTH_PROVIDER_SRC.indexOf('await deleteAccountRemote()');
+  const localSignOutAt = AUTH_PROVIDER_SRC.indexOf("signOut({ scope: 'local' })");
+  assert.ok(rpcAt !== -1, 'the provider calls the sync-layer RPC wrapper');
+  assert.ok(localSignOutAt !== -1, "the follow-up sign-out is scope 'local' (the server user no longer exists)");
+  assert.ok(rpcAt < localSignOutAt, 'server delete precedes the local session drop');
+  const body = AUTH_PROVIDER_SRC.slice(
+    AUTH_PROVIDER_SRC.indexOf('const deleteAccount'),
+    AUTH_PROVIDER_SRC.indexOf('const clearError'),
+  );
+  assert.ok(body.includes('return false'), 'a failed RPC resolves false so the UI can stay honest');
+  assert.ok(!body.includes('clearLocalEventStorage'), 'local-first stores survive deletion (same hygiene as signOut)');
+  assert.ok(
+    !body.includes('setErrorMessage('),
+    'no provider errorMessage — it would resurface as a stale note on the account surfaces later',
+  );
+});
+
+check('DA4. a failed deletion surfaces the manual email fallback, never a fake success', () => {
+  assert.ok(
+    SETTINGS_SCREEN_SRC.includes('const deleted = await deleteAccount()'),
+    'the screen awaits the verified server result before leaving',
+  );
+  assert.ok(/Couldn’t delete your account just now/.test(SETTINGS_SCREEN_SRC), 'calm failure copy');
+  assert.ok(SETTINGS_SCREEN_SRC.includes('${supportEmail}'), 'the fallback names the real support address');
+  assert.ok(SYNC_ACCOUNT_SRC.includes("rpc('delete_account')"), 'deletion goes through the self-scoped RPC');
+  assert.ok(
+    !SYNC_ACCOUNT_SRC.includes('SERVICE_ROLE'),
+    'no service-role key anywhere near the client deletion path',
+  );
+});
+
 runAsyncChecks()
   .then(() => {
     console.log(`\nAll ${passed} checks passed ✅`);
