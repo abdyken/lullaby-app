@@ -1,12 +1,14 @@
 /**
  * ProPreviewCard — the Lullaby Pro card in Insights, shown once the parent has
- * enough data to feel the value. Its behavior depends on getProMode():
+ * enough data to feel the value. Its behavior depends on getProMode() + the live
+ * Pro entitlement:
  *
  *   preview  → NON-PAID fake-door: the two CTAs only record interest
  *              (`upgrade_card_tapped` / `export_tapped`) and show "coming soon".
  *   enabled + free  → the CTAs open the PaywallSheet; "Export this week" records
  *                     the gate it hit (`pro_gate_seen` + `paywall_opened`).
- *   enabled + Pro   → "Export this week" runs the REAL weekly export: it shares
+ *   enabled + Pro   → no upsell CTA (an active subscriber is never nudged to buy).
+ *                     "Export this week" runs the REAL weekly export: it shares
  *                     the calm, non-medical `buildWeeklyExportText(viewModel)` via
  *                     the OS share sheet (`export_started` / `export_completed`).
  *
@@ -27,9 +29,12 @@ import { shareWeeklyExport } from '../shareWeeklyExport';
 import type { InsightsViewModel } from '../types';
 import { InsightsSectionCard } from './InsightsSectionCard';
 
-const FEATURES = [
-  'Fuller history, gentle weekly recaps, and export-ready summaries. Coming later.',
-];
+// Fake-door (preview) keeps the "coming later" framing; the live upsell and the
+// active-subscriber state drop it.
+const FEATURE_PREVIEW =
+  'Fuller history, gentle weekly recaps, and export-ready summaries. Coming later.';
+const FEATURE_LIVE = 'Fuller history, gentle weekly recaps, and export-ready summaries.';
+const FEATURE_ACTIVE = 'Your Pro features are unlocked — export a weekly recap anytime.';
 
 const CONFIRM = 'Lullaby Pro is coming soon — thanks for the interest.';
 const EXPORT_READY = 'Weekly export is ready to share.';
@@ -54,6 +59,9 @@ export function ProPreviewCard({ viewModel }: { viewModel: InsightsViewModel }) 
   const { openPaywall, isPro } = usePro();
   // A calm one-line confirmation shown after a CTA (coming-soon / export-ready).
   const [feedback, setFeedback] = useState<string | null>(null);
+  // Real paywall available (vs. the non-paid fake-door preview).
+  const live = getProMode() === 'enabled';
+  const featureLine = isPro ? FEATURE_ACTIVE : live ? FEATURE_LIVE : FEATURE_PREVIEW;
 
   const onUpgrade = () => {
     // Real Pro build → open the paywall.
@@ -98,11 +106,9 @@ export function ProPreviewCard({ viewModel }: { viewModel: InsightsViewModel }) 
   };
 
   return (
-    <InsightsSectionCard title="Lullaby Pro" actionLabel="Soon">
+    <InsightsSectionCard title="Lullaby Pro" actionLabel={isPro ? 'Active' : 'Soon'}>
       <View style={{ gap: 8 }}>
-        {FEATURES.map((feature) => (
-          <FeatureRow key={feature} text={feature} color={colors.feed} inkColor={palette.inkSoft} />
-        ))}
+        <FeatureRow text={featureLine} color={colors.feed} inkColor={palette.inkSoft} />
       </View>
 
       {feedback ? (
@@ -111,22 +117,25 @@ export function ProPreviewCard({ viewModel }: { viewModel: InsightsViewModel }) 
         </Text>
       ) : (
         <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="See what Lullaby Pro includes"
-            onPress={onUpgrade}
-            hitSlop={6}
-            style={({ pressed }) => ({
-              paddingVertical: 9,
-              paddingHorizontal: 14,
-              borderRadius: radii.pill,
-              backgroundColor: colors.feedTint,
-              opacity: pressed ? 0.7 : 1,
-            })}>
-            <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.feed }}>
-              See what’s included
-            </Text>
-          </Pressable>
+          {/* An active subscriber is never shown the "See what's included" upsell. */}
+          {isPro ? null : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="See what Lullaby Pro includes"
+              onPress={onUpgrade}
+              hitSlop={6}
+              style={({ pressed }) => ({
+                paddingVertical: 9,
+                paddingHorizontal: 14,
+                borderRadius: radii.pill,
+                backgroundColor: colors.feedTint,
+                opacity: pressed ? 0.7 : 1,
+              })}>
+              <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.feed }}>
+                See what’s included
+              </Text>
+            </Pressable>
+          )}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Export this week"

@@ -1,12 +1,21 @@
 /**
- * UpgradeCard — a calm, NON-PAID "Lullaby Pro" preview. There is no payment, no
- * RevenueCat, and no live paywall: tapping only records an `upgrade_card_tapped`
- * analytics event (interest signal for the retention test) and shows a quiet
- * "coming soon" line. Purely presentational; it never gates anything.
+ * UpgradeCard — the "Lullaby Pro" card in the AccountSheet. Its behavior follows
+ * getProMode() + the live Pro entitlement, so a single card serves every state:
  *
- * Visual language follows the HandoffCard skeleton (soft gradient, eyebrow +
- * title + subline + low-emphasis CTA). Defaults to the day palette so it sits
- * cleanly on the white AccountSheet, which has no theme context.
+ *   isPro (any mode)  → a calm "Pro is active" status. NO upsell CTA, no "Soon"
+ *                       badge, no "coming soon/later" copy — an already-subscribed
+ *                       parent is never nudged to buy what they already have. This
+ *                       doubles as the Account surface's current-Pro-state display.
+ *   enabled + free    → a real upsell: tapping opens the shared PaywallSheet
+ *                       (`paywall_opened` + openPaywall). No "coming later" copy —
+ *                       the paywall is live.
+ *   preview (fake)    → the NON-PAID fake-door: tapping records `upgrade_card_tapped`
+ *                       and shows a quiet "coming soon" line. No payment, no paywall.
+ *
+ * Purely presentational; it never gates anything. Visual language follows the
+ * HandoffCard skeleton (soft gradient, eyebrow + title + subline + low-emphasis
+ * CTA). Defaults to the day palette so it sits cleanly on the white AccountSheet,
+ * which has no theme context.
  */
 import { LinearGradient } from 'expo-linear-gradient';
 import { useState } from 'react';
@@ -30,19 +39,28 @@ const GRADIENT: Record<SurfaceMode, [string, string]> = {
 };
 
 const TITLE = 'Understand your baby’s rhythm';
-const SUBLINE =
+// Fake-door (preview) subline keeps the "coming later" framing; the live upsell
+// drops it because the paywall is real.
+const SUBLINE_PREVIEW =
   'Fuller history, gentle weekly recaps, and export-ready summaries. Coming later.';
+const SUBLINE_LIVE = 'Fuller history, gentle weekly recaps, and export-ready summaries.';
 const CTA = 'See what’s included';
 const CONFIRM = 'Thanks — Lullaby Pro is coming soon.';
 
+// Already-subscribed state — a calm status, never an upsell.
+const ACTIVE_TITLE = 'Lullaby Pro is active';
+const ACTIVE_SUBLINE = 'Your Pro features are unlocked. Thank you for supporting Lullaby.';
+
 export function UpgradeCard({ source, surfaceMode = 'day' }: Props) {
   const track = useAnalytics();
-  const { openPaywall } = usePro();
+  const { openPaywall, isPro } = usePro();
   const [tapped, setTapped] = useState(false);
   const palette = surfaces[surfaceMode];
+  // Real paywall available (vs. the non-paid fake-door preview).
+  const live = getProMode() === 'enabled';
 
   const onPress = () => {
-    // Real Pro build → open the paywall (Phase 2 skeleton). Coarse props only.
+    // Real Pro build → open the shared paywall. Coarse props only.
     if (getProMode() === 'enabled') {
       track('paywall_opened', { source, surface: 'upgrade_card' });
       openPaywall();
@@ -78,28 +96,32 @@ export function UpgradeCard({ source, surfaceMode = 'day' }: Props) {
           }}>
           Lullaby Pro
         </Text>
-        <View
-          style={{
-            paddingHorizontal: 8,
-            paddingVertical: 2,
-            borderRadius: radii.pill,
-            backgroundColor: colors.sleepTint,
-          }}>
-          <Text
+        {/* "Soon" badge only in the fake-door preview — never for a live paywall
+            or an already-active subscriber. */}
+        {!isPro && !live ? (
+          <View
             style={{
-              fontFamily: fonts.bodyBold,
-              fontSize: 9.5,
-              letterSpacing: 0.6,
-              textTransform: 'uppercase',
-              color: colors.sleep,
+              paddingHorizontal: 8,
+              paddingVertical: 2,
+              borderRadius: radii.pill,
+              backgroundColor: colors.sleepTint,
             }}>
-            Soon
-          </Text>
-        </View>
+            <Text
+              style={{
+                fontFamily: fonts.bodyBold,
+                fontSize: 9.5,
+                letterSpacing: 0.6,
+                textTransform: 'uppercase',
+                color: colors.sleep,
+              }}>
+              Soon
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       <Text style={{ fontFamily: fonts.display, fontSize: 16.5, color: palette.ink, marginTop: 6 }}>
-        {TITLE}
+        {isPro ? ACTIVE_TITLE : TITLE}
       </Text>
       <Text
         style={{
@@ -109,10 +131,11 @@ export function UpgradeCard({ source, surfaceMode = 'day' }: Props) {
           color: palette.inkSoft,
           marginTop: 4,
         }}>
-        {SUBLINE}
+        {isPro ? ACTIVE_SUBLINE : live ? SUBLINE_LIVE : SUBLINE_PREVIEW}
       </Text>
 
-      {tapped ? (
+      {/* Already-active parents get no CTA at all — just the status above. */}
+      {isPro ? null : tapped ? (
         <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12, color: colors.sleep, marginTop: 10 }}>
           {CONFIRM}
         </Text>
