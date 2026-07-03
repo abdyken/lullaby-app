@@ -6426,8 +6426,17 @@ check('X22. client contract: local read first, 3s ceiling, Pro-gated; topic poli
     new URL('../src/features/reassure/application/nightRead.ts', import.meta.url),
     'utf8',
   );
-  assert.ok(hookSrc.includes('FETCH_TIMEOUT_MS = 3_000'), 'hard 3s client ceiling');
-  assert.ok(hookSrc.includes('Promise.race'), 'the LLM read races the ceiling — UI never blocks');
+  // The client wait-cap must EXCEED the function's own 8s server-side LLM
+  // timeout, or an uncached call (~5-8s: model + guardrail + audit + cache write)
+  // gets abandoned before it answers and mislabeled "unavailable" while the
+  // server is still succeeding + caching (the exact bug the first live test hit).
+  assert.ok(hookSrc.includes('FETCH_TIMEOUT_MS = 12_000'), 'client wait-cap is 12s');
+  const capMatch = hookSrc.match(/FETCH_TIMEOUT_MS = (\d[\d_]*)/);
+  assert.ok(capMatch && Number(capMatch[1].replace(/_/g, '')) > RX_LLM.LLM_TIMEOUT_MS,
+    'the client wait-cap exceeds the 8s server-side LLM timeout');
+  assert.ok(hookSrc.includes('Promise.race'), 'the read races a wait-cap — the UI never blocks (local read is already shown)');
+  // A cap-hit is UNKNOWN, never a failure: pending → keep loading, retry next open.
+  assert.ok(hookSrc.includes("return { kind: 'pending' }"), 'a wait-cap timeout is pending, not unavailable');
   assert.ok(hookSrc.includes('canUseLlmNightRead(isPro)'), 'the LLM read is Pro-gated');
   const cardSrc = readFileSync(
     new URL('../src/features/reassure/components/RecapCard.tsx', import.meta.url),
@@ -6659,7 +6668,7 @@ check('X24e. consent never leaks: no phone, no analytics, no LLM in the consent 
 });
 
 // ---------------------------------------------------------------------------
-// NR1–NR5: night-read release-readiness. The real deployed calls (2026-07-02
+// NR1–NR7: night-read release-readiness. The real deployed calls (2026-07-02
 // audit) all ended in guardrail_block: valid JSON, short, end_turn — but every
 // response reached for the word "okay" ("that's okay"), which is judgement
 // vocabulary the night read has no source text to exempt, so it was a VOCAB
@@ -6784,14 +6793,78 @@ check('NR6. the honest AI/fallback label is wired and keeps the non-medical disc
     noteSrc.includes('the local read based on your logs'),
     'the unavailable note points at the local read, not a technical failure',
   );
-  // The screen renders it, driven by the hook status; the hook models all four states.
+  // The screen renders it, driven by the hook status; the four states live in
+  // the pure view leaf, and the hook derives its status from it.
   assert.ok(
     RX_REASSURE_SCREEN_SRC.includes('<AiReadNote surfaceMode={mode} status={nightReadStatus} />'),
     'the reassure screen renders the honest label under the recap',
   );
+  const viewSrc = readFileSync(
+    new URL('../src/features/reassure/domain/nightReadView.ts', import.meta.url),
+    'utf8',
+  );
   for (const s of ['idle', 'loading', 'ai', 'unavailable']) {
-    assert.ok(RX_NIGHTREAD_HOOK_SRC.includes(`'${s}'`), `the hook models the "${s}" status`);
+    assert.ok(viewSrc.includes(`'${s}'`), `the view leaf models the "${s}" status`);
   }
+  assert.ok(
+    RX_NIGHTREAD_HOOK_SRC.includes('nightReadView('),
+    'the hook derives its status from the pure view leaf',
+  );
+});
+
+check('NR7. display path: an llm/cached read shows AI status; a resolved fallback shows unavailable; idle is silent', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const view = require('../src/features/reassure/domain/nightReadView') as {
+    classifyNightReadResponse: (body: unknown) => { kind: 'read'; text: string } | { kind: 'fallback' };
+    nightReadView: (
+      eligible: boolean,
+      resolved: { text: string | null } | null,
+    ) => { read: string | null; status: 'idle' | 'loading' | 'ai' | 'unavailable' };
+  };
+
+  // A fresh llm answer and a server CACHE HIT both arrive as { read, source:'llm' }.
+  const fresh = view.classifyNightReadResponse({ read: 'Nothing has been logged yet tonight.', source: 'llm' });
+  assert.deepEqual(fresh, { kind: 'read', text: 'Nothing has been logged yet tonight.' });
+  const cached = view.classifyNightReadResponse({ read: 'Two feeds are logged so far.', source: 'llm' });
+  assert.deepEqual(cached, { kind: 'read', text: 'Two feeds are logged so far.' });
+  // Fallbacks: null read, missing read, empty/whitespace, or no body → local read.
+  for (const body of [
+    { read: null, source: 'fallback' },
+    { source: 'fallback' },
+    { read: '   ', source: 'llm' },
+    null,
+    undefined,
+  ]) {
+    assert.deepEqual(
+      view.classifyNightReadResponse(body),
+      { kind: 'fallback' },
+      `fallback for ${JSON.stringify(body)}`,
+    );
+  }
+
+  // The view maps eligibility + resolved outcome to the read + honest status.
+  // 1) llm response displays AI status (read shown).
+  assert.deepEqual(view.nightReadView(true, { text: fresh.text }), { read: fresh.text, status: 'ai' });
+  // 2) cached llm response displays AI status.
+  assert.deepEqual(view.nightReadView(true, { text: cached.text }), { read: cached.text, status: 'ai' });
+  // 3) resolved fallback displays the unavailable note (no read).
+  assert.deepEqual(view.nightReadView(true, { text: null }), { read: null, status: 'unavailable' });
+  // 4) local-only idle shows NO AI failure (not eligible → idle, nothing rendered).
+  assert.deepEqual(view.nightReadView(false, null), { read: null, status: 'idle' });
+  assert.deepEqual(view.nightReadView(false, { text: null }), { read: null, status: 'idle' });
+  // 5) in-flight / wait-cap pending stays a calm loading state (never the note).
+  assert.deepEqual(view.nightReadView(true, null), { read: null, status: 'loading' });
+
+  // AiReadNote renders nothing for idle/loading — a not-attempted state can never
+  // surface as an AI failure.
+  const noteSrc = readFileSync(
+    new URL('../src/features/reassure/components/AiReadNote.tsx', import.meta.url),
+    'utf8',
+  );
+  assert.ok(
+    noteSrc.includes("if (status !== 'ai' && status !== 'unavailable') return null;"),
+    'idle/loading render nothing (no scary AI failure surface)',
+  );
 });
 
 // §PC — the Reassure triage "Call pediatrician" phone action (local + private).

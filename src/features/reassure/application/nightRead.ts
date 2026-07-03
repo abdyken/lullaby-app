@@ -18,15 +18,21 @@
  * Anthropic. The client cannot see it and does not need to; consent + Pro are
  * the two client-side gates.
  *
- * Flow: AsyncStorage cache (per baby per night) → edge function with a hard
- * 3s abort → cache + show. The edge function re-computes tallies server-side
- * under RLS and runs the triage-first flow; see
- * supabase/functions/reassure-night-read/index.ts.
+ * Flow: AsyncStorage cache (per baby per night) → edge function (allowed to run
+ * to completion under a client wait-cap that EXCEEDS the function's own 8s LLM
+ * timeout, so a slow-but-successful read is never dropped) → cache + show. The
+ * edge function re-computes tallies server-side under RLS and runs the
+ * triage-first flow; see supabase/functions/reassure-night-read/index.ts.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
 
 import { consentAllowsAiNightRead } from '@/features/reassure/domain/aiConsent';
+import {
+  classifyNightReadResponse,
+  nightReadView,
+  type NightReadStatus,
+} from '@/features/reassure/domain/nightReadView';
 import type { ReassureNightRecap } from '@/features/reassure/domain/types';
 import { canUseLlmNightRead } from '@/lib/proGates';
 import { supabase } from '@/lib/supabase';
@@ -38,7 +44,13 @@ import { NIGHT_READ_CACHE_PREFIX } from './nightReadKeys';
 import { useAiNightReadConsent } from './useAiNightReadConsent';
 
 const CACHE_PREFIX = NIGHT_READ_CACHE_PREFIX;
-const FETCH_TIMEOUT_MS = 3_000;
+// Client wait-cap. It must EXCEED the function's own 8s server-side LLM timeout
+// (LLM_TIMEOUT_MS in _shared/reassureLlm.ts) — otherwise an uncached call, which
+// routinely takes ~5-8s (model + guardrail + audit + cache write; measured 7.2s
+// on the first live success), is abandoned before it answers and mislabeled
+// "unavailable" while the server is actually succeeding + caching. Hitting this
+// cap is treated as 'pending' (unknown), never as a failure.
+const FETCH_TIMEOUT_MS = 12_000;
 
 /** The night's key = the local calendar date the window OPENED on. */
 export function nightKeyFor(windowStartMs: number): string {
@@ -50,42 +62,52 @@ export function nightKeyFor(windowStartMs: number): string {
 
 type NightReadResponse = { read?: string; source?: string };
 
-async function fetchNightRead(babyId: string, nightKey: string): Promise<string | null> {
-  if (!supabase) return null;
+/**
+ * The three ways an attempt can resolve for the UI:
+ *   - 'read'     → the function returned an AI read (fresh or server-cached).
+ *   - 'fallback' → the function RESOLVED with no read (guardrail / disabled /
+ *                  error) → the honest "unavailable" note.
+ *   - 'pending'  → we hit the client wait-cap before the function answered.
+ *                  UNKNOWN, not a failure: keep the calm loading state and let
+ *                  the next open pick the read up from the fast server cache.
+ */
+type FetchOutcome = { kind: 'read'; text: string } | { kind: 'fallback' } | { kind: 'pending' };
+
+async function fetchNightRead(babyId: string, nightKey: string): Promise<FetchOutcome> {
+  if (!supabase) return { kind: 'fallback' };
   try {
-    // Hard 3s ceiling: the local read is already on screen, so a slow function
-    // simply loses the race and the parent never notices.
-    const result = await Promise.race([
-      supabase.functions.invoke<NightReadResponse>('reassure-night-read', {
-        body: {
-          babyId,
-          nightKey,
-          tzOffsetMinutes: new Date().getTimezoneOffset(),
-        },
-      }),
-      new Promise<null>((resolve) => {
-        setTimeout(() => resolve(null), FETCH_TIMEOUT_MS);
+    // The local read is already on screen, so nothing blocks. We let the invoke
+    // run to completion (the function bounds itself to 8s server-side) and only
+    // cap the wait to avoid hanging forever — a cap-hit is 'pending', never a
+    // failure. A short abort here is exactly what showed "unavailable" while a
+    // ~7s call was still succeeding and caching the read server-side.
+    const raced = await Promise.race([
+      supabase.functions
+        .invoke<NightReadResponse>('reassure-night-read', {
+          body: {
+            babyId,
+            nightKey,
+            tzOffsetMinutes: new Date().getTimezoneOffset(),
+          },
+        })
+        .then((r) => ({ timedOut: false as const, r })),
+      new Promise<{ timedOut: true }>((resolve) => {
+        setTimeout(() => resolve({ timedOut: true }), FETCH_TIMEOUT_MS);
       }),
     ]);
-    if (result == null || result.error || !result.data?.read) return null;
-    return result.data.read;
+    if (raced.timedOut) return { kind: 'pending' };
+    if (raced.r.error) return { kind: 'fallback' };
+    // A server cache hit and a fresh model answer both return { read, source:'llm' }.
+    return classifyNightReadResponse(raced.r.data);
   } catch {
-    return null;
+    return { kind: 'fallback' };
   }
 }
 
-/**
- * Coarse, honest status for the UI — never a technical error, never a leak of a
- * blocked-vs-timeout distinction:
- *   - 'idle'        — the client is not attempting an AI read (not Pro/eligible,
- *                     no consent, empty night). Show the local read, nothing else.
- *   - 'loading'     — eligible + consented, the attempt is in flight (≤3s). Still
- *                     just the local read; no spinner, no caption.
- *   - 'ai'          — an AI read is showing; label it clearly as AI-phrased.
- *   - 'unavailable' — we attempted and got no AI read (fallback/blocked/timeout);
- *                     show a calm "AI read isn't available right now" note.
- */
-export type NightReadStatus = 'idle' | 'loading' | 'ai' | 'unavailable';
+// The coarse UI status lives in the pure domain leaf (domain/nightReadView.ts)
+// so the smoke runner can pin the display contract; re-exported here for the
+// components that already import it from this hook.
+export type { NightReadStatus };
 
 export type NightReadState = {
   /** The AI-phrased read to overlay on the local recap, or null to keep local. */
@@ -150,17 +172,22 @@ export function useNightRead(recap: ReassureNightRecap): NightReadState {
         }
         const fetched = await fetchNightRead(babyId, nightKey);
         if (cancelled) return;
-        if (fetched == null) {
-          // Attempted and came back empty (server fallback / guardrail / timeout).
-          // Record the honest "no AI read" so the UI can show a calm note rather
-          // than silently pretend nothing was tried. Nothing is cached, so a
-          // later open re-attempts once the prompt/kill-switch is fixed.
+        if (fetched.kind === 'read') {
+          setOutcome({ key: cacheKey, text: fetched.text });
+          track('reassure_night_read_shown', { source: 'llm' });
+          void AsyncStorage.setItem(cacheKey, fetched.text).catch(() => {});
+          return;
+        }
+        if (fetched.kind === 'fallback') {
+          // The function RESOLVED with no AI read (guardrail / disabled / error).
+          // Honest "unavailable": the local read stays and nothing is cached, so a
+          // later open re-attempts once the prompt / kill-switch is fixed.
           setOutcome({ key: cacheKey, text: null });
           return;
         }
-        setOutcome({ key: cacheKey, text: fetched });
-        track('reassure_night_read_shown', { source: 'llm' });
-        void AsyncStorage.setItem(cacheKey, fetched).catch(() => {});
+        // 'pending' — we hit the client wait-cap before the function answered.
+        // Leave the outcome UNRESOLVED (calm loading, never the scary note); the
+        // next open re-attempts and picks the read up from the fast server cache.
       } catch {
         // silently keep the local read
       }
@@ -172,18 +199,13 @@ export function useNightRead(recap: ReassureNightRecap): NightReadState {
   }, [babyId, cacheKey, eligible, nightKey, track]);
 
   // Only trust an outcome that belongs to the CURRENT key (a stale one for a
-  // different night/baby simply doesn't match). Not eligible → always 'idle'.
-  const resolved = eligible && outcome !== null && outcome.key === cacheKey ? outcome : null;
-  const status: NightReadStatus = !eligible
-    ? 'idle'
-    : resolved === null
-      ? 'loading'
-      : resolved.text !== null
-        ? 'ai'
-        : 'unavailable';
+  // different night/baby simply doesn't match); nightReadView maps it — together
+  // with eligibility — to the read + honest status the screen renders.
+  const matched = outcome !== null && outcome.key === cacheKey ? { text: outcome.text } : null;
+  const { read, status } = nightReadView(eligible, matched);
 
   return {
-    read: resolved !== null ? resolved.text : null,
+    read,
     status,
     // Ask exactly once: eligible-for-AI, consent loaded, and still undecided.
     needsConsent: aiEligible && consent.ready && consent.status === null,
