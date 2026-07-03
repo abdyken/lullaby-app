@@ -236,6 +236,18 @@ import {
   buildInviteShareMessage,
   resolveAppInstallUrl,
 } from '../src/components/auth/inviteShareMessage';
+// Settings links (privacy / terms / support) — the pure env-or-placeholder
+// resolvers behind the Settings screen's link rows. Dependency-free leaf,
+// covered directly in §SL.
+import {
+  buildSupportMailtoUrl,
+  DEFAULT_PRIVACY_POLICY_URL,
+  DEFAULT_SUPPORT_EMAIL,
+  DEFAULT_TERMS_URL,
+  resolvePrivacyPolicyUrl,
+  resolveSupportEmail,
+  resolveTermsUrl,
+} from '../src/lib/appLinks';
 // Pro foundation (Phase 1) — pure config + gate leaves. proConfig reads only
 // process.env (and re-exports the preview flag); proGates is a dependency-free
 // predicate leaf. Both are safe to load here and are covered directly in §W.
@@ -6721,6 +6733,9 @@ check('RE1. .env.example documents the full EXPO_PUBLIC env surface', () => {
     'EXPO_PUBLIC_REVENUECAT_OFFERING_ID',
     'EXPO_PUBLIC_THEME_REVEAL_DURATION_MS',
     'EXPO_PUBLIC_APP_INSTALL_URL',
+    'EXPO_PUBLIC_PRIVACY_POLICY_URL',
+    'EXPO_PUBLIC_TERMS_URL',
+    'EXPO_PUBLIC_SUPPORT_EMAIL',
   ];
   for (const name of required) {
     assert.ok(envExampleValue(name) !== null, `.env.example must document ${name}=`);
@@ -6794,6 +6809,70 @@ check('RE6. dev entitlement stays __DEV__-gated through resolveDevProEntitlement
     PRO_PROVIDER_SRC.includes('resolveDevProEntitlement(__DEV__)'),
     'ProProvider passes the real __DEV__',
   );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SL. Settings links — privacy policy / terms / support rows (Apple review).
+//
+// The Settings screen must always offer a Privacy Policy link, a Terms link,
+// and a support contact. Destinations are env-configurable with safe
+// placeholder fallbacks (src/lib/appLinks.ts), and opening one must never be
+// able to crash the screen when a device has no browser / mail app.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SETTINGS_SCREEN_SRC = readFileSync(new URL('../src/app/settings.tsx', import.meta.url), 'utf8');
+const APP_LINKS_SRC = readFileSync(new URL('../src/lib/appLinks.ts', import.meta.url), 'utf8');
+
+check('SL1. link resolvers fall back to placeholders on unset/blank and trim overrides', () => {
+  assert.equal(resolvePrivacyPolicyUrl(undefined), DEFAULT_PRIVACY_POLICY_URL);
+  assert.equal(resolvePrivacyPolicyUrl(''), DEFAULT_PRIVACY_POLICY_URL);
+  assert.equal(resolvePrivacyPolicyUrl('   '), DEFAULT_PRIVACY_POLICY_URL);
+  assert.equal(resolvePrivacyPolicyUrl('  https://example.test/privacy  '), 'https://example.test/privacy');
+  assert.equal(resolveTermsUrl(undefined), DEFAULT_TERMS_URL);
+  assert.equal(resolveTermsUrl('  https://example.test/terms  '), 'https://example.test/terms');
+  assert.equal(resolveSupportEmail(undefined), DEFAULT_SUPPORT_EMAIL);
+  assert.equal(resolveSupportEmail('  care@example.test  '), 'care@example.test');
+  // The placeholders themselves are well-formed destinations, never empty.
+  assert.match(DEFAULT_PRIVACY_POLICY_URL, /^https:\/\//);
+  assert.match(DEFAULT_TERMS_URL, /^https:\/\//);
+  assert.match(DEFAULT_SUPPORT_EMAIL, /^[^@\s]+@[^@\s]+$/);
+});
+
+check('SL2. the support mailto carries only the address and an app-version subject', () => {
+  const url = buildSupportMailtoUrl({ email: 'care@example.test', appVersion: '1.2.3' });
+  assert.ok(url.startsWith('mailto:care@example.test?subject='), 'mailto + subject shape');
+  assert.ok(url.includes(encodeURIComponent('Lullaby feedback (v1.2.3)')), 'subject names the app version');
+  assert.ok(!/body=/.test(url), 'no prefilled body — nothing from the device rides along');
+});
+
+check('SL3. Settings renders privacy/terms/support rows through the guarded opener', () => {
+  for (const row of ['Privacy Policy', 'Terms of Use', 'Contact support']) {
+    assert.ok(SETTINGS_SCREEN_SRC.includes(`label="${row}"`), `Settings has a ${row} row`);
+  }
+  for (const resolver of ['resolvePrivacyPolicyUrl()', 'resolveTermsUrl()', 'resolveSupportEmail()']) {
+    assert.ok(SETTINGS_SCREEN_SRC.includes(resolver), `destinations come from ${resolver}`);
+  }
+  // Every open goes through the single try/catch wrapper with an inline
+  // fallback — Linking.openURL is never called bare.
+  const openSites = SETTINGS_SCREEN_SRC.split('Linking.openURL').length - 1;
+  assert.equal(openSites, 1, 'exactly one Linking.openURL site (inside openExternal)');
+  assert.match(
+    SETTINGS_SCREEN_SRC,
+    /try\s*\{\s*await Linking\.openURL\(url\);\s*\}\s*catch\s*\{/,
+    'the opener catches failure instead of crashing',
+  );
+});
+
+check('SL4. no store URL, secret, or payment reference rides into the link surfaces', () => {
+  for (const src of [APP_LINKS_SRC, SETTINGS_SCREEN_SRC]) {
+    for (const banned of ['apps.apple.com', 'itunes.apple.com', 'play.google.com', 'testflight.apple.com']) {
+      assert.ok(!src.includes(banned), `must not hardcode ${banned}`);
+    }
+    for (const secret of ['ANTHROPIC_API_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'ANON_KEY']) {
+      assert.ok(!src.includes(secret), `must not reference ${secret}`);
+    }
+  }
+  assert.ok(!/Stripe|checkout/i.test(APP_LINKS_SRC), 'no payment link sneaks into appLinks');
 });
 
 runAsyncChecks()
