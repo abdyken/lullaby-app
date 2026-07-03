@@ -11,7 +11,7 @@
  * across restarts). Tapping the toggle lets the native circular-reveal module
  * screenshot the current window, then the real app commits the new mode beneath it.
  */
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 
@@ -170,11 +170,11 @@ export default function TonightScreen() {
   const [sleepV2Open, setSleepV2Open] = useState(false);
   const [diaperV2Open, setDiaperV2Open] = useState(false);
   const [pumpV2Open, setPumpV2Open] = useState(false);
-  // Account surface lives behind the baby header (blueprint settings home),
+  // Account surfaces live behind the baby header (blueprint settings home),
   // reachable in EVERY build — signed-in caregiver, "continue locally" guest, and
-  // the unconfigured local demo alike — so there is always an obvious in-app
-  // account entry point (it shows auth state, signs out, or routes to the account
-  // entry). AccountSheet itself adapts its copy to a configured vs local build.
+  // the unconfigured local demo alike. Tapping the baby header opens the quick
+  // AccountSheet; the explicit header account button pushes the full /settings
+  // screen (dedicated account/settings home — no fifth tab).
   const [accountOpen, setAccountOpen] = useState(false);
 
   // Live render-only clock for elapsed labels and the hero progress ring. During
@@ -247,7 +247,7 @@ export default function TonightScreen() {
         caregivers={caregivers}
         surfaceMode={bodyMode}
         onPress={() => setAccountOpen(true)}
-        onAccount={() => setAccountOpen(true)}
+        onAccount={() => router.push('/settings')}
         onThemeToggle={handleThemeToggle}
         themeToggleDisabled={isTransitioning}
       />

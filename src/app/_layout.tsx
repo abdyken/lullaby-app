@@ -100,6 +100,9 @@ function RootShell({ fontsReady }: { fontsReady: boolean }) {
               contentStyle: { backgroundColor: surfaces[mode].bg },
             }}>
             <Stack.Screen name="(tabs)" />
+            {/* Dedicated account/settings screen, pushed over the tab shell from
+                the Tonight header's account button (no fifth tab). */}
+            <Stack.Screen name="settings" />
             {/* OAuth / email auth deep-link landing (lullaby://auth-callback). A
                 real route here is what stops Expo Router rendering "Unmatched
                 Route" for the Supabase redirect; it fades in as a calm interstitial
