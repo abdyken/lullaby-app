@@ -100,11 +100,11 @@ are created in the Apple Developer + Supabase dashboards below.
 ### Manual setup required (dashboards, not code)
 
 1. **Apple Developer → Certificates, Identifiers & Profiles → Identifiers**: open
-   the **App ID** for `com.lullaby.app` (the app's `ios.bundleIdentifier`) and
+   the **App ID** for `com.bizhanash.lullaby` (the app's `ios.bundleIdentifier`) and
    enable the **Sign In with Apple** capability. Leave the "Server-to-Server
    Notification Endpoint" blank.
 2. **Supabase → Authentication → Providers → Apple**: **enable** the provider and
-   add the bundle id `com.lullaby.app` to **Client IDs** (Authorized Client IDs).
+   add the iOS bundle id `com.bizhanash.lullaby` to **Client IDs** (Authorized Client IDs).
    For a **native-only iOS** sign-in that is all Supabase needs to verify the
    token — the **Services ID + signing key are NOT required** (those are only for
    the web / OAuth-redirect flow). If you also test inside **Expo Go**, add

@@ -159,8 +159,9 @@ Documented (not fabricated) per guardrails — none of this is done in the repo:
   + `EXPO_PUBLIC_SUPABASE_ANON_KEY` in `.env`. (See `supabase/README.md`.) Email-confirmation = on
   ⟹ a deep-link confirmation handler is required (gap #6).
 - **Apple Sign in (app-side done — Step 06; dashboards still required):** enable the **Sign In with
-  Apple** capability on the `com.lullaby.app` App ID, and enable the Apple provider in Supabase with
-  `com.lullaby.app` in Client IDs. Native-only iOS needs **no** Services ID / signing key. Full
+  Apple** capability on the `com.bizhanash.lullaby` (iOS bundle id) App ID, and enable the Apple
+  provider in Supabase with `com.bizhanash.lullaby` in Client IDs. Native-only iOS needs **no**
+  Services ID / signing key. Full
   runbook + build/runtime notes in `supabase/README.md`. (`usesAppleSignIn` + plugin already in
   `app.json`; `AuthProvider.signInWithApple` already wired.)
 - **Google Sign in (app-side done — Step 07; dashboards still required):** create a Google Cloud

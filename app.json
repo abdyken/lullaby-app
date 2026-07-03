@@ -9,7 +9,7 @@
     "userInterfaceStyle": "light",
     "ios": {
       "icon": "./assets/images/icon.png",
-      "bundleIdentifier": "com.lullaby.app",
+      "bundleIdentifier": "com.bizhanash.lullaby",
       "supportsTablet": false,
       "usesAppleSignIn": true
     },
@@ -35,7 +35,9 @@
         {
           "microphonePermission": "Lullaby uses the microphone so you can ask a question hands-free.",
           "speechRecognitionPermission": "Lullaby uses speech recognition to hear your question and route it to a safe answer.",
-          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
         }
       ],
       [

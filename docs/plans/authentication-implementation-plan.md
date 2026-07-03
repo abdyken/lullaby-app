@@ -68,7 +68,7 @@ plane for no benefit. Invest the saved time in hardening (secure storage, accoun
 ## 2. Current App Audit
 
 **Stack:** Expo SDK `~56`, React Native `0.85.3`, React `19.2.3`, Expo Router `~56` (typed routes + React Compiler on),
-TypeScript strict, NativeWind. Path alias `@/* → src/*`. Scheme **`lullaby://`**; bundle/app id `com.lullaby.app`.
+TypeScript strict, NativeWind. Path alias `@/* → src/*`. Scheme **`lullaby://`**; iOS bundle id `com.bizhanash.lullaby`, Android package `com.lullaby.app`.
 
 ### 2.1 What already exists (auth)
 

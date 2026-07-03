@@ -89,10 +89,10 @@ Current state from `/auth/v1/settings`: `google: false` (disabled).
 
 ### 4. Apple provider (native iOS) — optional
 
-1. **Apple Developer → Identifiers →** open the App ID for `com.lullaby.app` and
-   enable the **Sign In with Apple** capability.
-2. **Supabase → Authentication → Providers → Apple → enable** and add the bundle
-   id `com.lullaby.app` to **Client IDs**. For native-only iOS, the Services ID
+1. **Apple Developer → Identifiers →** open the App ID for the iOS bundle id
+   `com.bizhanash.lullaby` and enable the **Sign In with Apple** capability.
+2. **Supabase → Authentication → Providers → Apple → enable** and add the iOS bundle
+   id `com.bizhanash.lullaby` to **Client IDs**. For native-only iOS, the Services ID
    + signing key are **not** required. (If testing in Expo Go, also add
    `host.exp.Exponent`.)
 
