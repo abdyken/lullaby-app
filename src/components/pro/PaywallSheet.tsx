@@ -25,12 +25,12 @@ import { colors, fonts, radii, shadows } from '@/theme';
 import type { ProPackageView } from '@/lib/revenueCat';
 
 const TITLE = 'Lullaby Pro';
-const SUBTITLE = 'Keep and share the week, without losing the calm.';
+const SUBTITLE = 'Fuller history, gentle weekly recaps, and export-ready summaries. Coming later.';
 
 const BENEFITS = [
-  'Weekly export you can keep',
-  'Clean summary to share with your pediatrician',
-  'Full-week recap in one place',
+  'Fuller history',
+  'Gentle weekly recaps',
+  'Export-ready summaries',
 ];
 
 // Calm per-state copy.

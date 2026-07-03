@@ -18,14 +18,14 @@ change the bundle id)._
 
 ## 1. Verification status (as of this report)
 
-Run from the repo root — all green for the Task 02 update branch
-`fix/apple-p0-02-local-only-truthful-copy-manual`:
+Run from the repo root — all green for the final review-copy branch
+`fix/apple-final-review-copy-and-links`:
 
 | Command | Result |
 | --- | --- |
 | `npm run typecheck` (`tsc --noEmit`) | ✅ exit 0 |
 | `npm run lint` (`expo lint`) | ✅ clean |
-| `npm run check:local-interactions` | ✅ All 389 checks passed |
+| `npm run check:local-interactions` | ✅ All 391 checks passed |
 | `git diff --check` | ✅ clean |
 
 There is **no `npm test` script** in this project — the pure-logic smoke suite
@@ -39,12 +39,12 @@ is the test infrastructure. Do not assume a Jest/Vitest runner exists.
 | # | Blocker | Status | Summary |
 | --- | --- | --- | --- |
 | 01 | Reassure safety copy + draft gate | ✅ done | New pure gate `src/features/reassure/domain/contentGate.ts` hides placeholder clinical KB blocks from **public (non-`__DEV__`) builds** until `REASSURE_CONTENT.status` flips to `approved`. Gated topic answers show review-pending copy + a pediatrician pointer; triage escalation stays ungated. Subtitle reads "General supportive information for tonight — not medical advice, never a diagnosis." |
-| 02 | Local-only truthful copy | ✅ done via `fix/apple-p0-02-local-only-truthful-copy-manual` | Account-entry chips now read **Saved on this device / Optional account / Privacy-first**. Account/auth/settings/invite copy no longer promises backup, sync, multi-device pickup, shared logs, or caregiver visibility for Shape A local-only v1. Added smoke guard **AE8**. Validation passed: `npm run typecheck`, `npm run lint`, `npm run check:local-interactions` (389/389), and `git diff --check`. |
+| 02 | Local-only truthful copy | ✅ done via `fix/apple-final-review-copy-and-links` | Account-entry chips read **Saved on this device / Optional account / Privacy-first**. Handoff/Tonight public copy is fixed to **Tonight’s log is saved on this device.** and **Updated just now.** Account/auth/settings/invite copy no longer promises backup, sync, multi-device pickup, shared logs, or caregiver visibility for Shape A local-only v1. Caregiver invite entry points now show a disabled/future-facing **Caregiver invites / Coming later** row instead of opening active sharing. Smoke guards **AE8** and **AE9** pin this. Validation passed: `npm run typecheck`, `npm run lint`, `npm run check:local-interactions` (391/391), and `git diff --check`. |
 | 03 | Settings screen from Home header | ✅ done | New route `src/app/settings.tsx` (root Stack sibling of `(tabs)`, **no fifth tab**). Tonight header account button pushes `/settings`; sections: Account, Appearance (Night mode switch), Privacy & data, Support, About. |
 | 04 | Privacy / Terms / Support / About | ✅ done | Privacy Policy + Terms of Use link rows, Support `mailto` row (email shown as subtitle), build info in About. Destinations resolve from `src/lib/appLinks.ts` with env overrides (`EXPO_PUBLIC_PRIVACY_POLICY_URL` / `_TERMS_URL` / `_SUPPORT_EMAIL`) falling back to **placeholder** `https://lullaby.app/privacy`, `/terms`, `support@lullaby.app`. All opens are try/catch-guarded. |
 | 05 | Account logout + delete account | ✅ done (code) / ⚠️ migration not applied | Sign out was already reachable. Added in-app **Delete account** (two-step confirm) → `AuthProvider.deleteAccount()` → `deleteAccountRemote()` → self-scoped definer RPC in `supabase/migrations/20260703060000_delete_account.sql`. **The migration is NOT applied to the remote Supabase project**; until it is, the flow degrades to a truthful email-request fallback. |
 | 06 | Baby profile edit | ⚠️ **partial (not merged)** | Wrapper run failed; no code landed. Baby name + birth date are set during onboarding (`BabySetupScreen`); **there is no post-setup edit affordance**. See §5. |
-| 07 | RevenueCat safe for production | ✅ done | Pro ships **OFF** by default (`EXPO_PUBLIC_PRO_ENABLED=0`) so no paywall is reachable in the shipping build. Hardened the defensive "unconfigured" state: `restorePurchases()` short-circuits crash-safely; Restore button is tappable in every paywall state. SDK stays isolated in `src/lib/revenueCat.ts`, all calls try/catch-guarded. |
+| 07 | RevenueCat safe for production | ✅ done | Pro ships **OFF** by default (`EXPO_PUBLIC_PRO_ENABLED=0`) so no paywall is reachable in the shipping build. Hardened the defensive "unconfigured" state: `restorePurchases()` short-circuits crash-safely; Restore button is tappable in every paywall state. SDK stays isolated in `src/lib/revenueCat.ts`, all calls try/catch-guarded. Pro card/paywall copy no longer says **doctor-ready summary**, **more caregivers**, or pediatrician-share summary; it now uses the safer future-facing copy **Fuller history, gentle weekly recaps, and export-ready summaries. Coming later.** |
 | 08 | Insights error / empty / loading states | ✅ done | `src/features/insights/InsightsScreen.tsx` now has a load-status machine (`loading`/`ready`/`error`) with a calm error card + "Try again", a loading card, and a request-token ref so stale loads are ignored. A read failure no longer masquerades as the empty "Getting started" state. |
 | 09 | Typecheck / env / docs / release config | ✅ done | Added the `typecheck` npm script. Verified `.env.example` documents the full 16-var `EXPO_PUBLIC` surface with safe beta defaults (Pro flags off, RevenueCat keys empty). Verified iOS permission strings (mic + speech) in `app.json` plugin config and `ios/Lullaby/Info.plist`; ATS keeps `NSAllowsArbitraryLoads=false`. |
 
@@ -68,7 +68,7 @@ Run all of these from the repo root; **all must pass** before an EAS build:
 ```bash
 npm run typecheck                  # tsc --noEmit
 npm run lint                       # expo lint
-npm run check:local-interactions   # pure-logic smoke suite (389 checks after AE8)
+npm run check:local-interactions   # pure-logic smoke suite (391 checks after AE9/W7b)
 npx expo-doctor                    # config / dependency health (advisory)
 ```
 
@@ -96,11 +96,12 @@ committed): keep `EXPO_PUBLIC_PRO_ENABLED=0`, and set the real
 
 These cannot be done safely from the automated fixer and gate submission:
 
-1. **Host the Privacy Policy and Terms of Use pages.** The in-app links resolve
-   to placeholder `https://lullaby.app/privacy` and `/terms`. Either host real
-   pages at those URLs or set `EXPO_PUBLIC_PRIVACY_POLICY_URL` /
-   `EXPO_PUBLIC_TERMS_URL` in the production EAS env. A dead privacy link is an
-   Apple 5.1.1(i) rejection.
+1. **Host the Privacy Policy and Terms of Use pages before submission.** The
+   in-app links read `EXPO_PUBLIC_PRIVACY_POLICY_URL` and
+   `EXPO_PUBLIC_TERMS_URL`, with placeholder fallbacks at
+   `https://lullaby.app/privacy` and `/terms`. Those fallback pages must be live
+   if used, or production EAS env must point to real hosted pages. A dead privacy
+   link is an Apple 5.1.1(i) rejection.
 2. **Ensure `support@lullaby.app` (or the `EXPO_PUBLIC_SUPPORT_EMAIL` override)
    is a real, monitored mailbox** — it is also the documented manual
    account-deletion fallback.
@@ -112,10 +113,10 @@ These cannot be done safely from the automated fixer and gate submission:
      first — `supabase db push` (or paste `supabase/migrations/20260703060000_delete_account.sql`
      into the SQL editor). Apple 5.1.1(v) requires in-app deletion to actually
      work when account creation ships.
-4. **Ensure the submitted build includes Task 02 branch
-   `fix/apple-p0-02-local-only-truthful-copy-manual`.** That branch removes the
-   stale account-entry Backup / Sync / Caregiver sharing claims and adds the AE8
-   smoke guard.
+4. **Ensure the submitted build includes branch
+   `fix/apple-final-review-copy-and-links`.** That branch removes stale
+   sync/caregiver-sharing handoff copy, disables public caregiver invite entry
+   points for Shape A, softens Pro card copy, and adds AE9/W7b smoke guards.
 5. **Clinician sign-off for Reassure (task 01 launch gate).** Work
    `docs/reassure-content-review.md` items 1–15, then flip
    `REASSURE_CONTENT.status` to `approved` with `reviewedBy`/`reviewedAt`. Until
@@ -148,10 +149,11 @@ Ranked by likelihood of a review note for the intended local-only v1:
    and must carry the general-information disclaimer.
 
 **Not a risk for the intended submission:** the paywall. With Pro OFF by default,
-no purchase/paywall surface is reachable (task 07). Account-entry copy is also
-truthful for Shape A once the submitted build includes
-`fix/apple-p0-02-local-only-truthful-copy-manual`: chips read "Saved on this
-device", "Optional account", and "Privacy-first."
+no purchase/paywall surface is reachable (task 07). Account-entry and
+Handoff/Tonight copy are truthful for Shape A once the submitted build includes
+`fix/apple-final-review-copy-and-links`: chips read "Saved on this device",
+"Optional account", and "Privacy-first"; the handoff card says the log is saved
+on this device and updated just now.
 
 ---
 
@@ -200,7 +202,11 @@ the Apple-review surfaces the fix pass touched:
 - [ ] Account entry uses truthful local-only chips: **Saved on this device** /
       **Optional account** / **Privacy-first**; no backup/sync/shared-log promise
       appears in account/auth/settings/invite copy.
+- [ ] Tonight handoff card reads **Tonight’s log is saved on this device.** and
+      **Updated just now.** No sync/shared/caregiver-visibility copy appears.
 - [ ] Settings shows **Account / Appearance / Privacy & data / Support / About**.
+- [ ] Signed-in account/settings surfaces show **Caregiver invites / Coming later**
+      and do not open an active caregiver-sharing invite flow.
 - [ ] **Night mode** switch runs the theme transition cleanly.
 - [ ] **Privacy Policy** and **Terms of Use** rows open live pages (or show the
       calm inline fallback with the URL, never crash).
