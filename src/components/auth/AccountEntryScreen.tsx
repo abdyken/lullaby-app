@@ -1,13 +1,14 @@
 /**
  * AccountEntryScreen — the calm account-entry surface shown after onboarding when
  * a configured build has no session (status 'signed-out'). It REPLACES the old
- * sign-in wall: local-first stays the default ("Continue locally"), and creating
- * an account / signing in are offered, not forced. This is the direct expression
- * of the auth guardrail: NEVER force account creation — "Continue locally" must
- * remain. The value copy stays honest for Shape A: local-only v1.
+ * sign-in wall: this is a privacy-first, local-only build, so "Continue locally"
+ * is the promoted, primary path, and creating an account / signing in are offered
+ * as quiet secondary options, never forced. This is the direct expression of the
+ * auth guardrail: NEVER force account creation — "Continue locally" must remain.
+ * The copy stays honest for Shape A: local-only v1 (no account, data on device).
  *
  * Self-contained two-view surface so the gate stays a one-liner:
- *   intro → the value pitch + three choices (Create account / Continue locally / Sign in)
+ *   intro → the promise + the local-first primary, with account options below
  *   auth  → the existing <AuthScreen> (email+password), with a back link to intro
  */
 import { useState } from 'react';
@@ -19,36 +20,66 @@ import { colors, fonts, radii } from '@/theme';
 
 import { AppleSignInButton } from './AppleSignInButton';
 import { AuthScreen } from './AuthScreen';
-import { AuthButton, AuthLink, AuthShell } from './AuthShell';
+import { AuthLink, AuthShell } from './AuthShell';
 import { GoogleSignInButton } from './GoogleSignInButton';
 
-/** One compact value chip — a soft lavender tint with a short label. */
-function ValueChip({ label }: { label: string }) {
+/**
+ * Primary (filled indigo) action — the one loud, promoted CTA. Flat by design
+ * (no shadow/elevation), matching the onboarding polish; a filled accent pill on
+ * the cream surface carries the weight on its own. The fill lives on an inner View
+ * so it paints reliably on Android (a Pressable background can drop out). A
+ * disabled CTA reads as a calm, intentionally-quiet pill (soft lavender fill,
+ * faint label) rather than a washed-out indigo.
+ */
+function PrimaryButton({
+  label,
+  onPress,
+  disabled,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
   return (
-    <View
-      style={{
-        backgroundColor: colors.sleepTint,
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      onPress={onPress}
+      disabled={disabled}
+      style={({ pressed }) => ({
         borderRadius: radii.pill,
-        paddingHorizontal: 13,
-        paddingVertical: 7,
-      }}>
-      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.sleep }}>{label}</Text>
-    </View>
+        transform: [{ scale: pressed && !disabled ? 0.98 : 1 }],
+      })}>
+      <View
+        style={{
+          minHeight: 52,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: disabled ? colors.sleepTint : colors.sleep,
+          borderRadius: radii.pill,
+          paddingHorizontal: 24,
+        }}>
+        <Text
+          style={{
+            fontFamily: fonts.bodyBold,
+            fontSize: 15,
+            letterSpacing: 0.2,
+            color: disabled ? colors.inkFaint : colors.white,
+          }}>
+          {label}
+        </Text>
+      </View>
+    </Pressable>
   );
 }
 
-/** A single calm row of value chips — replaces a heavy paragraph + bullet list. */
-function ValueChips() {
-  return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-      <ValueChip label="Saved on this device" />
-      <ValueChip label="Optional account" />
-      <ValueChip label="Privacy-first" />
-    </View>
-  );
-}
-
-/** Secondary (outline) button — mirrors the AccountSheet's quiet action style. */
+/**
+ * Secondary (outline) button — a quiet, flat alternative to the primary action,
+ * matching the "Continue with Google" pill so the account options read as one
+ * calm secondary set. Fill + hairline border live on an inner View so they paint
+ * reliably on Android.
+ */
 function SecondaryButton({
   label,
   onPress,
@@ -62,20 +93,27 @@ function SecondaryButton({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled }}
       onPress={onPress}
       disabled={disabled}
       style={({ pressed }) => ({
-        minHeight: 50,
-        alignItems: 'center',
-        justifyContent: 'center',
         borderRadius: radii.pill,
-        backgroundColor: colors.surfaceSoft,
-        borderWidth: 1,
-        borderColor: colors.line,
-        paddingHorizontal: 24,
-        opacity: pressed || disabled ? 0.6 : 1,
+        transform: [{ scale: pressed && !disabled ? 0.98 : 1 }],
       })}>
-      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 15, color: colors.ink }}>{label}</Text>
+      <View
+        style={{
+          minHeight: 50,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: colors.surface,
+          borderRadius: radii.pill,
+          borderWidth: 1,
+          borderColor: colors.line,
+          paddingHorizontal: 24,
+          opacity: disabled ? 0.6 : 1,
+        }}>
+        <Text style={{ fontFamily: fonts.bodyBold, fontSize: 15, color: colors.ink }}>{label}</Text>
+      </View>
     </Pressable>
   );
 }
@@ -144,29 +182,30 @@ export function AccountEntryScreen() {
     <AuthShell
       eyebrow="Lullaby"
       title="Save your night log"
-      subtitle="Lullaby works without an account. For this build, your baby's care history stays on this phone."
+      subtitle="No account needed. Everything you log stays on this phone."
       footer={
         configured ? (
           <AuthLink label="Already have an account? Sign in" onPress={() => openAuth('signIn')} />
         ) : undefined
       }>
-      <ValueChips />
+      {/* Local-first is the promoted, primary path: the one filled action, at the top.
+          Always present in both states — the "never force account creation" guardrail. */}
+      <PrimaryButton label="Continue locally" onPress={() => void continueLocally()} disabled={busy} />
 
       {configured ? (
         <>
-          <AuthButton label="Create account" onPress={() => openAuth('signUp')} disabled={busy} />
-          {/* Native "Sign in with Apple" — renders on iOS only; null elsewhere, so the
-              local-first "Continue locally" escape hatch always stays present. */}
+          {/* Account options, kept as quiet secondary choices — present and tappable,
+              just not the loudest thing on screen. */}
+          <SecondaryButton label="Create account" onPress={() => openAuth('signUp')} disabled={busy} />
+          {/* Native "Sign in with Apple" — renders on iOS only; null elsewhere. */}
           <AppleSignInButton />
           {/* "Continue with Google" — iOS + Android via the system browser; null when
-              not configured (or on web), so the escape hatch below always stays. */}
+              not configured (or on web). */}
           <GoogleSignInButton />
         </>
       ) : (
         <SetupRequiredNote />
       )}
-      {/* Always present in both states — the "never force account creation" guardrail. */}
-      <SecondaryButton label="Continue locally" onPress={() => void continueLocally()} disabled={busy} />
     </AuthShell>
   );
 }

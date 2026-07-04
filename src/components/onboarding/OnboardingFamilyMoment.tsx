@@ -16,13 +16,28 @@
  * backplate that fades up on the night surface so the warm family keeps its
  * contrast there (it's fully transparent on cream, so day is unchanged).
  *
- * Motion is barely-there: the caregiver+baby group breathes and the heart drifts +
- * pulses. Both loops are gated on `reduceMotion`; the drivers rest at their neutral
- * pose (0 → scale 1 / translate 0), so disabling motion yields a still — and still
- * beautiful — frame, never a frozen-mid-pose one.
+ * Motion is barely-there and runs on Reanimated (UI thread, 60fps, identical on
+ * iOS + Android): the soft peach halo slowly breathes (~1.0→1.04 on a ~4s loop),
+ * the caregiver+baby group breathes, and the heart does a soft double-beat every
+ * few seconds. Every loop is gated on Reduce Motion (the OS setting via
+ * useReducedMotion, OR the `reduceMotion` prop); the drivers then rest at their
+ * neutral pose (0 → scale 1 / translate 0), so disabling motion yields a still —
+ * and still beautiful — frame, never a frozen-mid-pose one.
  */
-import { useEffect, useState } from 'react';
-import { Animated, StyleSheet, View, type ViewStyle } from 'react-native';
+import { useEffect } from 'react';
+import { StyleSheet, View, type ViewStyle } from 'react-native';
+import Animated, {
+  cancelAnimation,
+  Easing,
+  interpolate,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import Svg, { Circle, Defs, Ellipse, G, Path, RadialGradient, Stop } from 'react-native-svg';
 
 import type { SurfaceMode } from '@/theme';
@@ -86,46 +101,81 @@ type Props = {
 
 export function OnboardingFamilyMoment({
   mode = 'day',
-  reduceMotion = false,
+  reduceMotion: reduceMotionProp = false,
   maxWidth = 264,
   style,
 }: Props) {
   const night = mode === 'night';
 
-  // Two calm drivers. Each rests at 0 → its neutral pose, so Reduce Motion just
-  // never starts the loops and the scene holds a still, intentional frame.
-  const [breathe] = useState(() => new Animated.Value(0));
-  const [pulse] = useState(() => new Animated.Value(0));
-  // The second caregiver breathes on her own driver — same calm motion, slightly
-  // slower + phase-offset, so the family breathes together but never in lockstep.
-  const [breatheBack] = useState(() => new Animated.Value(0));
+  // Reduce Motion = the OS setting (Reanimated's useReducedMotion, called
+  // unconditionally) OR the caller's prop. Either one holds every driver at its
+  // neutral rest, so the scene renders a still, intentional frame.
+  const osReduceMotion = useReducedMotion();
+  const still = reduceMotionProp || osReduceMotion;
+
+  // Calm shared-value drivers (UI thread). Each rests at 0 → its neutral pose.
+  const breathe = useSharedValue(0); // caregiver + baby group
+  const breatheBack = useSharedValue(0); // second caregiver (slower, phase-offset)
+  const halo = useSharedValue(0); // breathing peach backdrop
+  const heart = useSharedValue(0); // soft double-beat pulse
 
   useEffect(() => {
-    if (reduceMotion) return;
-    const loop = (value: Animated.Value, halfMs: number) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(value, { toValue: 1, duration: halfMs, useNativeDriver: true }),
-          Animated.timing(value, { toValue: 0, duration: halfMs, useNativeDriver: true }),
-        ]),
-      );
-    const animations = [
-      loop(breathe, 1900),
-      loop(pulse, 2400),
-      // ~500ms later + a touch slower (4100ms loop) → her breath sits just off the
-      // father/baby's, so the whole family reads as softly breathing together.
-      Animated.sequence([Animated.delay(500), loop(breatheBack, 2050)]),
-    ];
-    animations.forEach((a) => a.start());
-    return () => animations.forEach((a) => a.stop());
-  }, [breathe, pulse, breatheBack, reduceMotion]);
+    if (still) {
+      // Hold each driver at its neutral rest → a calm, deliberate still frame.
+      breathe.value = 0;
+      breatheBack.value = 0;
+      halo.value = 0;
+      heart.value = 0;
+      return;
+    }
+    const easeInOut = Easing.inOut(Easing.ease);
+    // Slow yoyo breaths — low amplitude; she lags ~500ms so it's never lockstep.
+    breathe.value = withRepeat(withTiming(1, { duration: 1900, easing: easeInOut }), -1, true);
+    breatheBack.value = withDelay(
+      500,
+      withRepeat(withTiming(1, { duration: 2050, easing: easeInOut }), -1, true),
+    );
+    // ~4s halo breath (2s in / 2s out), like a sleeping baby.
+    halo.value = withRepeat(withTiming(1, { duration: 2000, easing: easeInOut }), -1, true);
+    // A soft double-beat (up·down·up·down) then a long rest → about every 3.2s.
+    heart.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 140, easing: easeInOut }),
+        withTiming(0, { duration: 180, easing: easeInOut }),
+        withTiming(1, { duration: 140, easing: easeInOut }),
+        withTiming(0, { duration: 180, easing: easeInOut }),
+        withTiming(0, { duration: 2600 }),
+      ),
+      -1,
+    );
+    return () => {
+      cancelAnimation(breathe);
+      cancelAnimation(breatheBack);
+      cancelAnimation(halo);
+      cancelAnimation(heart);
+    };
+  }, [still, breathe, breatheBack, halo, heart]);
 
-  const groupScale = breathe.interpolate({ inputRange: [0, 1], outputRange: [1, 1.016] });
-  const groupTranslate = breathe.interpolate({ inputRange: [0, 1], outputRange: [0, -3] });
-  const backScale = breatheBack.interpolate({ inputRange: [0, 1], outputRange: [1, 1.012] });
-  const backTranslate = breatheBack.interpolate({ inputRange: [0, 1], outputRange: [0, -2] });
-  const heartTranslate = pulse.interpolate({ inputRange: [0, 1], outputRange: [0, -5] });
-  const heartScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
+  const groupStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: interpolate(breathe.value, [0, 1], [0, -3]) },
+      { scale: interpolate(breathe.value, [0, 1], [1, 1.016]) },
+    ],
+  }));
+  const backStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: interpolate(breatheBack.value, [0, 1], [0, -2]) },
+      { scale: interpolate(breatheBack.value, [0, 1], [1, 1.012]) },
+    ],
+  }));
+  // The backdrop halo gently swells + softens — the one "breath" the eye reads.
+  const haloStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(halo.value, [0, 1], [1, 0.9]),
+    transform: [{ scale: interpolate(halo.value, [0, 1], [1, 1.04]) }],
+  }));
+  const heartStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: interpolate(heart.value, [0, 1], [1, 1.12]) }],
+  }));
 
   return (
     <View
@@ -136,35 +186,48 @@ export function OnboardingFamilyMoment({
         { width: '100%', maxWidth, aspectRatio: VIEW_W / VIEW_H, alignSelf: 'center' },
         style,
       ]}>
-      {/* ── Back layer: glow, backplate, grounding cloud. Static. ── */}
+      {/* ── Back layer, split so ONLY the halo breathes. Same draw order as before
+            (backplate → halo → cloud); layout/geometry unchanged. ── */}
+
+      {/* 1) neutral readability backplate — invisible on cream (day), a soft warm
+            lift behind the family on navy night. Static. */}
       <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}>
         <Defs>
-          <RadialGradient id="famGlowOuter" cx="50%" cy="48%" r="64%">
-            <Stop offset="0%" stopColor={P.glow} stopOpacity={night ? 0.92 : 0.8} />
-            <Stop offset="100%" stopColor={P.glow} stopOpacity={0} />
-          </RadialGradient>
-          <RadialGradient id="famGlowInner" cx="48%" cy="58%" r="46%">
-            <Stop offset="0%" stopColor={P.glowInner} stopOpacity={night ? 0.55 : 0.72} />
-            <Stop offset="100%" stopColor={P.glowInner} stopOpacity={0} />
-          </RadialGradient>
-          {/* neutral readability backplate — invisible on cream (day), a soft warm
-              lift behind the family on the navy night surface */}
           <RadialGradient id="famBackplate" cx="50%" cy="56%" r="60%">
             <Stop offset="0%" stopColor={P.backplate} stopOpacity={night ? 0.5 : 0} />
             <Stop offset="68%" stopColor={P.backplate} stopOpacity={night ? 0.28 : 0} />
             <Stop offset="100%" stopColor={P.backplate} stopOpacity={0} />
           </RadialGradient>
         </Defs>
-
-        {/* neutral backplate first (under the warm glow) so it only lifts shadows */}
+        {/* backplate first (under the warm glow) so it only lifts shadows */}
         <Ellipse cx={108} cy={98} rx={98} ry={62} fill="url(#famBackplate)" />
+      </Svg>
 
-        {/* layered halo → depth: a wide soft bloom + a brighter core behind the pair */}
-        <Ellipse cx={108} cy={82} rx={110} ry={72} fill="url(#famGlowOuter)" />
-        <Ellipse cx={104} cy={94} rx={70} ry={52} fill="url(#famGlowInner)" />
+      {/* 2) the breathing peach halo — a wide soft bloom + a brighter core, on its
+            own Reanimated layer so it gently swells (~1.0→1.04) + softens on a ~4s
+            loop without nudging the backplate, cloud, or family off their marks. */}
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, haloStyle]}>
+        <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}>
+          <Defs>
+            <RadialGradient id="famGlowOuter" cx="50%" cy="48%" r="64%">
+              <Stop offset="0%" stopColor={P.glow} stopOpacity={night ? 0.92 : 0.8} />
+              <Stop offset="100%" stopColor={P.glow} stopOpacity={0} />
+            </RadialGradient>
+            <RadialGradient id="famGlowInner" cx="48%" cy="58%" r="46%">
+              <Stop offset="0%" stopColor={P.glowInner} stopOpacity={night ? 0.55 : 0.72} />
+              <Stop offset="100%" stopColor={P.glowInner} stopOpacity={0} />
+            </RadialGradient>
+          </Defs>
+          {/* layered halo → depth: a wide soft bloom + a brighter core behind the pair */}
+          <Ellipse cx={108} cy={82} rx={110} ry={72} fill="url(#famGlowOuter)" />
+          <Ellipse cx={104} cy={94} rx={70} ry={52} fill="url(#famGlowInner)" />
+        </Svg>
+      </Animated.View>
 
-        {/* a soft grounding cloud the family rests on — barely-there, just enough to
-            seat the scene rather than have it float in a void */}
+      {/* 3) a soft grounding cloud the family rests on — barely-there, just enough
+            to seat the scene rather than have it float in a void. Static, drawn
+            above the halo exactly as before. */}
+      <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}>
         <Ellipse cx={108} cy={152} rx={98} ry={28} fill={P.cloud} opacity={night ? 0.5 : 0.7} />
       </Svg>
 
@@ -172,12 +235,7 @@ export function OnboardingFamilyMoment({
             glow/cloud but below the front caregiver+baby. Lifted into her own
             Animated layer (identical paths, identical layering) so she breathes too,
             on a slightly slower + phase-offset driver. ── */}
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          StyleSheet.absoluteFill,
-          { transform: [{ translateY: backTranslate }, { scale: backScale }] },
-        ]}>
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, backStyle]}>
         <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}>
           {/* second caregiver — softer, leaning in from behind so the moment reads as
               "parents", not a lone figure. Hair cap frames the face; the face itself
@@ -204,12 +262,7 @@ export function OnboardingFamilyMoment({
       </Animated.View>
 
       {/* ── Mid layer: the caregiver + baby group. This is what breathes. ── */}
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          StyleSheet.absoluteFill,
-          { transform: [{ translateY: groupTranslate }, { scale: groupScale }] },
-        ]}>
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, groupStyle]}>
         <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}>
           {/* grounding shadow beneath the bundle → the baby has weight */}
           <Ellipse cx={110} cy={141} rx={36} ry={7.5} fill={P.shadow} />
@@ -275,17 +328,20 @@ export function OnboardingFamilyMoment({
         </Svg>
       </Animated.View>
 
-      {/* ── Foreground: the warm heart, drifting + pulsing above the pair. ── */}
+      {/* ── Foreground: the warm heart, doing a soft double-beat above the pair.
+            Scale-only (it pulses in place — its anchor never moves). ── */}
       <Animated.View
         pointerEvents="none"
-        style={{
-          position: 'absolute',
-          top: '15%',
-          left: 0,
-          right: 0,
-          alignItems: 'center',
-          transform: [{ translateY: heartTranslate }, { scale: heartScale }],
-        }}>
+        style={[
+          {
+            position: 'absolute',
+            top: '15%',
+            left: 0,
+            right: 0,
+            alignItems: 'center',
+          },
+          heartStyle,
+        ]}>
         <Svg width="11%" style={{ aspectRatio: 1 }} viewBox="0 0 24 24">
           <Path
             d="M12 21.6 C12 21.6 3.2 15.4 3.2 9 C3.2 6 5.6 3.8 8.4 3.8 C10 3.8 11.4 4.6 12 5.8 C12.6 4.6 14 3.8 15.6 3.8 C18.4 3.8 20.8 6 20.8 9 C20.8 15.4 12 21.6 12 21.6 Z"
