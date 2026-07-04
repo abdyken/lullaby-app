@@ -366,7 +366,7 @@ export function SleepIdle({
         <View style={{ flex: 1, minWidth: 0, marginRight: 6 }}>
           <ChoiceCard
             title="Start now"
-            subtitle="Begin a live sleep timer"
+            subtitle="The timer starts now"
             accessibilityLabel="Start sleep now"
             accentTint={accentTint}
             icon={<MoonIcon color={accentColor} />}
@@ -376,7 +376,7 @@ export function SleepIdle({
         <View style={{ flex: 1, minWidth: 0, marginLeft: 6 }}>
           <ChoiceCard
             title="Started earlier"
-            subtitle="Start the timer 5 min ago"
+            subtitle="Counts from 5 minutes ago"
             accessibilityLabel="Start sleep 5 minutes ago"
             accentTint={accentTint}
             icon={
@@ -401,7 +401,7 @@ export function SleepIdle({
           marginTop: 15,
           marginHorizontal: 10,
         }}>
-        The big sky button also starts and stops this same sleep session.
+        You can also start and stop sleep from the home screen.
       </Text>
     </View>
   );
