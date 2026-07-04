@@ -154,7 +154,7 @@ export function useV2TodayView(params: { now?: number; caregivers: Caregiver[] }
         eyebrow: 'Asleep',
         timerText: formatClock(elapsed),
         title: 'Sleep started',
-        description: `Started ${clockLabel(activeSleep.startedAt)} · timer is live`,
+        description: `Started ${clockLabel(activeSleep.startedAt)} · still asleep`,
         actionLabel: 'Baby woke up',
         progress: Math.min(1, elapsed / WAKE_WINDOW_MS),
         stateIcon: 'moon',
