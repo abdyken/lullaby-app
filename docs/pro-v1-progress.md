@@ -16,7 +16,7 @@ it is cut from the paywall. No gated stubs, no hardcoded values.
 
 ## Tasks
 
-- [ ] **T0 — Anonymous/guest purchase (blocker).**
+- [x] **T0 — Anonymous/guest purchase (blocker).** *(committed: see log)*
   RevenueCat configures with an anonymous appUserID when there is no Supabase
   session; `ProProvider` stops forcing `signed_out` when `userId === null`;
   `canPurchase` no longer requires a userId; identity still switches via
@@ -60,7 +60,20 @@ it is cut from the paywall. No gated stubs, no hardcoded values.
 
 ## Per-feature self-check results
 
-(filled in as tasks land)
+### T0 — anonymous/guest purchase ✅
+- `canPurchase` with `userId === null`: TRUE once paywall is `ready` —
+  `const canPurchase = proMode === 'enabled' && paywallStatus === 'ready' && !isPurchasing`
+  (no userId term; pinned by new smoke check Z8).
+- Guest configure path: `configureRevenueCat({ userId: null })` →
+  `Purchases.configure({ apiKey, appUserID: null })` — RevenueCat mints/persists
+  its own anonymous id; entitlement is device-local.
+- Identity hygiene kept: sign-in mid-session → `logIn(user.id)` once; sign-out →
+  `logOut()` back to anonymous (never leaks entitlement between accounts);
+  `logOut` no-ops when already anonymous (SDK errors otherwise).
+- `signed_out` paywall state removed end-to-end (type union, provider, sheet) —
+  no "Sign in to subscribe" dead end remains (Z8 pins its absence).
+- RE5 unconfigured-state pin preserved; verification: typecheck ✓, lint ✓,
+  smoke 407/407 ✓ (was 406, +Z8), `git diff --check` ✓.
 
 ## Log
 

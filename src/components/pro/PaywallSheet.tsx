@@ -5,7 +5,6 @@
  * LogSheet). It reads the purchase surface from usePro() and renders one of a few
  * calm states:
  *   unconfigured → "Subscriptions are not configured in this build yet."
- *   signed_out   → "Sign in to subscribe."
  *   loading      → "Loading subscription options…"
  *   ready        → the real subscription packages (store-localized price strings)
  *   unavailable  → "Subscription options aren't available right now."
@@ -36,7 +35,6 @@ const BENEFITS = [
 
 // Calm per-state copy.
 const UNAVAILABLE = 'Subscriptions are not configured in this build yet.';
-const SIGN_IN = 'Sign in to subscribe to Lullaby Pro.';
 const LOADING = 'Loading subscription options…';
 const NO_PACKAGES = 'Subscription options aren’t available right now.';
 const ACTIVE = 'You’re all set — Lullaby Pro is active.';
@@ -168,10 +166,10 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
 
   const showBadge = !isPro && paywallStatus !== 'ready';
   // Restore is ALWAYS reachable (Apple review 3.1.1) — the button is only disabled
-  // while a restore is in flight. `canRestore` now drives the helper copy: when the
-  // store is configured + signed-in we show the store-manage line, otherwise a calm
-  // hint. ProProvider.restorePurchases() safely no-ops when RevenueCat is
-  // unconfigured, so tapping it in any state never crashes.
+  // while a restore is in flight. `canRestore` drives the helper copy: when the
+  // store is configured (signed-in or guest) we show the store-manage line,
+  // otherwise a calm hint. ProProvider.restorePurchases() safely no-ops when
+  // RevenueCat is unconfigured, so tapping it in any state never crashes.
   const canRestore = paywallStatus === 'ready' || paywallStatus === 'unavailable';
 
   return (
@@ -270,8 +268,6 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
                 </Text>
               ) : null}
             </View>
-          ) : paywallStatus === 'signed_out' ? (
-            <NoticeBox text={SIGN_IN} />
           ) : paywallStatus === 'loading' ? (
             <NoticeBox text={LOADING} />
           ) : paywallStatus === 'unavailable' ? (
@@ -280,7 +276,7 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
             <NoticeBox text={UNAVAILABLE} />
           )}
 
-          {/* Restore — real when configured + signed-in; calm disabled stub otherwise. */}
+          {/* Restore — real whenever RevenueCat is configured; calm stub otherwise. */}
           {!isPro ? (
             <View style={{ marginTop: 14 }}>
               <Pressable

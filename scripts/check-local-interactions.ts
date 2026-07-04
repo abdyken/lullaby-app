@@ -5480,6 +5480,34 @@ check('Z6. PaywallSheet shows real package price strings and a real restore', ()
   assert.ok(PAYWALL_SHEET_SRC.includes('canRestore'), 'restore is enabled when configured + signed-in');
 });
 
+check('Z8. a guest with no account can purchase (anonymous RevenueCat identity)', () => {
+  // Apple 2.1: the app is fully usable with no account, so a local/guest parent
+  // must be able to buy Pro. RevenueCat configures ANONYMOUSLY when there is no
+  // session; ProProvider never dead-ends the paywall on "sign in first".
+  assert.ok(
+    REVENUECAT_SRC.includes('userId: string | null'),
+    'configureRevenueCat accepts a null userId (anonymous configure)',
+  );
+  assert.ok(
+    !PRO_PROVIDER_SRC.includes('signed_out'),
+    'ProProvider no longer forces a signed_out paywall state for guests',
+  );
+  assert.ok(
+    /const canPurchase = proMode === 'enabled' && paywallStatus === 'ready'/.test(PRO_PROVIDER_SRC),
+    'canPurchase requires only enabled mode + a ready paywall',
+  );
+  assert.ok(
+    !/canPurchase[^;]*userId/.test(PRO_PROVIDER_SRC),
+    'canPurchase must not require a signed-in userId',
+  );
+  assert.ok(
+    !/sign in to subscribe/i.test(PAYWALL_SHEET_SRC),
+    'PaywallSheet has no sign-in-to-subscribe dead end',
+  );
+  // Sign-out still sheds the identity so entitlement never leaks between users.
+  assert.ok(/Purchases\.logOut/.test(REVENUECAT_SRC), 'the service can revert to anonymous on sign-out');
+});
+
 check('Z7. analytics union has the six purchase/restore events (coarse props only)', () => {
   for (const event of [
     'purchase_started',
