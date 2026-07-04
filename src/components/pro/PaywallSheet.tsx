@@ -51,6 +51,13 @@ const NOT_MEDICAL = 'Not medical advice.';
 const STORE_MANAGED = 'Subscriptions are billed through your App Store / Play Store account.';
 const STORE_MANAGE = 'Cancel or manage anytime in your store account settings.';
 
+// Apple-required auto-renewable subscription disclosure (App Store Review 3.1.2).
+// Canonical Apple wording, adapted honestly — disclosure only, no marketing
+// claims and no URL (per-period price + plan label already render on each
+// package button). Rendered near the purchase CTA, visible without scrolling.
+const AUTO_RENEW =
+  'Payment is charged to your Apple ID at confirmation of purchase. The subscription auto-renews unless canceled at least 24 hours before the end of the current period. Your account is charged for renewal within 24 hours prior to the end of the current period. Manage or cancel anytime in your Apple ID settings.';
+
 // App Store / Play review-safe legal links. Labels only — the destinations come
 // from appLinks (env EXPO_PUBLIC_TERMS_URL / EXPO_PUBLIC_PRIVACY_POLICY_URL with
 // safe fallbacks), so no URL is ever hardcoded in this file.
@@ -303,8 +310,12 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
             </View>
           ) : null}
 
-          {/* Safety copy — descriptive, non-medical, store-managed billing. */}
+          {/* Auto-renewal disclosure (Apple 3.1.2) + descriptive, non-medical,
+              store-managed billing. Always visible, near the purchase CTA. */}
           <View style={{ marginTop: 14, gap: 3 }}>
+            <Text style={{ fontFamily: fonts.body, fontSize: 11.5, lineHeight: 16, color: colors.inkFaint }}>
+              {AUTO_RENEW}
+            </Text>
             <Text style={{ fontFamily: fonts.body, fontSize: 11.5, lineHeight: 16, color: colors.inkFaint }}>
               {NOT_MEDICAL}
             </Text>

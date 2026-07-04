@@ -15,6 +15,17 @@
       "infoPlist": {
         "NSSpeechRecognitionUsageDescription": "Lullaby uses speech recognition to hear your question and route it to a safe answer.",
         "NSMicrophoneUsageDescription": "Lullaby uses the microphone so you can ask a question hands-free."
+      },
+      "privacyManifests": {
+        "NSPrivacyTracking": false,
+        "NSPrivacyTrackingDomains": [],
+        "NSPrivacyCollectedDataTypes": [],
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": ["CA92.1"]
+          }
+        ]
       }
     },
     "android": {
