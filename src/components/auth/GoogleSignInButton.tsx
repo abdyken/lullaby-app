@@ -23,7 +23,7 @@ import { Platform, Pressable, Text, View } from 'react-native';
 import { isGoogleSignInConfigured } from '@/lib/googleAuth';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/state/AuthProvider';
-import { colors, fonts, radii, shadows } from '@/theme';
+import { colors, fonts, radii } from '@/theme';
 
 export function GoogleSignInButton() {
   const { signInWithGoogle, busy } = useAuth();
@@ -50,7 +50,9 @@ export function GoogleSignInButton() {
         borderRadius: radii.pill,
         transform: [{ scale: pressed && !busy ? 0.98 : 1 }],
       })}>
-      {/* Light fill on an inner View so it paints reliably on Android. */}
+      {/* Light fill on an inner View so it paints reliably on Android. Flat (no
+          shadow) so it reads as a quiet secondary option beside the promoted,
+          filled "Continue locally" primary on the account-entry surface. */}
       <View
         style={{
           minHeight: 50,
@@ -62,7 +64,6 @@ export function GoogleSignInButton() {
           borderColor: colors.line,
           paddingHorizontal: 24,
           opacity: busy ? 0.55 : 1,
-          ...shadows.card,
         }}>
         {/* While a sign-in is launching/completing, the label reads as progress so
             a repeated tap (already guarded above) is clearly unnecessary. */}
