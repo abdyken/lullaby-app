@@ -13,7 +13,8 @@
  * import this module (enforced in scripts/check-local-interactions.ts).
  */
 
-/** Export / share the weekly recap (PDF/CSV/share sheet). Pro-only. */
+/** Export / share the weekly recap — plain TEXT via the OS share sheet (a
+ * formatted PDF/CSV does not exist; never advertise one). Pro-only. */
 export function canExportWeeklyRecap(isPro: boolean): boolean {
   return isPro;
 }

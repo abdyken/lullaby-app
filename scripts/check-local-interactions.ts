@@ -5187,17 +5187,26 @@ check('W7. fake-door preview survives: preview mode resolves and the interest an
   assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('export_tapped'"), 'ProPreviewCard fires export_tapped');
 });
 
-check('W7b. Pro public copy stays future-facing for Apple review', () => {
+check('W7b. Pro public copy names only REAL features and keeps stale claims out', () => {
+  // Rescoped when the v1 pillars became real: the copy now names exactly the
+  // two working features (shareable weekly TEXT summary + 30-day rhythm
+  // insights) and the old future-facing claims joined the ban list — "Fuller
+  // history" is unbuilt vaporware and must never reappear on a sale surface.
   for (const [name, src] of [
     ['UpgradeCard.tsx', UPGRADE_CARD_SRC],
     ['ProPreviewCard.tsx', PRO_PREVIEW_CARD_SRC],
     ['PaywallSheet.tsx', PAYWALL_SHEET_SRC],
   ] as const) {
-    assert.ok(
-      src.includes('Fuller history') || src.includes('gentle weekly recaps') || src.includes('Export-ready summaries'),
-      `${name} keeps softened future-facing Pro copy`,
-    );
-    for (const stale of ['doctor-ready', 'more caregivers', 'share with your pediatrician']) {
+    assert.ok(/weekly summary/i.test(src), `${name} names the real shareable weekly summary`);
+    assert.ok(/rhythm insights/i.test(src), `${name} names the real rhythm insights`);
+    for (const stale of [
+      'doctor-ready',
+      'more caregivers',
+      'share with your pediatrician',
+      'Fuller history',
+      'gentle weekly recaps',
+      'Export-ready summaries',
+    ]) {
       assert.ok(!src.includes(stale), `${name} must not include stale Pro claim: ${stale}`);
     }
   }
@@ -5362,6 +5371,21 @@ check('X6. ProPreviewCard opens the paywall in enabled mode and keeps the fake-d
 check('X7. analytics union carries the paywall entry events (paywall_opened + pro_gate_seen)', () => {
   assert.ok(ANALYTICS_SRC.includes("'paywall_opened'"), 'paywall_opened in the union');
   assert.ok(ANALYTICS_SRC.includes("'pro_gate_seen'"), 'pro_gate_seen in the union');
+});
+
+check('X9. the live paywall sells ONLY real, working features (no vaporware, no Soon)', () => {
+  // Apple 2.1/2.3.2: everything advertised on a purchasable paywall must
+  // genuinely work when tapped. The v1 sell-list is exactly the two built
+  // pillars: the shareable weekly TEXT summary and the 30-day rhythm insights.
+  assert.ok(!/fuller history/i.test(PAYWALL_SHEET_SRC), 'fuller history (unbuilt) is never advertised');
+  assert.ok(!/coming later/i.test(PAYWALL_SHEET_SRC), 'a live paywall never says "coming later"');
+  assert.ok(!/>\s*Soon\s*</.test(PAYWALL_SHEET_SRC), 'no "Soon" badge on a purchasable paywall');
+  assert.ok(!/PDF|CSV/.test(PAYWALL_SHEET_SRC), 'the text export is never sold as PDF/CSV');
+  assert.ok(/weekly summary/i.test(PAYWALL_SHEET_SRC), 'sells the real shareable weekly summary');
+  assert.ok(/30-day/.test(PAYWALL_SHEET_SRC), 'sells the real 30-day rhythm insights');
+  // The live (enabled-mode) card sublines match the same honest sell-list.
+  assert.ok(!/FEATURE_LIVE[^;]*fuller history/i.test(PRO_PREVIEW_CARD_SRC), 'live card copy drops fuller history');
+  assert.ok(!/SUBLINE_LIVE[^;]*fuller history/i.test(UPGRADE_CARD_SRC), 'live upsell copy drops fuller history');
 });
 
 check('X8. parent call sites render the Pro card in preview + enabled, hide it when off', () => {

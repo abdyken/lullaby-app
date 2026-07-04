@@ -24,13 +24,17 @@ import { colors, fonts, radii, shadows } from '@/theme';
 
 import type { ProPackageView } from '@/lib/revenueCat';
 
+// Sell-list rule (Apple 2.1): ONLY features that genuinely work appear here —
+// today that is the shareable weekly summary (plain text via the OS share
+// sheet, never sold as a formatted document) and the 30-day rhythm insights
+// with computed trends. No future promises, nothing unbuilt.
 const TITLE = 'Lullaby Pro';
-const SUBTITLE = 'Fuller history, gentle weekly recaps, and export-ready summaries. Coming later.';
+const SUBTITLE =
+  'Keep the pattern, not just the night — deeper views of what you already log, on this device.';
 
 const BENEFITS = [
-  'Fuller history',
-  'Gentle weekly recaps',
-  'Export-ready summaries',
+  'Shareable weekly summary — a calm text recap you can keep or send',
+  '30-day rhythm insights with real trends from your logs',
 ];
 
 // Calm per-state copy.
@@ -164,7 +168,6 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
     restorePurchases,
   } = usePro();
 
-  const showBadge = !isPro && paywallStatus !== 'ready';
   // Restore is ALWAYS reachable (Apple review 3.1.1) — the button is only disabled
   // while a restore is in flight. `canRestore` drives the helper copy: when the
   // store is configured (signed-in or guest) we show the store-manage line,
@@ -205,6 +208,8 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
             }}
           />
 
+          {/* No "Soon" badge here, ever — this sheet only renders on a live,
+              purchasable paywall, so a coming-soon signal would be misleading. */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text
               style={{
@@ -216,21 +221,6 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
               }}>
               Lullaby Pro
             </Text>
-            {showBadge ? (
-              <View
-                style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: radii.pill, backgroundColor: colors.sleepTint }}>
-                <Text
-                  style={{
-                    fontFamily: fonts.bodyBold,
-                    fontSize: 9.5,
-                    letterSpacing: 0.6,
-                    textTransform: 'uppercase',
-                    color: colors.sleep,
-                  }}>
-                  Soon
-                </Text>
-              </View>
-            ) : null}
           </View>
 
           <Text style={{ fontFamily: fonts.display, fontSize: 22, color: colors.ink, marginTop: 6 }}>{TITLE}</Text>
