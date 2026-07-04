@@ -40,10 +40,11 @@ const GRADIENT: Record<SurfaceMode, [string, string]> = {
 
 const TITLE = 'Understand your baby’s rhythm';
 // Fake-door (preview) subline keeps the "coming later" framing; the live upsell
-// drops it because the paywall is real.
+// drops it because the paywall is real. Both name ONLY features that genuinely
+// exist: the shareable weekly TEXT summary and the 30-day rhythm insights.
 const SUBLINE_PREVIEW =
-  'Fuller history, gentle weekly recaps, and export-ready summaries. Coming later.';
-const SUBLINE_LIVE = 'Fuller history, gentle weekly recaps, and export-ready summaries.';
+  'A shareable weekly summary and monthly rhythm insights. Coming later.';
+const SUBLINE_LIVE = 'A shareable weekly summary and 30-day rhythm insights with real trends.';
 const CTA = 'See what’s included';
 const CONFIRM = 'Thanks — Lullaby Pro is coming soon.';
 

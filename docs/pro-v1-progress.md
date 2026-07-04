@@ -42,7 +42,7 @@ it is cut from the paywall. No gated stubs, no hardcoded values.
   Self-check (integrity): grep proves no hardcoded trend/window in the Pro path;
   free vs Pro genuinely differ; non-crashing from fresh/empty state.
 
-- [ ] **T2 — Copy truth pass (paywall + cards + docs).**
+- [x] **T2 — Copy truth pass (paywall + cards + docs).** *(committed: see log)*
   - PaywallSheet: subtitle/benefits sell ONLY the two real pillars —
     "shareable weekly summary" (text, never "PDF/CSV") + "30-day rhythm
     insights". Remove "Coming later.", remove the "Soon" badge, remove
@@ -97,6 +97,24 @@ it is cut from the paywall. No gated stubs, no hardcoded values.
   path.
 - Verification: typecheck ✓, lint ✓, smoke 413/413 ✓ (+EI1–EI4, EIG1–EIG2),
   `git diff --check` ✓.
+
+### T2 — copy truth pass ✅
+- PaywallSheet now sells exactly the two BUILT pillars: "Shareable weekly
+  summary — a calm text recap you can keep or send" + "30-day rhythm insights
+  with real trends from your logs". "Coming later." subtitle, the "Soon" badge,
+  and "Fuller history" are gone from the purchasable paywall.
+- UpgradeCard / ProPreviewCard live sublines match the same sell-list; the
+  non-paid fake-door (preview mode) keeps its honest "Coming later." framing.
+  ProPreviewCard's corner label in a live build is now "Pro", not "Soon".
+- The export is described as a TEXT summary everywhere; the `proGates.ts`
+  comment no longer implies a PDF/CSV exists.
+- Smoke: new X9 pins the honest sell-list (no fuller-history/coming-later/
+  Soon/PDF/CSV on the paywall; both real pillars named). W7b RESCOPE (not a
+  weakening): it previously asserted the presence of the old future-facing
+  copy ("Fuller history…") — that copy is now an Apple 2.3.2 liability on a
+  live paywall, so the check now asserts the new truthful sell-list AND bans
+  all the old claims outright (strictly stronger ban list).
+- Verification: typecheck ✓, lint ✓, smoke 414/414 ✓, `git diff --check` ✓.
 
 ## Log
 
