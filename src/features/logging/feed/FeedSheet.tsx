@@ -93,7 +93,7 @@ export function FeedSheet({ onClose }: Props) {
     ? activeStartedLabel
       ? `Started ${activeStartedLabel}`
       : 'Switch sides or finish anytime'
-    : 'Breast session or bottle';
+    : 'Breast or bottle';
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={handleClose} statusBarTranslucent>
@@ -144,9 +144,9 @@ export function FeedSheet({ onClose }: Props) {
           </Text>
           <Text
             style={{
-              fontFamily: isActive ? fonts.bodyBold : fonts.body,
+              fontFamily: fonts.bodyBold,
               fontSize: 13,
-              color: isActive ? colors.inkSoft : colors.inkFaint,
+              color: colors.inkSoft,
               marginTop: 2,
               textAlign: isActive ? 'center' : 'left',
             }}>

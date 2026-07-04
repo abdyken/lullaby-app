@@ -16,6 +16,7 @@
  * carry the meaning (plan Phase 10 — do not communicate type by colour only).
  */
 import { Pressable, Text, View } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 
 import { colors, fonts } from '@/theme';
 
@@ -32,14 +33,48 @@ type Props = {
 };
 
 /**
- * A distinct decorative glyph per kind, mirroring the reference's instant cards.
- * The text label remains the accessible source of truth.
+ * A distinct SVG glyph per kind, in the sheet's inline-svg house style (single
+ * accent color, rounded forms — the same idiom as `MoonIcon` in `SleepIdle`).
+ * Each glyph now conveys the state (droplet = wet, pile = dirty, both together,
+ * check = dry) instead of an abstract shape. The bold text label and the
+ * screen-reader label stay the accessible source of truth — the glyph never
+ * carries meaning by shape or colour alone (plan Phase 10).
  */
-function kindGlyph(kind: DiaperKind) {
-  if (kind === 'wet') return '💧';
-  if (kind === 'dirty') return '●';
-  if (kind === 'both') return '◐';
-  return '○';
+function KindGlyph({ kind, color }: { kind: DiaperKind; color: string }) {
+  if (kind === 'wet') {
+    return (
+      <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+        <Path d="M12 3C12 3 5.5 10.8 5.5 15A6.5 6.5 0 1 0 18.5 15C18.5 10.8 12 3 12 3Z" fill={color} />
+      </Svg>
+    );
+  }
+  if (kind === 'dirty') {
+    return (
+      <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+        <Path
+          d="M4 17.5C3.6 14.6 6 12.8 7.8 13.2C8 10.6 11.4 10 12.8 12C15.2 11.1 18 12.9 17.4 15.1C19.2 15.4 19.3 17.5 17.6 17.5Z"
+          fill={color}
+        />
+      </Svg>
+    );
+  }
+  if (kind === 'both') {
+    return (
+      <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+        <Path d="M8.5 3.5C8.5 3.5 4.8 7.8 4.8 10.2A3.7 3.7 0 1 0 12.2 10.2C12.2 7.8 8.5 3.5 8.5 3.5Z" fill={color} />
+        <Path
+          d="M11.8 19.5C11.5 17.2 13.4 15.9 14.7 16.2C14.9 14.2 17.5 13.8 18.1 15.5C19.6 15.7 19.7 19.5 18.1 19.5Z"
+          fill={color}
+        />
+      </Svg>
+    );
+  }
+  // dry — a clean check ("checked, nothing to change").
+  return (
+    <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+      <Path d="M5 12.5L10 17.5L19 6.5" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
 }
 
 export function DiaperTypeButton({
@@ -86,16 +121,7 @@ export function DiaperTypeButton({
             backgroundColor: accentTint,
             marginBottom: 8,
           }}>
-          <Text
-            style={{
-              fontFamily: fonts.bodyBold,
-              fontSize: kind === 'wet' ? 29 : 28,
-              lineHeight: 32,
-              color: accentColor,
-              textAlign: 'center',
-            }}>
-            {kindGlyph(kind)}
-          </Text>
+          <KindGlyph kind={kind} color={accentColor} />
         </View>
         <View style={{ alignItems: 'center' }}>
           <Text style={{ fontFamily: fonts.display, fontSize: 16, color: colors.ink, textAlign: 'center' }}>
