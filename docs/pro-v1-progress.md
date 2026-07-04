@@ -52,11 +52,11 @@ it is cut from the paywall. No gated stubs, no hardcoded values.
   Constraints: PaywallSheet keeps required X1 strings, zero `$`, no URLs,
   no "monthly price"/"yearly price" phrases.
 
-- [ ] **T3 — Final verify + docs.**
-  `npm run typecheck` + `npm run lint` + `npm run check:local-interactions`
-  green; `git diff --check` clean. Per-feature self-checks recorded below.
-  Write `docs/pro-v1-done.md` (shipped / cut / human-remaining) and
-  `docs/human-handoff.md` for anything external hit along the way.
+- [x] **T3 — Final verify + docs.** *(committed: see log)*
+  typecheck ✓ · lint ✓ · check:local-interactions 414/414 ✓ ·
+  `git diff --check` ✓. Wrote `docs/pro-v1-done.md` + `docs/human-handoff.md`;
+  amended `docs/MONETIZATION_MODEL.md` in place (extended insights is now a
+  built v1 Pro pillar) so the product doc stays in sync with the gate code.
 
 ## Per-feature self-check results
 
@@ -121,3 +121,11 @@ it is cut from the paywall. No gated stubs, no hardcoded values.
 - Run started 2026-07-04. Plan grounded in `docs/pro-v1-ship-plan.md` +
   `docs/MONETIZATION_MODEL.md`; smoke-guard constraints surveyed
   (X1/X2/X3/Z4–Z7/RE5 pins identified before editing).
+- T0 landed as `f217926` (guest/anonymous purchase; +Z8; 407 checks).
+- T1 landed as `fe7d0ba` (30-day insights + real trends; +EI1–EI4, EIG1–EIG2;
+  413 checks).
+- T2 landed as `b43b7ee` (honest sell-list copy; +X9, W7b rescoped stronger;
+  414 checks).
+- T3: done + handoff docs written; monetization model amended. Run complete —
+  nothing pushed (repo rule). Remaining items are human-only
+  (docs/human-handoff.md).
