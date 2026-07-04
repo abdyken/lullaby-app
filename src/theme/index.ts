@@ -125,7 +125,8 @@ export const tabbar = {
   chipMinWidth: 68,
   chipHeight: 42,
   chipGap: 2,
-  iconSize: 20,
+  // icon-only tab bar: a touch larger than the old icon+label size for balance
+  iconSize: 22,
   labelSize: 9.5,
   surface: 'rgba(255,255,255,0.94)',
   border: 'rgba(255,255,255,0.7)',
