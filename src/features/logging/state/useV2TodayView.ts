@@ -102,7 +102,7 @@ function latestCompletedSleepEndedAt(events: CareEvent[]): string | null {
 }
 
 function nextNapLabel(wakeStartedAt: string | null, now: number): string {
-  if (wakeStartedAt === null) return 'Log the first sleep to build the nap rhythm';
+  if (wakeStartedAt === null) return 'Log a sleep to start the rhythm.';
   const target = ms(wakeStartedAt) + WAKE_WINDOW_MS;
   if (target <= now) return 'Nap window is open now';
   return `Next nap around ${clockLabel(new Date(target).toISOString())}`;

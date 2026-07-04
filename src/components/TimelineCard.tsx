@@ -71,7 +71,7 @@ export function TimelineCard({ entries, accentColor = colors.sleep, onAddNote, s
       ) : (
         <View style={{ paddingVertical: 14 }}>
           <Text style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: 18, color: palette.inkSoft }}>
-            Nothing logged yet tonight. Tap a quick-log tile above to start the night.
+            Nothing logged yet. Tap a tile to start the night.
           </Text>
         </View>
       )}
