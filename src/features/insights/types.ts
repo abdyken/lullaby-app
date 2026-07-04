@@ -29,6 +29,8 @@ export type InsightsViewModel = {
   updatedAt: number;
   hasEnoughData: boolean;
   dataDays: number;
+  /** The local-day window this view model was computed over (7 free / 30 Pro). */
+  windowDays: number;
   cards: InsightCardViewModel[];
   weeklySleep: WeeklySleepDayViewModel[];
   stats: {
