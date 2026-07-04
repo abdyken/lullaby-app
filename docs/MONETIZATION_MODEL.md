@@ -12,6 +12,13 @@ Companion docs: `docs/pro-implementation-plan.md` (the build ticket / architectu
 "keep the pattern, share it, and get the gentler phrasing." Core logging and
 safety are never gated.
 
+> **v1 update (2026-07-04, branch `feat/pro-subscription-v1`):** the extended
+> 30-day rhythm insights pillar is now BUILT and part of the v1 Pro surface
+> (gate `canViewExtendedInsights`), guest purchase works with no account
+> (anonymous RevenueCat), and all sale copy describes the export as a shareable
+> weekly TEXT summary. Sections below are amended in place where affected. See
+> `docs/pro-v1-done.md`.
+
 The gate rule lives in one dependency-free leaf, `src/lib/proGates.ts`, and the
 "core logging never gated" invariant is enforced by `scripts/check-local-interactions.ts`
 (§W). Nothing below overrides that.
@@ -58,6 +65,13 @@ actually built and cleanly isolated today, and those are the v1 Pro surface:
   `canUseLlmNightRead(isPro)`. Additionally requires the server night-read to be
   enabled and explicit on-device AI consent, so it stays dormant until that backend
   is live.
+- **Extended 30-day rhythm insights** *(added 2026-07-04)* — a real "Last 30 days"
+  section in Insights: rhythm cards + per-day stats computed over 30 days of
+  on-device logs, each stat with a computed trend (recent half of the window vs
+  the earlier half; no hardcoded values). The free 7-day Insights view stays free
+  and unchanged (its former fake `steady` chip was removed). Gate:
+  `canViewExtendedInsights(isPro)`; free users in a live-Pro build see a teaser
+  that opens the paywall.
 
 That is the whole v1 Pro surface. Extended history, the pediatrician summary, and
 extra caregivers have predicates reserved but no live feature behind them yet (see
@@ -118,7 +132,8 @@ Cross-referenced against the code as it stands. "Gate" = the predicate in
 | Active timers | logging session use-cases | Full | Same | **Never** | n/a | Timestamp-based, restart-safe |
 | Today / Home | `src/app/(tabs)/index.tsx` | Full | Same | **Never** | n/a | The nightly habit loop |
 | Timeline / History | `src/app/(tabs)/log.tsx` (`loadAllEvents`, unbounded) | **Full history, all events** | Same today | **Later** | Low | `canViewFullHistory` defined but **not applied**; gating needs a free-window cutoff (v1.1) |
-| Insights (7-day) | `src/features/insights/InsightsScreen.tsx` | Full 7-day view + free `WeeklyRecapCard` | Same (7-day) | **Never (free) for v1** | Low | Insights is inherently 7-day; no longer window is built to unlock |
+| Insights (7-day) | `src/features/insights/InsightsScreen.tsx` | Full 7-day view + free `WeeklyRecapCard` | Same (7-day) | **Never (free) for v1** | Low | The free 7-day view is never gated |
+| Extended insights (30-day) | `ExtendedInsightsCard.tsx`, gate `canViewExtendedInsights` | Teaser → paywall (live-Pro builds only) | Real 30-day view + computed trends | **Now** *(added 2026-07-04)* | Low | Genuinely computed (smoke §EI/§EIG pin the math + gate) |
 | Weekly recap export | `ProPreviewCard.tsx` + `shareWeeklyExport.ts` / `buildWeeklyExportText.ts`, gate `canExportWeeklyRecap` | View free recap; export CTA opens paywall | Real share-sheet weekly recap | **Now** | Low | Fully built + isolated. The v1 Pro anchor |
 | Reassure triage + recap | `src/features/reassure/*` (no gate import) | Full | Same | **Never** | n/a | Safety is never gated |
 | Reassure AI night-read | `src/features/reassure/application/nightRead.ts`, gate `canUseLlmNightRead` | Local computed read | LLM-phrased read | **Now (dormant)** | Low | Isolated; needs server night-read on + on-device consent, so lights up only when backend is live |
@@ -138,9 +153,10 @@ Today/Home, the full timeline, the 7-day Insights view + free weekly recap card,
 Reassure triage/recap/local night read, theme switching, the first caregiver invite
 and sync.
 
-**Pro in v1:** the weekly recap export (`canExportWeeklyRecap`) as the anchor, plus
-the AI night-read polish (`canUseLlmNightRead`) which only activates once its server
-backend and consent are in place.
+**Pro in v1:** the weekly recap export (`canExportWeeklyRecap`) as the anchor, the
+extended 30-day rhythm insights (`canViewExtendedInsights`, added 2026-07-04) as the
+second pillar, plus the AI night-read polish (`canUseLlmNightRead`) which only
+activates once its server backend and consent are in place (dormant; not advertised).
 
 **Waits until v1.1+:** extended/full history depth, pediatrician summary, multiple
 babies, extra caregivers, reminders/notifications, PDF/CSV export, premium themes,

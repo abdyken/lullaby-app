@@ -4,8 +4,10 @@
  * Phase 4 wires the RevenueCat purchase flow behind the same shape the earlier
  * phases used, so call sites (UpgradeCard / ProPreviewCard / PaywallSheet) did not
  * change their contract. It:
- *   - configures RevenueCat (via @/lib/revenueCat) ONLY when Pro is enabled, a
- *     signed-in session exists, and the platform has an API key,
+ *   - configures RevenueCat (via @/lib/revenueCat) ONLY when Pro is enabled and
+ *     the platform has an API key. A signed-in session is NOT required: a guest
+ *     (local-only, no account) configures anonymously and can purchase — the
+ *     entitlement stays device-local until they sign in,
  *   - reads CustomerInfo → `isPro` (RevenueCat is the on-device source of truth
  *     this phase; the Supabase `pro_entitlements` household row is a later phase),
  *   - loads the configured offering into SDK-free `packages`,
@@ -13,8 +15,8 @@
  *
  * It never imports the RevenueCat SDK directly (that lives only in
  * @/lib/revenueCat), never writes Supabase, never blocks rendering, never gates
- * logging, and degrades calmly when keys/products are missing or the user is
- * signed out. The dev/QA override (EXPO_PUBLIC_PRO_DEV_ENTITLEMENT, __DEV__ only)
+ * logging, and degrades calmly when keys/products are missing.
+ * The dev/QA override (EXPO_PUBLIC_PRO_DEV_ENTITLEMENT, __DEV__ only)
  * still unlocks `isPro` so Pro can be exercised before store products exist.
  *
  * Effects are lint/React-Compiler-safe: state is set only inside async callbacks,
@@ -49,7 +51,6 @@ import {
   getRevenueCatOffering,
   hasActiveRevenueCatEntitlement,
   isRevenueCatConfigured,
-  logOutRevenueCat,
   purchaseRevenueCatPackage,
   restoreRevenueCatPurchases,
   toProPackageViews,
@@ -62,12 +63,11 @@ import { useAuth } from '@/state/AuthProvider';
  * The paywall's high-level state, so PaywallSheet can render calmly without
  * knowing anything about RevenueCat:
  *   unconfigured → no key / Pro off — "not configured in this build yet"
- *   signed_out   → configured but no session — "sign in to subscribe"
  *   loading      → configuring / fetching the offering
- *   ready        → packages available to purchase
- *   unavailable  → configured + signed-in, but no packages came back
+ *   ready        → packages available to purchase (signed-in OR guest/anonymous)
+ *   unavailable  → configured, but no packages came back
  */
-export type PaywallStatus = 'unconfigured' | 'signed_out' | 'loading' | 'ready' | 'unavailable';
+export type PaywallStatus = 'unconfigured' | 'loading' | 'ready' | 'unavailable';
 
 /** The resolved Pro state from one RevenueCat sync (computed off-render). */
 type ProSnapshot = {
@@ -138,16 +138,16 @@ export function ProProvider({ children }: { children: ReactNode }) {
     const notReady: PaywallStatus | null =
       proMode !== 'enabled' || !platform || !hasRevenueCatConfig(platform)
         ? 'unconfigured'
-        : userId === null
-          ? 'signed_out'
-          : null;
+        : null;
 
-    if (notReady || userId === null) {
-      // Signing out reverts RevenueCat to anonymous so entitlement never leaks.
-      if (notReady === 'signed_out') void logOutRevenueCat();
-      return { isPro: devPro, packages: [], paywallStatus: notReady ?? 'unconfigured', offering: null };
+    if (notReady) {
+      return { isPro: devPro, packages: [], paywallStatus: notReady, offering: null };
     }
 
+    // Signed-in AND guest both configure. `userId === null` configures RevenueCat
+    // anonymously so a local/guest parent can purchase with no account; when the
+    // identity later changes, the service maps it to logIn/logOut (sign-out
+    // reverts to anonymous so entitlement never leaks between accounts).
     const ok = await configureRevenueCat({ userId });
     if (!ok) return { isPro: devPro, packages: [], paywallStatus: 'unconfigured', offering: null };
 
@@ -235,9 +235,8 @@ export function ProProvider({ children }: { children: ReactNode }) {
     track('restore_started', { surface: 'paywall' });
     // Apple-review safety: Restore is reachable from every paywall state and must
     // never crash when RevenueCat is disabled/unconfigured. If the SDK was never
-    // configured (missing key, unsupported platform, native module absent, or the
-    // user is signed out) degrade to a calm message instead of calling into an
-    // unconfigured SDK.
+    // configured (missing key, unsupported platform, native module absent)
+    // degrade to a calm message instead of calling into an unconfigured SDK.
     if (!isRevenueCatConfigured()) {
       setRestoreError('Subscriptions are not available in this version yet.');
       track('restore_failed', { surface: 'paywall', errorCode: 'not_configured', cancelled: false });
@@ -268,7 +267,8 @@ export function ProProvider({ children }: { children: ReactNode }) {
   const openPaywall = useCallback(() => setIsPaywallOpen(true), []);
   const closePaywall = useCallback(() => setIsPaywallOpen(false), []);
 
-  const canPurchase = proMode === 'enabled' && userId !== null && paywallStatus === 'ready' && !isPurchasing;
+  // A guest (userId === null) can purchase too — anonymous RevenueCat identity.
+  const canPurchase = proMode === 'enabled' && paywallStatus === 'ready' && !isPurchasing;
 
   const value = useMemo<ProContextValue>(
     () => ({
