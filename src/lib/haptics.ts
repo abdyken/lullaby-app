@@ -41,3 +41,8 @@ export function hapticUndo(): void {
 export function hapticSuccess(): void {
   safe(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
 }
+
+/** Light tick when a segmented toggle's selection changes (Breast/Bottle, side). */
+export function hapticSelection(): void {
+  safe(() => Haptics.selectionAsync());
+}
