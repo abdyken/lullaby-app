@@ -1365,7 +1365,7 @@ check('Z1. formatBabyAge reads "Newborn" in week 0, singular at 1, plural after'
 
 check('Z2. the Calibrating + coach copy is personal, honest, and not fake-precise', () => {
   assert.match(tonightCalibratingText('Mia'), /Mia's nights/);
-  assert.match(tonightCalibratingText('Mia'), /rhythm will fill in/);
+  assert.match(tonightCalibratingText('Mia'), /rhythm fills in/);
   assert.match(firstLogNudgeText('Mia'), /Mia's first feed/);
   assert.match(firstLogNudgeText('Mia'), /timeline/);
   assert.match(firstLogThreadText(), /thread/);
@@ -1766,9 +1766,17 @@ check('AE7. the main app has an explicit, labeled account entry (not only the ba
 });
 
 check('AE8. public account entry copy is truthful for local-only Shape A', () => {
-  for (const honest of ['Saved on this device', 'Optional account', 'Privacy-first']) {
-    assert.ok(ACCOUNT_ENTRY_SRC.includes(honest), `account entry has honest chip: ${honest}`);
-  }
+  // The decorative value chips were removed in the UX pass; the honest local-only
+  // promise (no account, data on device) now lives in the subtitle copy itself.
+  assert.ok(
+    ACCOUNT_ENTRY_SRC.includes('No account needed. Everything you log stays on this phone.'),
+    'account entry subtitle must state the truthful local-only promise (no account, on-device)',
+  );
+  // Internal "for this build" dev-speak must never ship in public account-entry copy.
+  assert.ok(
+    !/[Ff]or this build/.test(ACCOUNT_ENTRY_SRC),
+    'public account-entry copy must not contain internal "for this build" phrasing',
+  );
   for (const [name, src] of [
     ['AccountEntryScreen', ACCOUNT_ENTRY_SRC],
     ['AccountSheet', ACCOUNT_SHEET_SRC],
