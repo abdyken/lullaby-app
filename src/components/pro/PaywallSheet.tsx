@@ -5,7 +5,6 @@
  * LogSheet). It reads the purchase surface from usePro() and renders one of a few
  * calm states:
  *   unconfigured → "Subscriptions are not configured in this build yet."
- *   signed_out   → "Sign in to subscribe."
  *   loading      → "Loading subscription options…"
  *   ready        → the real subscription packages (store-localized price strings)
  *   unavailable  → "Subscription options aren't available right now."
@@ -25,18 +24,21 @@ import { colors, fonts, radii, shadows } from '@/theme';
 
 import type { ProPackageView } from '@/lib/revenueCat';
 
+// Sell-list rule (Apple 2.1): ONLY features that genuinely work appear here —
+// today that is the shareable weekly summary (plain text via the OS share
+// sheet, never sold as a formatted document) and the 30-day rhythm insights
+// with computed trends. No future promises, nothing unbuilt.
 const TITLE = 'Lullaby Pro';
-const SUBTITLE = 'Fuller history, gentle weekly recaps, and export-ready summaries. Coming later.';
+const SUBTITLE =
+  'Keep the pattern, not just the night — deeper views of what you already log, on this device.';
 
 const BENEFITS = [
-  'Fuller history',
-  'Gentle weekly recaps',
-  'Export-ready summaries',
+  'Shareable weekly summary — a calm text recap you can keep or send',
+  '30-day rhythm insights with real trends from your logs',
 ];
 
 // Calm per-state copy.
 const UNAVAILABLE = 'Subscriptions are not configured in this build yet.';
-const SIGN_IN = 'Sign in to subscribe to Lullaby Pro.';
 const LOADING = 'Loading subscription options…';
 const NO_PACKAGES = 'Subscription options aren’t available right now.';
 const ACTIVE = 'You’re all set — Lullaby Pro is active.';
@@ -48,6 +50,13 @@ const RESTORE_NOTE = 'Restore recovers a subscription you already purchased.';
 const NOT_MEDICAL = 'Not medical advice.';
 const STORE_MANAGED = 'Subscriptions are billed through your App Store / Play Store account.';
 const STORE_MANAGE = 'Cancel or manage anytime in your store account settings.';
+
+// Apple-required auto-renewable subscription disclosure (App Store Review 3.1.2).
+// Canonical Apple wording, adapted honestly — disclosure only, no marketing
+// claims and no URL (per-period price + plan label already render on each
+// package button). Rendered near the purchase CTA, visible without scrolling.
+const AUTO_RENEW =
+  'Payment is charged to your Apple ID at confirmation of purchase. The subscription auto-renews unless canceled at least 24 hours before the end of the current period. Your account is charged for renewal within 24 hours prior to the end of the current period. Manage or cancel anytime in your Apple ID settings.';
 
 // App Store / Play review-safe legal links. Labels only — the destinations come
 // from appLinks (env EXPO_PUBLIC_TERMS_URL / EXPO_PUBLIC_PRIVACY_POLICY_URL with
@@ -166,12 +175,11 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
     restorePurchases,
   } = usePro();
 
-  const showBadge = !isPro && paywallStatus !== 'ready';
   // Restore is ALWAYS reachable (Apple review 3.1.1) — the button is only disabled
-  // while a restore is in flight. `canRestore` now drives the helper copy: when the
-  // store is configured + signed-in we show the store-manage line, otherwise a calm
-  // hint. ProProvider.restorePurchases() safely no-ops when RevenueCat is
-  // unconfigured, so tapping it in any state never crashes.
+  // while a restore is in flight. `canRestore` drives the helper copy: when the
+  // store is configured (signed-in or guest) we show the store-manage line,
+  // otherwise a calm hint. ProProvider.restorePurchases() safely no-ops when
+  // RevenueCat is unconfigured, so tapping it in any state never crashes.
   const canRestore = paywallStatus === 'ready' || paywallStatus === 'unavailable';
 
   return (
@@ -207,6 +215,8 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
             }}
           />
 
+          {/* No "Soon" badge here, ever — this sheet only renders on a live,
+              purchasable paywall, so a coming-soon signal would be misleading. */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text
               style={{
@@ -218,21 +228,6 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
               }}>
               Lullaby Pro
             </Text>
-            {showBadge ? (
-              <View
-                style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: radii.pill, backgroundColor: colors.sleepTint }}>
-                <Text
-                  style={{
-                    fontFamily: fonts.bodyBold,
-                    fontSize: 9.5,
-                    letterSpacing: 0.6,
-                    textTransform: 'uppercase',
-                    color: colors.sleep,
-                  }}>
-                  Soon
-                </Text>
-              </View>
-            ) : null}
           </View>
 
           <Text style={{ fontFamily: fonts.display, fontSize: 22, color: colors.ink, marginTop: 6 }}>{TITLE}</Text>
@@ -270,8 +265,6 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
                 </Text>
               ) : null}
             </View>
-          ) : paywallStatus === 'signed_out' ? (
-            <NoticeBox text={SIGN_IN} />
           ) : paywallStatus === 'loading' ? (
             <NoticeBox text={LOADING} />
           ) : paywallStatus === 'unavailable' ? (
@@ -280,7 +273,7 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
             <NoticeBox text={UNAVAILABLE} />
           )}
 
-          {/* Restore — real when configured + signed-in; calm disabled stub otherwise. */}
+          {/* Restore — real whenever RevenueCat is configured; calm stub otherwise. */}
           {!isPro ? (
             <View style={{ marginTop: 14 }}>
               <Pressable
@@ -317,8 +310,12 @@ export function PaywallSheet({ onClose }: { onClose: () => void }) {
             </View>
           ) : null}
 
-          {/* Safety copy — descriptive, non-medical, store-managed billing. */}
+          {/* Auto-renewal disclosure (Apple 3.1.2) + descriptive, non-medical,
+              store-managed billing. Always visible, near the purchase CTA. */}
           <View style={{ marginTop: 14, gap: 3 }}>
+            <Text style={{ fontFamily: fonts.body, fontSize: 11.5, lineHeight: 16, color: colors.inkFaint }}>
+              {AUTO_RENEW}
+            </Text>
             <Text style={{ fontFamily: fonts.body, fontSize: 11.5, lineHeight: 16, color: colors.inkFaint }}>
               {NOT_MEDICAL}
             </Text>
