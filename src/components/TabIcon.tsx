@@ -21,13 +21,14 @@ export function TabIcon({ name, color, size = tabbar.iconSize }: Props) {
   const sw = 1.9;
 
   if (name === 'tonight') {
-    // crescent moon / the orb itself
+    // home — this is the home tab (the moon now lives only on the theme toggle)
     return (
       <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
         <Path
-          d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"
+          d="M3.5 11.5 12 4l8.5 7.5M6 10v9h12v-9M10.4 19v-3.5a1.6 1.6 0 0 1 3.2 0V19"
           stroke={stroke}
           strokeWidth={sw}
+          strokeLinecap="round"
           strokeLinejoin="round"
         />
       </Svg>
