@@ -4,8 +4,8 @@
  * in-app).
  *
  * Each destination is build-time configurable via an optional EXPO_PUBLIC_*
- * env var and falls back to the documented lullaby.app placeholder when the
- * var is unset or blank — so the rows always have a destination and never
+ * env var and falls back to a live hosted default when the var is unset or
+ * blank — so the rows always have a real, reachable destination and never
  * crash on a missing env value. These are public URLs inlined into the JS
  * bundle at build time; no secret may ever live here. The real hosted URLs
  * must be in place (or configured here) before an App Store submission — see
@@ -17,9 +17,16 @@
  * resolveAppInstallUrl in src/components/auth/inviteShareMessage.ts.
  */
 
-/** Placeholder destinations until the real pages are hosted. */
-export const DEFAULT_PRIVACY_POLICY_URL = 'https://lullaby.app/privacy';
-export const DEFAULT_TERMS_URL = 'https://lullaby.app/terms';
+/**
+ * Live fallback destinations — the real hosted landing pages, used only when
+ * the EXPO_PUBLIC_* override is unset/blank. The old lullaby.app defaults
+ * pointed at a parked/for-sale domain (dead legal links → guaranteed App Store
+ * rejection), so the safety net now points at the real published pages. The
+ * env var stays the primary source; these are just the never-dead fallback.
+ * (The support email is still a placeholder until a monitored mailbox exists.)
+ */
+export const DEFAULT_PRIVACY_POLICY_URL = 'https://lullaby-landing.vercel.app/privacy';
+export const DEFAULT_TERMS_URL = 'https://lullaby-landing.vercel.app/terms';
 export const DEFAULT_SUPPORT_EMAIL = 'support@lullaby.app';
 
 /** Trimmed override when the var carries a real value, else the fallback. */
