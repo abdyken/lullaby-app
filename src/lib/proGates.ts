@@ -23,6 +23,15 @@ export function canViewFullHistory(isPro: boolean): boolean {
   return isPro;
 }
 
+/**
+ * View the extended 30-day rhythm insights with real computed trends. Pro-only.
+ * The free 7-day Insights view stays free for everyone — this gates only the
+ * longer window and its trend analysis (depth, never input).
+ */
+export function canViewExtendedInsights(isPro: boolean): boolean {
+  return isPro;
+}
+
 /** Generate / share the clean, descriptive pediatrician summary. Pro-only. */
 export function canSharePediatricianSummary(isPro: boolean): boolean {
   return isPro;

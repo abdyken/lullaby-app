@@ -26,7 +26,7 @@ it is cut from the paywall. No gated stubs, no hardcoded values.
   `ready`; entitlement stays device-local; RE5 regex
   (`!hasRevenueCatConfig(platform) ? 'unconfigured'`) preserved.
 
-- [ ] **T1 — Premium rhythm insights (the real build).**
+- [x] **T1 — Premium rhythm insights (the real build).** *(committed: see log)*
   - Parametrize the insights window (`windowDays`, default 7) through
     `insightSelectors.ts` / `getInsightsViewModel.ts`.
   - Replace the hardcoded `delta: 'steady'` with a REAL trend computed from
@@ -74,6 +74,29 @@ it is cut from the paywall. No gated stubs, no hardcoded values.
   no "Sign in to subscribe" dead end remains (Z8 pins its absence).
 - RE5 unconfigured-state pin preserved; verification: typecheck ✓, lint ✓,
   smoke 407/407 ✓ (was 406, +Z8), `git diff --check` ✓.
+
+### T1 — premium 30-day rhythm insights ✅ (integrity check passed)
+- **Free vs Pro genuinely differ:** free = the unchanged 7-day view, now with NO
+  trend chips at all (the fake `delta: 'steady'` stub is deleted); Pro = a real
+  "Last 30 days" section (rhythm cards + per-day stats) computed over 30 days of
+  on-device logs via `loadEventsInRange`.
+- **Pro output really computed:** trends come from `buildWindowTrends` /
+  `computeTrend` — recent half of the window vs the earlier half, ±10% steady
+  band, and NO trend at all when a half has <2 logged days or the baseline is
+  zero (never a made-up chip). Smoke EIG1 pins that exactly one `'steady'`
+  literal exists and it lives inside `computeTrend`; EI2/EI3 prove up/down/steady
+  are all reachable from data alone; EI1 proves the 30-day window genuinely
+  includes >7-day-old events; EI4 proves free carries no chip.
+- **Gate:** new `canViewExtendedInsights(isPro)` in proGates; free (enabled
+  mode) sees a teaser → `pro_gate_seen` gate:'extended_insights' +
+  `paywall_opened` + openPaywall; teaser shows no premium data. Card renders only
+  when `getProMode() === 'enabled'` and `dataDays >= 4` (EIG2 pins all of this).
+- **Non-crashing from fresh state:** entitled-but-loading shows a calm line;
+  sparse 30-day data shows a calm fill-in line; empty events already covered by
+  IG1. Extended load failure keeps the last good view and never blocks the free
+  path.
+- Verification: typecheck ✓, lint ✓, smoke 413/413 ✓ (+EI1–EI4, EIG1–EIG2),
+  `git diff --check` ✓.
 
 ## Log
 
