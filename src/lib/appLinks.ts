@@ -23,11 +23,12 @@
  * pointed at a parked/for-sale domain (dead legal links → guaranteed App Store
  * rejection), so the safety net now points at the real published pages. The
  * env var stays the primary source; these are just the never-dead fallback.
- * (The support email is still a placeholder until a monitored mailbox exists.)
+ * (The support email fallback is a real monitored mailbox, so a build with the
+ * EXPO_PUBLIC_SUPPORT_EMAIL env var unset still has a reachable contact.)
  */
 export const DEFAULT_PRIVACY_POLICY_URL = 'https://lullaby-landing.vercel.app/privacy';
 export const DEFAULT_TERMS_URL = 'https://lullaby-landing.vercel.app/terms';
-export const DEFAULT_SUPPORT_EMAIL = 'support@lullaby.app';
+export const DEFAULT_SUPPORT_EMAIL = '240103091@sdu.edu.kz';
 
 /** Trimmed override when the var carries a real value, else the fallback. */
 function resolveConfigured(raw: string | undefined, fallback: string): string {
