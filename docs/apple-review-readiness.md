@@ -231,6 +231,5 @@ the Apple-review surfaces the fix pass touched:
 - `docs/testflight-readiness.md` — broader QA + build guide.
 - `docs/release-env.md` — env var surface and safe defaults.
 - `docs/reassure-content-review.md` — clinician sign-off manifest (task 01 gate).
-- `.claude-night/reports/*.status.json` — per-task machine-readable reports (01–09).
 - `supabase/migrations/20260703060000_delete_account.sql` — delete-account RPC
   (apply before enabling accounts).

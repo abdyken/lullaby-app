@@ -11,14 +11,14 @@
  * (cream surface, grab handle, feed accent). Reads the feature API from
  * `useLogging()`; all business logic lives in the use-cases behind it.
  */
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fonts, radii, shadows } from '@/theme';
 
 import { newClientEventId } from '../domain/ids';
-import type { BreastSide, MilkType } from '../domain/types';
+import { isBreastFeed, type BreastFeedEvent, type BreastSide, type MilkType } from '../domain/types';
 import { useLogging } from '../state/LoggingProvider';
 import { confirmDiscardSession } from '../ui/confirmDiscardSession';
 import { BottleFeedForm } from './BottleFeedForm';
@@ -53,6 +53,7 @@ function formatStartedAt(iso: string | null): string {
 export function FeedSheet({ onClose }: Props) {
   const insets = useSafeAreaInsets();
   const {
+    todayEvents,
     activeBreastFeed,
     error,
     clearError,
@@ -64,6 +65,20 @@ export function FeedSheet({ onClose }: Props) {
   } = useLogging();
 
   const [tab, setTab] = useState<FeedTab>(lastFeedMethod);
+
+  // Pre-select the breast the parent is likely to use: the opposite of the last
+  // completed breast feed's final side (babies alternate). Read-only over the
+  // existing today events — this only seeds the selector; what gets saved is
+  // unchanged (the parent still confirms with Start). Falls back to Left when
+  // there's no prior breast feed to alternate from.
+  const defaultBreastSide = useMemo<BreastSide>(() => {
+    const lastBreast = [...todayEvents]
+      .filter((e): e is BreastFeedEvent => isBreastFeed(e) && e.status === 'completed')
+      .sort((a, b) => Date.parse(b.endedAt ?? b.occurredAt) - Date.parse(a.endedAt ?? a.occurredAt))[0];
+    const segments = lastBreast?.details.segments ?? [];
+    const lastSide = segments.length > 0 ? segments[segments.length - 1].side : null;
+    return lastSide === 'left' ? 'right' : 'left';
+  }, [todayEvents]);
   // One idempotency key per sheet-open: a double-tap on Save dedupes to one event.
   const bottleClientId = useRef(newClientEventId());
 
@@ -188,6 +203,7 @@ export function FeedSheet({ onClose }: Props) {
           ) : tab === 'breast' ? (
             <BreastFeedIdle
               accentColor={accentColor}
+              defaultSide={defaultBreastSide}
               onStart={(side: BreastSide) => {
                 lastFeedMethod = 'breast';
                 void startBreast(side);
