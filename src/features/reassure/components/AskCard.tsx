@@ -135,6 +135,7 @@ export function AskCard({ surfaceMode, onAsk, inputRef }: Props) {
           accessibilityRole="button"
           accessibilityLabel="Ask"
           onPress={submitText}
+          hitSlop={8}
           style={({ pressed }) => ({
             width: 38,
             height: 38,
