@@ -27,6 +27,7 @@ import { TIMELINE_LIMIT } from '@/data/localInteractions';
 import type { TimelineEntry } from '@/data/mock';
 import type { Caregiver } from '@/data/models';
 import type { QuickLogKind } from '@/components/QuickLogButton';
+import { hapticSave } from '@/lib/haptics';
 
 import type { CareEvent } from '../domain/types';
 import { formatClock, sessionElapsedMs } from '../timer/sessionMath';
@@ -206,7 +207,14 @@ export function useV2TodayView(params: { now?: number; caregivers: Caregiver[] }
       });
 
     const onPrimaryAction = () => {
-      void (logging.activeSleep ? logging.finishSleep() : logging.startSleep());
+      if (logging.activeSleep) {
+        // Finish confirms via recordMutation (haptic + toast) already — no extra buzz.
+        void logging.finishSleep();
+      } else {
+        // Match the sheet's start-confirmation: a soft tap on a one-tap Orb start.
+        hapticSave();
+        void logging.startSleep();
+      }
     };
 
     return { orb, activeTile, timeline, quickLogMeta, tonightStatus, onPrimaryAction };
