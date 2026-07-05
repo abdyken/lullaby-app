@@ -220,7 +220,7 @@ export function VoiceOrb({
           height: ORB_SIZE,
           alignItems: 'center',
           justifyContent: 'center',
-          transform: [{ scale: pressed ? 0.96 : 1 }],
+          opacity: pressed ? 0.86 : 1,
         })}>
         {/* breathing / thinking / ready halo (Reanimated, UI thread) */}
         <Reanimated.View

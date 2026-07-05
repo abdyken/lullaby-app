@@ -182,7 +182,7 @@ function TopicRow({
               paddingHorizontal: 14,
               paddingVertical: 9,
               marginTop: 2,
-              transform: [{ scale: pressed ? 0.96 : 1 }],
+              opacity: pressed ? 0.86 : 1,
             })}>
             <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.sleep }}>
               {askLabel}
