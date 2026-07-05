@@ -6441,7 +6441,22 @@ check('X17c. voice fallback states are explicit and unavailable voice focuses th
 check('X17d. Reassure keyboard/tabbar structure keeps send, chips, and answers reachable', () => {
   assert.ok(REASSURE_SCREEN_SRC.includes('KeyboardAvoidingView'), 'Reassure is keyboard-aware');
   assert.ok(REASSURE_SCREEN_SRC.includes('Keyboard.dismiss()'), 'typed ask dismisses the keyboard on submit');
-  assert.ok(REASSURE_SCREEN_SRC.includes("source === 'text' ? 260 : 120"), 'typed ask scroll waits for keyboard/layout settle');
+  // The ask answer scrolls into view exactly ONCE, deduped by pendingAnswerScrollRef
+  // and driven by the answer block's own onLayout (which carries the measured y
+  // AFTER the keyboard-dismiss reflow) — this replaces the removed guessed
+  // `source === 'text' ? 260 : 120` timer. Pin the dedup mechanism, not a bare
+  // 'onLayout' (which could pass even if the scroll broke): the flag is SET when a
+  // new answer is requested and CONSUMED (flipped false) inside the answer block's
+  // onLayout right before the single scrollToAnswer() call.
+  assert.ok(
+    REASSURE_SCREEN_SRC.includes('pendingAnswerScrollRef.current = true'),
+    'a new answer marks a single pending scroll-into-view',
+  );
+  assert.ok(
+    REASSURE_SCREEN_SRC.includes('pendingAnswerScrollRef.current = false') &&
+      REASSURE_SCREEN_SRC.includes('scrollToAnswer()'),
+    'typed ask scrolls into view once, consumed by the answer block onLayout (after keyboard/layout settle)',
+  );
   assert.ok(REASSURE_SCREEN_SRC.includes('keyboardShouldPersistTaps="handled"'), 'send stays tappable while keyboard is open');
   assert.ok(REASSURE_SCREEN_SRC.includes('REASSURE_TABBAR_EXTRA_CLEARANCE'), 'Reassure has named tabbar clearance');
   assert.ok(REASSURE_SCREEN_SRC.includes('tabbar.height + 64'), 'Reassure bottom clearance accounts for tabbar height plus extra space');

@@ -79,7 +79,7 @@ export function AiConsentCard({ surfaceMode, onGrant, onDecline }: Props) {
           accessibilityRole="button"
           accessibilityLabel="Turn on the AI-phrased night read"
           onPress={onGrant}
-          style={({ pressed }) => ({ transform: [{ scale: pressed ? 0.97 : 1 }] })}>
+          style={({ pressed }) => ({ opacity: pressed ? 0.86 : 1 })}>
           <View
             style={{
               backgroundColor: colors.sleep,
@@ -96,7 +96,7 @@ export function AiConsentCard({ surfaceMode, onGrant, onDecline }: Props) {
           accessibilityRole="button"
           accessibilityLabel="Keep the local read without AI"
           onPress={onDecline}
-          style={({ pressed }) => ({ transform: [{ scale: pressed ? 0.97 : 1 }] })}>
+          style={({ pressed }) => ({ opacity: pressed ? 0.86 : 1 })}>
           <View
             style={{
               backgroundColor: night ? 'rgba(255,255,255,0.08)' : colors.surface,

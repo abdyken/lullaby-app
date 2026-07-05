@@ -357,7 +357,7 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: 8,
-                    transform: [{ scale: pressed ? 0.98 : 1 }],
+                    opacity: pressed ? 0.86 : 1,
                   })}>
                   <PhoneIcon />
                   <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.white }}>
@@ -381,7 +381,7 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
                     borderColor: colors.alert,
                     paddingVertical: 13,
                     alignItems: 'center',
-                    transform: [{ scale: pressed ? 0.98 : 1 }],
+                    opacity: pressed ? 0.86 : 1,
                   })}>
                   <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.alert }}>
                     {ADD_NUMBER_ACTION}
@@ -477,7 +477,7 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
                         borderRadius: 12,
                         paddingVertical: 12,
                         alignItems: 'center',
-                        transform: [{ scale: pressed ? 0.98 : 1 }],
+                        opacity: pressed ? 0.86 : 1,
                       })}>
                       <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13.5, color: colors.white }}>
                         {SAVE_NUMBER_ACTION}
@@ -492,7 +492,7 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
                         paddingVertical: 12,
                         alignItems: 'center',
                         justifyContent: 'center',
-                        transform: [{ scale: pressed ? 0.98 : 1 }],
+                        opacity: pressed ? 0.86 : 1,
                       })}>
                       <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13.5, color: palette.inkSoft }}>
                         {CANCEL_ACTION}
@@ -517,7 +517,7 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
                   borderRadius: 14,
                   paddingVertical: 14,
                   alignItems: 'center',
-                  transform: [{ scale: pressed ? 0.98 : 1 }],
+                  opacity: pressed ? 0.86 : 1,
                 })}>
                 <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.alert }}>
                   {TRIAGE_COPY.secondaryAction}
