@@ -59,7 +59,6 @@ import { OnboardingNightSky } from './OnboardingNightSky';
 import { OnboardingStepLayout } from './OnboardingStepLayout';
 import {
   ONBOARDING_FOCUS_NEEDS,
-  hasOnboardingFocusNeed,
   toggleOnboardingFocusNeed,
   type OnboardingFocusNeed,
 } from './onboardingFocus';
@@ -1077,7 +1076,7 @@ export function OnboardingScreen({ onComplete }: Props) {
         }
         title={`What's hardest with ${focusTitleName} right now?`}
         subtitle="We'll start tonight with what you need most. Tap any that fit."
-        cta={<AuthButton label="Continue" onPress={flow.submit} disabled={!hasOnboardingFocusNeed(focusNeeds)} />}
+        cta={<AuthButton label="Continue" onPress={flow.submit} />}
         secondaryCta={
           <LinkButton
             label="Skip for now"
