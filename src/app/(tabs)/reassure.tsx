@@ -324,7 +324,9 @@ export default function ReassureScreen() {
                 accessibilityLabel="Try voice again"
                 onPress={retryVoice}
                 style={({ pressed }) => ({
-                  backgroundColor: colors.sleep,
+                  backgroundColor: colors.sleepTint,
+                  borderWidth: 1.5,
+                  borderColor: colors.sleep,
                   borderRadius: radii.pill,
                   minHeight: 44,
                   paddingHorizontal: 20,
@@ -332,7 +334,7 @@ export default function ReassureScreen() {
                   justifyContent: 'center',
                   transform: [{ scale: pressed ? 0.96 : 1 }],
                 })}>
-                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.white }}>
+                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.sleep }}>
                   Try again
                 </Text>
               </Pressable>
