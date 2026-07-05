@@ -5,10 +5,13 @@
  * swap in an LLM-phrased read for Pro users — see application/nightRead.ts —
  * but the local text always renders first and remains the fallback.)
  */
+import { useEffect, useRef } from 'react';
 import { Text, View } from 'react-native';
+import Reanimated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import type { ReassureNightRecap } from '@/features/reassure/domain/types';
 import { recapReadText, recapWindowLabel } from '@/features/reassure/domain/recap';
+import { useReduceMotion } from '@/lib/useReduceMotion';
 import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
 type Props = {
@@ -50,6 +53,24 @@ export function RecapCard({ surfaceMode, recap, readOverride }: Props) {
   const night = surfaceMode === 'night';
   const tallies = buildTallies(recap);
   const readText = readOverride ?? recapReadText(recap);
+
+  // Gentle local→AI crossfade: the local read is on screen from the first frame
+  // (opacity 1); when the AI-phrased read arrives it fades up. Opacity only — no
+  // layout shift — and held static under reduce-motion. PURELY visual: the read
+  // value above is unchanged (local first, AI overrides), so the X22 local-first
+  // ordering is untouched.
+  const reduceMotion = useReduceMotion() ?? true;
+  const reveal = useSharedValue(1);
+  const prevOverride = useRef<string | null | undefined>(readOverride);
+  useEffect(() => {
+    const aiArrived = readOverride != null && readOverride !== prevOverride.current;
+    prevOverride.current = readOverride;
+    if (aiArrived && !reduceMotion) {
+      reveal.value = 0.4;
+      reveal.value = withTiming(1, { duration: 520, easing: Easing.out(Easing.quad) });
+    }
+  }, [readOverride, reduceMotion, reveal]);
+  const readStyle = useAnimatedStyle(() => ({ opacity: reveal.value }));
 
   return (
     <View
@@ -95,12 +116,15 @@ export function RecapCard({ surfaceMode, recap, readOverride }: Props) {
           color: colors.sleep,
           marginBottom: 6,
         }}>
-        The short version
+        In short
       </Text>
-      <Text
-        style={{ fontFamily: fonts.bodyBold, fontSize: 14, lineHeight: 21.5, color: palette.ink }}>
+      <Reanimated.Text
+        style={[
+          { fontFamily: fonts.bodyBold, fontSize: 14, lineHeight: 21.5, color: palette.ink },
+          readStyle,
+        ]}>
         {readText}
-      </Text>
+      </Reanimated.Text>
 
       <View
         style={{

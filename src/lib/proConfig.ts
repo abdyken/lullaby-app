@@ -7,9 +7,9 @@
  * set:
  *
  *   EXPO_PUBLIC_PRO_ENABLED          → REAL Pro (RevenueCat paywall + live gates).
- *                                      NOT wired yet — Phase 1 only reports the
- *                                      flag; there is no paywall, purchase, or
- *                                      RevenueCat behind it.
+ *                                      Wired via RevenueCat (Phase 4): purchase,
+ *                                      restore, and the 'pro' entitlement on the
+ *                                      'default' offering resolve behind it.
  *   EXPO_PUBLIC_PRO_PREVIEW_ENABLED  → the NON-PAID fake-door preview (interest
  *                                      analytics only). Owned by proPreview.ts and
  *                                      re-exported here so there is one flag parser.
@@ -31,8 +31,8 @@ export type ProMode = 'off' | 'preview' | 'enabled';
 
 /**
  * Whether REAL Pro (paywall + live feature gates) is enabled for this build.
- * Off by default; only "true"/"1" turns it on. Phase 1: this only reports the
- * flag — no RevenueCat, no purchases, and no paywall are wired behind it yet.
+ * Off by default; only "true"/"1" turns it on. When on, RevenueCat purchase /
+ * restore and the paywall are wired behind it (Phase 4).
  */
 export function isProEnabled(): boolean {
   const raw = process.env.EXPO_PUBLIC_PRO_ENABLED;

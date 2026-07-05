@@ -6,7 +6,12 @@ import {
   type SleepEvent,
 } from '@/features/logging/domain/types';
 
-import type { InsightStatViewModel, InsightsViewModel, WeeklySleepDayViewModel } from './types';
+import type {
+  InsightDeltaTone,
+  InsightStatViewModel,
+  InsightsViewModel,
+  WeeklySleepDayViewModel,
+} from './types';
 
 type LocalDay = {
   date: string;
@@ -18,9 +23,41 @@ type LocalDay = {
 const MAX_WAKE_WINDOW_MINUTES = 10 * 60;
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
-export function buildInsightsViewModel(params: { events: CareEvent[]; now: number }): InsightsViewModel {
+/** The free Insights window: the last 7 local days. */
+export const DEFAULT_INSIGHTS_WINDOW_DAYS = 7;
+/** The Pro extended-insights window: the last 30 local days. */
+export const EXTENDED_INSIGHTS_WINDOW_DAYS = 30;
+/**
+ * Trends are only computed for windows of at least this many days: the trend
+ * compares the recent half of the window against the earlier half, and a half
+ * shorter than a week is too noisy to honestly call a direction.
+ */
+export const TREND_MIN_WINDOW_DAYS = 14;
+/** Each half-window needs at least this many active (logged) days to compare. */
+const TREND_MIN_ACTIVE_DAYS_PER_HALF = 2;
+/** Relative change inside ±this band reads as "steady". */
+const TREND_STEADY_BAND = 0.1;
+
+/** A computed per-stat trend: recent half-window vs the earlier half-window. */
+type StatTrend = { delta: string; deltaTone: InsightDeltaTone };
+
+type WindowTrends = {
+  feeds: StatTrend | null;
+  sleep: StatTrend | null;
+  diapers: StatTrend | null;
+};
+
+const NO_TRENDS: WindowTrends = { feeds: null, sleep: null, diapers: null };
+
+export function buildInsightsViewModel(params: {
+  events: CareEvent[];
+  now: number;
+  /** Local-day window size; defaults to the free 7-day view. */
+  windowDays?: number;
+}): InsightsViewModel {
   const { events, now } = params;
-  const days = getLast7LocalDays(now);
+  const windowDays = Math.max(1, Math.round(params.windowDays ?? DEFAULT_INSIGHTS_WINDOW_DAYS));
+  const days = getLastNLocalDays(now, windowDays);
   const windowStart = days[0]?.startMs ?? startOfLocalDay(now);
   const windowEnd = days[days.length - 1]?.endMs ?? addLocalDays(windowStart, 1);
   const relevantEvents = events.filter((event) => isVisibleEvent(event));
@@ -52,10 +89,19 @@ export function buildInsightsViewModel(params: { events: CareEvent[]; now: numbe
   const hasPatternData = feedEvents.length >= 3 || completedSleepEvents.length >= 2 || diaperEvents.length >= 4;
   const hasEnoughData = activeDataDays > 0 && (activeDataDays >= 4 || hasPatternData);
 
+  // Trends are REAL: computed from the logs by comparing the recent half of the
+  // window against the earlier half. Short (free, 7-day) windows carry no trend
+  // at all — never a hardcoded placeholder.
+  const trends =
+    windowDays >= TREND_MIN_WINDOW_DAYS
+      ? buildWindowTrends({ days, events: relevantEvents, feedEvents, diaperEvents, sleeps: completedSleepEvents })
+      : NO_TRENDS;
+
   return {
     updatedAt: now,
     hasEnoughData,
     dataDays: activeDataDays,
+    windowDays,
     cards,
     weeklySleep,
     stats: {
@@ -63,12 +109,14 @@ export function buildInsightsViewModel(params: { events: CareEvent[]; now: numbe
         count: feedEvents.length,
         activeDataDays,
         label: 'Feeds / day',
+        trend: trends.feeds,
       }),
-      sleepPerDay: buildSleepStat({ totalSleepMinutes, activeDataDays }),
+      sleepPerDay: buildSleepStat({ totalSleepMinutes, activeDataDays, trend: trends.sleep }),
       diapersPerDay: buildCountStat({
         count: diaperEvents.length,
         activeDataDays,
         label: 'Diapers / day',
+        trend: trends.diapers,
       }),
     },
   };
@@ -86,10 +134,10 @@ function addLocalDays(dayStartMs: number, count: number): number {
   return date.getTime();
 }
 
-function getLast7LocalDays(now: number): LocalDay[] {
+function getLastNLocalDays(now: number, count: number): LocalDay[] {
   const todayStart = startOfLocalDay(now);
-  return Array.from({ length: 7 }, (_, index) => {
-    const startMs = addLocalDays(todayStart, index - 6);
+  return Array.from({ length: count }, (_, index) => {
+    const startMs = addLocalDays(todayStart, index - (count - 1));
     const endMs = addLocalDays(startMs, 1);
     const date = new Date(startMs);
     return {
@@ -188,10 +236,8 @@ function buildFeedRhythmCard(feedEvents: CareEvent[]): InsightsViewModel['cards'
   if (feedEvents.length < 3) {
     return {
       id: 'feed-rhythm',
-      emoji: '🍼',
-      text: 'Feed rhythm will appear after a few more logs.',
-      source: 'Keep logging',
-      sourceTone: 'muted',
+      icon: 'bottle',
+      text: "Feed rhythm shows once you've logged a few feeds.",
       tone: 'feed',
     };
   }
@@ -205,21 +251,21 @@ function buildFeedRhythmCard(feedEvents: CareEvent[]): InsightsViewModel['cards'
 
   return {
     id: 'feed-rhythm',
-    emoji: '🍼',
-    text: `Feeds are settling into a ${formatDuration(averageMinutes)} rhythm based on recent logs.`,
+    icon: 'bottle',
+    text: `Feeds are settling into a ${formatDuration(averageMinutes)} rhythm.`,
     source: `From ${feedEvents.length} recent feeds`,
     tone: 'feed',
   };
 }
 
 function buildSleepInsightCard(sleeps: SleepEvent[]): InsightsViewModel['cards'][number] {
-  if (sleeps.length === 0) {
+  // Honesty gate: one nap isn't a "longest stretch". Hold the placeholder until
+  // there are at least two completed sleeps to compare. The max below is unchanged.
+  if (sleeps.length < 2) {
     return {
       id: 'sleep-pattern',
-      emoji: '🌙',
-      text: 'Sleep patterns will build as you log more completed sleeps.',
-      source: 'Building pattern',
-      sourceTone: 'muted',
+      icon: 'moon',
+      text: "Sleep patterns show once you've logged a couple of sleeps.",
       tone: 'sleep',
     };
   }
@@ -231,9 +277,8 @@ function buildSleepInsightCard(sleeps: SleepEvent[]): InsightsViewModel['cards']
 
   return {
     id: 'sleep-pattern',
-    emoji: '🌙',
-    text: `Longest sleep stretch is around ${formatDuration(longestMinutes)} based on recent sleep logs.`,
-    source: 'Based on recent sleep logs',
+    icon: 'moon',
+    text: `Longest sleep stretch is around ${formatDuration(longestMinutes)}.`,
     tone: 'sleep',
   };
 }
@@ -247,13 +292,13 @@ function buildWakeWindowCard(sleeps: SleepEvent[]): InsightsViewModel['cards'][n
     return [gapMinutes];
   });
 
-  if (sleeps.length < 2 || gaps.length === 0) {
+  // Honesty gate: a single gap is one sample, not an "around X" average. Hold the
+  // placeholder until there are at least two wake windows. The mean below is unchanged.
+  if (sleeps.length < 2 || gaps.length < 2) {
     return {
       id: 'wake-windows',
-      emoji: '💡',
-      text: 'Wake windows need a few completed sleeps to estimate.',
-      source: 'A few more logs needed',
-      sourceTone: 'muted',
+      icon: 'sun',
+      text: "Wake windows show once you've logged a few sleeps.",
       tone: 'neutral',
     };
   }
@@ -261,15 +306,98 @@ function buildWakeWindowCard(sleeps: SleepEvent[]): InsightsViewModel['cards'][n
   const averageMinutes = Math.round(gaps.reduce((sum, value) => sum + value, 0) / gaps.length);
   return {
     id: 'wake-windows',
-    emoji: '💡',
-    text: `Wake windows are around ${formatDuration(averageMinutes)} based on recent sleep times.`,
-    source: 'Based on wake times',
+    icon: 'sun',
+    text: `Wake windows are around ${formatDuration(averageMinutes)}.`,
     tone: 'neutral',
   };
 }
 
-function buildCountStat(params: { count: number; activeDataDays: number; label: string }): InsightStatViewModel {
-  const { count, activeDataDays, label } = params;
+/**
+ * Compare the recent half of the window against the earlier half for each stat.
+ * Honesty rules: a half with too few logged days, or an empty baseline, yields
+ * NO trend (null) rather than a made-up one.
+ */
+function buildWindowTrends(params: {
+  days: LocalDay[];
+  events: CareEvent[];
+  feedEvents: CareEvent[];
+  diaperEvents: CareEvent[];
+  sleeps: SleepEvent[];
+}): WindowTrends {
+  const { days, events, feedEvents, diaperEvents, sleeps } = params;
+  const mid = Math.floor(days.length / 2);
+  const earlier = buildHalfWindowAverages(days.slice(0, mid), events, feedEvents, diaperEvents, sleeps);
+  const recent = buildHalfWindowAverages(days.slice(mid), events, feedEvents, diaperEvents, sleeps);
+  if (!earlier || !recent) return NO_TRENDS;
+
+  return {
+    feeds: computeTrend(earlier.feedsPerDay, recent.feedsPerDay),
+    sleep: computeTrend(earlier.sleepMinutesPerDay, recent.sleepMinutesPerDay),
+    diapers: computeTrend(earlier.diapersPerDay, recent.diapersPerDay),
+  };
+}
+
+type HalfWindowAverages = {
+  feedsPerDay: number;
+  sleepMinutesPerDay: number;
+  diapersPerDay: number;
+};
+
+function buildHalfWindowAverages(
+  days: LocalDay[],
+  events: CareEvent[],
+  feedEvents: CareEvent[],
+  diaperEvents: CareEvent[],
+  sleeps: SleepEvent[],
+): HalfWindowAverages | null {
+  if (days.length === 0) return null;
+  const activeDays = buildActiveDataDayKeys(days, events).size;
+  if (activeDays < TREND_MIN_ACTIVE_DAYS_PER_HALF) return null;
+
+  const startMs = days[0].startMs;
+  const endMs = days[days.length - 1].endMs;
+  const feeds = feedEvents.filter((event) =>
+    isTimestampInWindow(getEventStartedAt(event), startMs, endMs),
+  ).length;
+  const diapers = diaperEvents.filter((event) =>
+    isTimestampInWindow(getEventStartedAt(event), startMs, endMs),
+  ).length;
+  const sleepMinutes = days.reduce(
+    (sum, day) =>
+      sum + sleeps.reduce((daySum, sleep) => daySum + overlapMinutes(getEventStartedAt(sleep), getEventEndedAt(sleep), day), 0),
+    0,
+  );
+
+  return {
+    feedsPerDay: feeds / activeDays,
+    sleepMinutesPerDay: sleepMinutes / activeDays,
+    diapersPerDay: diapers / activeDays,
+  };
+}
+
+/**
+ * A real relative-change trend. `earlier` is the baseline; without one (zero)
+ * there is nothing honest to claim, so the stat carries no trend chip.
+ */
+function computeTrend(earlier: number, recent: number): StatTrend | null {
+  if (!Number.isFinite(earlier) || !Number.isFinite(recent) || earlier <= 0) return null;
+  const change = (recent - earlier) / earlier;
+  if (Math.abs(change) < TREND_STEADY_BAND) {
+    return { delta: 'steady', deltaTone: 'neutral' };
+  }
+  const percent = Math.round(Math.abs(change) * 100);
+  return change > 0
+    ? { delta: `up ${percent}%`, deltaTone: 'up' }
+    : { delta: `down ${percent}%`, deltaTone: 'down' };
+}
+
+function buildCountStat(params: {
+  count: number;
+  activeDataDays: number;
+  label: string;
+  trend: StatTrend | null;
+}): InsightStatViewModel {
+  const { count, activeDataDays, label, trend } = params;
   if (activeDataDays === 0) {
     return { value: '0', label };
   }
@@ -277,12 +405,16 @@ function buildCountStat(params: { count: number; activeDataDays: number; label: 
   return {
     value: formatDecimal(count / activeDataDays),
     label,
-    ...(activeDataDays >= 4 ? { delta: 'steady', deltaTone: 'neutral' as const } : {}),
+    ...(trend ?? {}),
   };
 }
 
-function buildSleepStat(params: { totalSleepMinutes: number; activeDataDays: number }): InsightStatViewModel {
-  const { totalSleepMinutes, activeDataDays } = params;
+function buildSleepStat(params: {
+  totalSleepMinutes: number;
+  activeDataDays: number;
+  trend: StatTrend | null;
+}): InsightStatViewModel {
+  const { totalSleepMinutes, activeDataDays, trend } = params;
   if (activeDataDays === 0 || totalSleepMinutes <= 0) {
     return { value: '0', label: 'Sleep / day' };
   }
@@ -293,7 +425,7 @@ function buildSleepStat(params: { totalSleepMinutes: number; activeDataDays: num
       value: `${Math.round(averageMinutes)}`,
       unit: 'm',
       label: 'Sleep / day',
-      ...(activeDataDays >= 4 ? { delta: 'steady', deltaTone: 'neutral' as const } : {}),
+      ...(trend ?? {}),
     };
   }
 
@@ -301,7 +433,7 @@ function buildSleepStat(params: { totalSleepMinutes: number; activeDataDays: num
     value: `${Math.round(averageMinutes / 60)}`,
     unit: 'h',
     label: 'Sleep / day',
-    ...(activeDataDays >= 4 ? { delta: 'steady', deltaTone: 'neutral' as const } : {}),
+    ...(trend ?? {}),
   };
 }
 

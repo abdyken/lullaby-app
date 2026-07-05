@@ -11,9 +11,12 @@
  * household `pro_entitlements` row is a later phase. This module never touches
  * Supabase, never emits analytics, and never contains an external payment link.
  *
- * Identity: we configure/log in with the Supabase `user.id` as the RevenueCat
- * appUserID, so entitlement follows the signed-in account and does not leak
- * between accounts on a shared device (sign-out calls logOut).
+ * Identity: a signed-in user configures/logs in with the Supabase `user.id` as
+ * the RevenueCat appUserID, so entitlement follows the account and does not leak
+ * between accounts on a shared device (sign-out reverts to anonymous). A GUEST
+ * (no session) configures ANONYMOUSLY — RevenueCat mints and persists its own
+ * device-local anonymous id — so a local-only parent can purchase with no
+ * account; their entitlement lives on this device + store account.
  */
 import { Platform } from 'react-native';
 import Purchases, {
@@ -59,6 +62,9 @@ function currentPlatform(): RevenueCatPlatform | null {
 
 // Tracks whether Purchases.configure has run this session (it may run only once).
 let configuredApiKey: string | null = null;
+// The identity RevenueCat currently carries: a Supabase user id, or null while
+// anonymous (guest). Lets identity changes map to logIn/logOut exactly once.
+let currentAppUserId: string | null = null;
 
 /** Whether RevenueCat has been configured this app session. */
 export function isRevenueCatConfigured(): boolean {
@@ -66,12 +72,14 @@ export function isRevenueCatConfigured(): boolean {
 }
 
 /**
- * Configure RevenueCat once per session with the signed-in user's id as the
- * appUserID; on a later identity change, log in instead. Returns false (never
- * throws) when there is no platform key or the native call fails, so callers can
- * degrade to a calm "not configured" state.
+ * Configure RevenueCat once per session. A signed-in user's id becomes the
+ * appUserID; `userId: null` configures ANONYMOUSLY so a guest with no account
+ * can purchase (RevenueCat mints/persists its own device-local anonymous id).
+ * On a later identity change, log in / log out instead of reconfiguring.
+ * Returns false (never throws) when there is no platform key or the native call
+ * fails, so callers can degrade to a calm "not configured" state.
  */
-export async function configureRevenueCat(params: { userId: string }): Promise<boolean> {
+export async function configureRevenueCat(params: { userId: string | null }): Promise<boolean> {
   const platform = currentPlatform();
   if (!platform) return false;
   const apiKey = getRevenueCatApiKey(platform);
@@ -79,11 +87,21 @@ export async function configureRevenueCat(params: { userId: string }): Promise<b
 
   try {
     if (configuredApiKey === null) {
+      // First configure this session. A null appUserID is the anonymous path.
       Purchases.configure({ apiKey, appUserID: params.userId });
       configuredApiKey = apiKey;
-    } else {
-      // Already configured this session — make sure we are the right identity.
-      await Purchases.logIn(params.userId);
+      currentAppUserId = params.userId;
+    } else if (params.userId !== null) {
+      // Already configured this session — adopt the signed-in identity once.
+      if (currentAppUserId !== params.userId) {
+        await Purchases.logIn(params.userId);
+        currentAppUserId = params.userId;
+      }
+    } else if (currentAppUserId !== null) {
+      // Signed out mid-session — revert to a fresh anonymous identity so the
+      // previous account's entitlement never leaks to the next user.
+      await Purchases.logOut();
+      currentAppUserId = null;
     }
     return true;
   } catch {
@@ -91,11 +109,16 @@ export async function configureRevenueCat(params: { userId: string }): Promise<b
   }
 }
 
-/** Log the RevenueCat user out (revert to anonymous) on sign-out. Never throws. */
+/**
+ * Log the RevenueCat user out (revert to anonymous) on sign-out. Never throws.
+ * No-ops when already anonymous — the SDK treats logging out an anonymous user
+ * as an error, and there is no identity to shed.
+ */
 export async function logOutRevenueCat(): Promise<void> {
-  if (configuredApiKey === null) return;
+  if (configuredApiKey === null || currentAppUserId === null) return;
   try {
     await Purchases.logOut();
+    currentAppUserId = null;
   } catch {
     // Calm: sign-out should never surface a subscription error.
   }

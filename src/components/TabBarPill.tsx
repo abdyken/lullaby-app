@@ -33,7 +33,6 @@
 import { useEffect } from 'react';
 import { PixelRatio, Pressable, useWindowDimensions, View } from 'react-native';
 import Animated, {
-  interpolateColor,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -42,7 +41,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TabIcon, type TabName } from '@/components/TabIcon';
-import { fonts, getAccentForState, tabbar, tabbarSurfaces, type SurfaceMode } from '@/theme';
+import { getAccentForState, tabbar, tabbarSurfaces, type SurfaceMode } from '@/theme';
 
 const TABBAR_BORDER_WIDTH = 1;
 /** Tabs in the navigator. Used for deterministic slot geometry. */
@@ -135,11 +134,6 @@ function AnimatedTabItem({
     return { opacity: tabProgress(activeIndex.value, index) };
   }, [index]);
 
-  const labelStyle = useAnimatedStyle(() => {
-    const p = tabProgress(activeIndex.value, index);
-    return { color: interpolateColor(p, [0, 1], [inactiveColor, accent.color]) };
-  }, [index, inactiveColor]);
-
   return (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
       <Pressable
@@ -155,13 +149,15 @@ function AnimatedTabItem({
           borderRadius: tabbar.tabRadius,
           opacity: pressed ? 0.85 : 1,
         })}>
+        {/* Icons only — labels are hidden. The tab name still reaches screen
+            readers via the Pressable's accessibilityLabel above. The icon sits
+            centred in the chip (no label row to balance against). */}
         <View
           style={{
             minWidth: tabbar.chipMinWidth,
             height: tabbar.chipHeight,
             alignItems: 'center',
             justifyContent: 'center',
-            gap: tabbar.chipGap,
           }}>
           <View
             style={{
@@ -177,18 +173,6 @@ function AnimatedTabItem({
               <TabIcon name={iconName} color={accent.color} size={tabbar.iconSize} />
             </Animated.View>
           </View>
-          <Animated.Text
-            numberOfLines={1}
-            style={[
-              {
-                fontFamily: fonts.bodyBold,
-                fontSize: tabbar.labelSize,
-                letterSpacing: 0.1,
-              },
-              labelStyle,
-            ]}>
-            {label}
-          </Animated.Text>
         </View>
       </Pressable>
     </View>

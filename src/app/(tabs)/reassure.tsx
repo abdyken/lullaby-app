@@ -259,25 +259,28 @@ export default function ReassureScreen() {
         bottomGapExtra={REASSURE_TABBAR_EXTRA_CLEARANCE}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}>
-      <Text
-        style={{ fontFamily: fonts.bodyBold, fontSize: 10, letterSpacing: 1.4, color: colors.sleep }}>
-        IS THIS NORMAL?
-      </Text>
-      <Text style={{ fontFamily: fonts.display, fontSize: 30, color: palette.ink, marginTop: 6 }}>
+      {/* One calm header line. The "is this normal?" question now lives in the
+          hero; the non-medical disclaimer lives in the quiet footer (RG3) and the
+          bounded-promise card, so it is not repeated here. */}
+      <Text style={{ fontFamily: fonts.display, fontSize: 30, color: palette.ink }}>
         Reassure
       </Text>
       <Text
         style={{ fontFamily: fonts.body, fontSize: 14, lineHeight: 20, color: palette.inkSoft, marginTop: 2 }}>
-        General supportive information for tonight — not medical advice, never a diagnosis.
+        A calm companion for the small hours.
       </Text>
 
-      {/* night-sky hero + voice orb (the signature moment) */}
+      {/* night-sky hero + ambient agent orb (the signature moment). The orb
+          READS the night-read status only — it reflects Resting/Thinking/Ready
+          and never triggers a read, gates content, or routes. */}
       <ReassureHero>
         <VoiceOrb
           state={voice.state}
           reduceMotion={reduceMotion}
           onPress={onOrbPress}
           interimText={voice.interim}
+          nightReadStatus={nightReadStatus}
+          isResolving={nightReadStatus === 'loading'}
         />
       </ReassureHero>
 
@@ -321,13 +324,17 @@ export default function ReassureScreen() {
                 accessibilityLabel="Try voice again"
                 onPress={retryVoice}
                 style={({ pressed }) => ({
-                  backgroundColor: colors.sleep,
+                  backgroundColor: colors.sleepTint,
+                  borderWidth: 1.5,
+                  borderColor: colors.sleep,
                   borderRadius: radii.pill,
-                  paddingHorizontal: 13,
-                  paddingVertical: 8,
+                  minHeight: 44,
+                  paddingHorizontal: 20,
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   transform: [{ scale: pressed ? 0.96 : 1 }],
                 })}>
-                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.white }}>
+                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.sleep }}>
                   Try again
                 </Text>
               </Pressable>
@@ -340,11 +347,13 @@ export default function ReassureScreen() {
                 style={({ pressed }) => ({
                   backgroundColor: colors.sleep,
                   borderRadius: radii.pill,
-                  paddingHorizontal: 13,
-                  paddingVertical: 8,
+                  minHeight: 44,
+                  paddingHorizontal: 20,
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   transform: [{ scale: pressed ? 0.96 : 1 }],
                 })}>
-                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.white }}>
+                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.white }}>
                   Open Settings
                 </Text>
               </Pressable>
@@ -354,15 +363,17 @@ export default function ReassureScreen() {
               accessibilityLabel="Type instead"
               onPress={focusTypeInstead}
               style={({ pressed }) => ({
-                backgroundColor: mode === 'night' ? 'rgba(255,255,255,0.08)' : colors.surface,
+                backgroundColor: colors.sleepTint,
                 borderWidth: 1.5,
-                borderColor: palette.line,
+                borderColor: colors.sleep,
                 borderRadius: radii.pill,
-                paddingHorizontal: 13,
-                paddingVertical: 8,
+                minHeight: 44,
+                paddingHorizontal: 20,
+                alignItems: 'center',
+                justifyContent: 'center',
                 transform: [{ scale: pressed ? 0.96 : 1 }],
               })}>
-              <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.sleep }}>
+              <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.sleep }}>
                 Type instead
               </Text>
             </Pressable>
@@ -411,6 +422,24 @@ export default function ReassureScreen() {
       {/* tonight recap, grounded in the saved logs */}
       <Kicker text={currentRecapHeading} color={palette.inkFaint} />
       <RecapCard surfaceMode={mode} recap={recap} readOverride={nightRead} />
+
+      {/* While the AI read is resolving, a calm, honest "reading" line — only for
+          AI-eligible + consented parents. The local read above is already fully
+          shown, so this never blocks; it disappears the moment the read resolves. */}
+      {nightReadStatus === 'loading' ? (
+        <Text
+          accessibilityLiveRegion="polite"
+          style={{
+            fontFamily: fonts.body,
+            fontSize: 12,
+            lineHeight: 17.5,
+            color: palette.inkFaint,
+            marginTop: 8,
+            paddingHorizontal: 2,
+          }}>
+          Reading tonight’s logs…
+        </Text>
+      ) : null}
 
       {/* Honest label under the read: an 'AI-phrased' badge when the AI read is
           showing, or a calm 'AI read isn't available' note when we tried and it

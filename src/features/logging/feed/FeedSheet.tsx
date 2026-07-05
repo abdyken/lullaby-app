@@ -11,14 +11,15 @@
  * (cream surface, grab handle, feed accent). Reads the feature API from
  * `useLogging()`; all business logic lives in the use-cases behind it.
  */
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { hapticSave } from '@/lib/haptics';
 import { colors, fonts, radii, shadows } from '@/theme';
 
 import { newClientEventId } from '../domain/ids';
-import type { BreastSide, MilkType } from '../domain/types';
+import { isBreastFeed, type BreastFeedEvent, type BreastSide, type MilkType } from '../domain/types';
 import { useLogging } from '../state/LoggingProvider';
 import { confirmDiscardSession } from '../ui/confirmDiscardSession';
 import { BottleFeedForm } from './BottleFeedForm';
@@ -37,6 +38,12 @@ const FEED_TAB_OPTIONS: FeedSegmentedOption<FeedTab>[] = [
   { value: 'bottle', label: 'Bottle' },
 ];
 
+// Remembered last feed method for the session (in-memory, resets on app restart
+// — mirrors BottleFeedForm's lastAmountMl). The sheet opens on whichever method
+// the parent committed to last, so a bottle parent doesn't re-tap the Bottle tab
+// every feed. Set only on a real start/save, never on an idle tab peek.
+let lastFeedMethod: FeedTab = 'breast';
+
 function formatStartedAt(iso: string | null): string {
   if (!iso) return '';
   const date = new Date(iso);
@@ -47,6 +54,7 @@ function formatStartedAt(iso: string | null): string {
 export function FeedSheet({ onClose }: Props) {
   const insets = useSafeAreaInsets();
   const {
+    todayEvents,
     activeBreastFeed,
     error,
     clearError,
@@ -57,7 +65,21 @@ export function FeedSheet({ onClose }: Props) {
     saveBottle,
   } = useLogging();
 
-  const [tab, setTab] = useState<FeedTab>('breast');
+  const [tab, setTab] = useState<FeedTab>(lastFeedMethod);
+
+  // Pre-select the breast the parent is likely to use: the opposite of the last
+  // completed breast feed's final side (babies alternate). Read-only over the
+  // existing today events — this only seeds the selector; what gets saved is
+  // unchanged (the parent still confirms with Start). Falls back to Left when
+  // there's no prior breast feed to alternate from.
+  const defaultBreastSide = useMemo<BreastSide>(() => {
+    const lastBreast = [...todayEvents]
+      .filter((e): e is BreastFeedEvent => isBreastFeed(e) && e.status === 'completed')
+      .sort((a, b) => Date.parse(b.endedAt ?? b.occurredAt) - Date.parse(a.endedAt ?? a.occurredAt))[0];
+    const segments = lastBreast?.details.segments ?? [];
+    const lastSide = segments.length > 0 ? segments[segments.length - 1].side : null;
+    return lastSide === 'left' ? 'right' : 'left';
+  }, [todayEvents]);
   // One idempotency key per sheet-open: a double-tap on Save dedupes to one event.
   const bottleClientId = useRef(newClientEventId());
 
@@ -82,7 +104,10 @@ export function FeedSheet({ onClose }: Props) {
 
   const handleSaveBottle = async (amountMl: number, milkType: MilkType): Promise<boolean> => {
     const ok = await saveBottle({ amountMl, milkType, clientEventId: bottleClientId.current });
-    if (ok) handleClose();
+    if (ok) {
+      lastFeedMethod = 'bottle';
+      handleClose();
+    }
     return ok;
   };
 
@@ -93,7 +118,7 @@ export function FeedSheet({ onClose }: Props) {
     ? activeStartedLabel
       ? `Started ${activeStartedLabel}`
       : 'Switch sides or finish anytime'
-    : 'Breast session or bottle';
+    : 'Breast or bottle';
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={handleClose} statusBarTranslucent>
@@ -144,9 +169,9 @@ export function FeedSheet({ onClose }: Props) {
           </Text>
           <Text
             style={{
-              fontFamily: isActive ? fonts.bodyBold : fonts.body,
+              fontFamily: fonts.bodyBold,
               fontSize: 13,
-              color: isActive ? colors.inkSoft : colors.inkFaint,
+              color: colors.inkSoft,
               marginTop: 2,
               textAlign: isActive ? 'center' : 'left',
             }}>
@@ -179,7 +204,10 @@ export function FeedSheet({ onClose }: Props) {
           ) : tab === 'breast' ? (
             <BreastFeedIdle
               accentColor={accentColor}
+              defaultSide={defaultBreastSide}
               onStart={(side: BreastSide) => {
+                lastFeedMethod = 'breast';
+                hapticSave();
                 void startBreast(side);
               }}
             />

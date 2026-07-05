@@ -13,13 +13,23 @@
  * import this module (enforced in scripts/check-local-interactions.ts).
  */
 
-/** Export / share the weekly recap (PDF/CSV/share sheet). Pro-only. */
+/** Export / share the weekly recap — plain TEXT via the OS share sheet (a
+ * formatted PDF/CSV does not exist; never advertise one). Pro-only. */
 export function canExportWeeklyRecap(isPro: boolean): boolean {
   return isPro;
 }
 
 /** View history beyond the free 7-day window. Pro-only. */
 export function canViewFullHistory(isPro: boolean): boolean {
+  return isPro;
+}
+
+/**
+ * View the extended 30-day rhythm insights with real computed trends. Pro-only.
+ * The free 7-day Insights view stays free for everyone — this gates only the
+ * longer window and its trend analysis (depth, never input).
+ */
+export function canViewExtendedInsights(isPro: boolean): boolean {
   return isPro;
 }
 

@@ -122,7 +122,7 @@ export function DiaperSheet({ onClose }: Props) {
               marginTop: 3,
               textAlign: 'center',
             }}>
-            Choose one option — it saves instantly
+            Pick one. It saves right away.
           </Text>
 
           {error && (
@@ -187,7 +187,7 @@ export function DiaperSheet({ onClose }: Props) {
               marginTop: 18,
               marginHorizontal: 10,
             }}>
-            No confirmation screen: Quick Log → type → saved. Undo is available in the toast.
+            Tapped the wrong one? You can undo it.
           </Text>
         </View>
       </View>

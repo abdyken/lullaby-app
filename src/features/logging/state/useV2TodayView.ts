@@ -102,7 +102,7 @@ function latestCompletedSleepEndedAt(events: CareEvent[]): string | null {
 }
 
 function nextNapLabel(wakeStartedAt: string | null, now: number): string {
-  if (wakeStartedAt === null) return 'Log the first sleep to build the nap rhythm';
+  if (wakeStartedAt === null) return 'Log a sleep to start the rhythm.';
   const target = ms(wakeStartedAt) + WAKE_WINDOW_MS;
   if (target <= now) return 'Nap window is open now';
   return `Next nap around ${clockLabel(new Date(target).toISOString())}`;
@@ -154,7 +154,7 @@ export function useV2TodayView(params: { now?: number; caregivers: Caregiver[] }
         eyebrow: 'Asleep',
         timerText: formatClock(elapsed),
         title: 'Sleep started',
-        description: `Started ${clockLabel(activeSleep.startedAt)} · timer is live`,
+        description: `Started ${clockLabel(activeSleep.startedAt)} · still asleep`,
         actionLabel: 'Baby woke up',
         progress: Math.min(1, elapsed / WAKE_WINDOW_MS),
         stateIcon: 'moon',

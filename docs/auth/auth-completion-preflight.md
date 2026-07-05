@@ -4,7 +4,7 @@
 > **Worktree:** `/home/dimash/lullaby-auth-completion-workflow`
 > **Branch:** `feat/auth-completion-autoworkflow` (= `main` + merged `feat/auth-autoworkflow`
 > + merged `feat/onboarding-personalized-activation`).
-> **Source of truth:** `docs/plans/authentication-implementation-plan.md` (background intent).
+> **Source of truth:** `docs/archive/authentication-implementation-plan.md` (background intent).
 > **Checks at audit time:** `expo lint` ✓ · `check:local-interactions` ✓ (199/199) ·
 > `tsc --noEmit` ✗ (one **pre-existing, auth-unrelated** error — see §6).
 

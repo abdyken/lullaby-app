@@ -30,11 +30,12 @@ import type { InsightsViewModel } from '../types';
 import { InsightsSectionCard } from './InsightsSectionCard';
 
 // Fake-door (preview) keeps the "coming later" framing; the live upsell and the
-// active-subscriber state drop it.
+// active-subscriber state drop it. All variants name ONLY features that
+// genuinely exist: the shareable weekly TEXT summary and the 30-day insights.
 const FEATURE_PREVIEW =
-  'Fuller history, gentle weekly recaps, and export-ready summaries. Coming later.';
-const FEATURE_LIVE = 'Fuller history, gentle weekly recaps, and export-ready summaries.';
-const FEATURE_ACTIVE = 'Your Pro features are unlocked — export a weekly recap anytime.';
+  'A shareable weekly summary and monthly rhythm insights. Coming later.';
+const FEATURE_LIVE = 'A shareable weekly summary and 30-day rhythm insights with real trends.';
+const FEATURE_ACTIVE = 'Your Pro features are unlocked — share a weekly summary anytime.';
 
 const CONFIRM = 'Lullaby Pro is coming soon — thanks for the interest.';
 const EXPORT_READY = 'Weekly export is ready to share.';
@@ -106,7 +107,7 @@ export function ProPreviewCard({ viewModel }: { viewModel: InsightsViewModel }) 
   };
 
   return (
-    <InsightsSectionCard title="Lullaby Pro" actionLabel={isPro ? 'Active' : 'Soon'}>
+    <InsightsSectionCard title="Lullaby Pro" actionLabel={isPro ? 'Active' : live ? 'Pro' : 'Soon'}>
       <View style={{ gap: 8 }}>
         <FeatureRow text={featureLine} color={colors.feed} inkColor={palette.inkSoft} />
       </View>
