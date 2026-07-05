@@ -25,8 +25,18 @@ import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/state/AuthProvider';
 import { colors, fonts, radii } from '@/theme';
 
-export function GoogleSignInButton() {
+export function GoogleSignInButton({
+  variant = 'secondary',
+}: {
+  /**
+   * Visual weight only — the handler/flow is identical. 'primary' paints the
+   * filled indigo pill (the promoted account path); 'secondary' is the quiet
+   * light-surface pill. Presentation-only: the account/OAuth logic never changes.
+   */
+  variant?: 'primary' | 'secondary';
+} = {}) {
   const { signInWithGoogle, busy } = useAuth();
+  const primary = variant === 'primary';
 
   // Hidden unless this build can actually complete a Google sign-in: a configured
   // Supabase client + a Google OAuth client ID, on a native platform. Absent →
@@ -50,24 +60,30 @@ export function GoogleSignInButton() {
         borderRadius: radii.pill,
         transform: [{ scale: pressed && !busy ? 0.98 : 1 }],
       })}>
-      {/* Light fill on an inner View so it paints reliably on Android. Flat (no
-          shadow) so it reads as a quiet secondary option beside the promoted,
-          filled "Continue locally" primary on the account-entry surface. */}
+      {/* Fill on an inner View so it paints reliably on Android. Flat (no shadow).
+          'primary' is the filled indigo pill (the promoted account path); the
+          default 'secondary' is the quiet light-surface pill. */}
       <View
         style={{
-          minHeight: 50,
+          minHeight: primary ? 52 : 50,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: colors.surface,
+          backgroundColor: primary ? colors.sleep : colors.surface,
           borderRadius: radii.pill,
-          borderWidth: 1,
+          borderWidth: primary ? 0 : 1,
           borderColor: colors.line,
           paddingHorizontal: 24,
           opacity: busy ? 0.55 : 1,
         }}>
         {/* While a sign-in is launching/completing, the label reads as progress so
             a repeated tap (already guarded above) is clearly unnecessary. */}
-        <Text style={{ fontFamily: fonts.bodyBold, fontSize: 15, color: colors.ink }}>
+        <Text
+          style={{
+            fontFamily: fonts.bodyBold,
+            fontSize: 15,
+            letterSpacing: primary ? 0.2 : 0,
+            color: primary ? colors.white : colors.ink,
+          }}>
           {busy ? 'Signing in…' : 'Continue with Google'}
         </Text>
       </View>

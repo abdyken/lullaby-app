@@ -188,23 +188,28 @@ export function AccountEntryScreen() {
           <AuthLink label="Already have an account? Sign in" onPress={() => openAuth('signIn')} />
         ) : undefined
       }>
-      {/* Local-first is the promoted, primary path: the one filled action, at the top.
-          Always present in both states — the "never force account creation" guardrail. */}
-      <PrimaryButton label="Continue locally" onPress={() => void continueLocally()} disabled={busy} />
-
       {configured ? (
         <>
-          {/* Account options, kept as quiet secondary choices — present and tappable,
-              just not the loudest thing on screen. */}
-          <SecondaryButton label="Create account" onPress={() => openAuth('signUp')} disabled={busy} />
+          {/* Product decision: the account path is now the promoted, primary action.
+              "Continue with Google" is the one filled indigo pill, at the top;
+              Create account / Apple / Continue locally follow as quiet secondary
+              options. This changes VISUAL WEIGHT ONLY — every handler, the auth flow
+              and the guest/local path are untouched. */}
+          <GoogleSignInButton variant="primary" />
           {/* Native "Sign in with Apple" — renders on iOS only; null elsewhere. */}
           <AppleSignInButton />
-          {/* "Continue with Google" — iOS + Android via the system browser; null when
-              not configured (or on web). */}
-          <GoogleSignInButton />
+          <SecondaryButton label="Create account" onPress={() => openAuth('signUp')} disabled={busy} />
+          {/* Local-first stays present and reachable (the "never force account
+              creation" guardrail), just demoted to a quiet secondary choice. */}
+          <SecondaryButton label="Continue locally" onPress={() => void continueLocally()} disabled={busy} />
         </>
       ) : (
-        <SetupRequiredNote />
+        <>
+          {/* Unconfigured build: no account backend exists, so the local-first path
+              stays the promoted primary action alongside a calm setup note. */}
+          <PrimaryButton label="Continue locally" onPress={() => void continueLocally()} disabled={busy} />
+          <SetupRequiredNote />
+        </>
       )}
     </AuthShell>
   );
