@@ -2696,12 +2696,12 @@ async function runAsyncChecks(): Promise<void> {
     assert.equal(vm.dataDays, 0);
     assert.equal(vm.weeklySleep.length, 7);
     assert.ok(vm.weeklySleep.every((day) => day.minutes === 0));
-    assert.equal(vm.cards[0].text, 'Feed rhythm will appear after a few more logs.');
-    assert.equal(vm.cards[0].source, 'Keep logging');
-    assert.equal(vm.cards[1].text, 'Sleep patterns will build as you log more completed sleeps.');
-    assert.equal(vm.cards[1].source, 'Building pattern');
-    assert.equal(vm.cards[2].text, 'Wake windows need a few completed sleeps to estimate.');
-    assert.equal(vm.cards[2].source, 'A few more logs needed');
+    assert.equal(vm.cards[0].text, "Feed rhythm shows once you've logged a few feeds.");
+    assert.equal(vm.cards[0].source, undefined);
+    assert.equal(vm.cards[1].text, "Sleep patterns show once you've logged a couple of sleeps.");
+    assert.equal(vm.cards[1].source, undefined);
+    assert.equal(vm.cards[2].text, "Wake windows show once you've logged a few sleeps.");
+    assert.equal(vm.cards[2].source, undefined);
     assert.equal(vm.stats.feedsPerDay.value, '0');
     assert.equal(vm.stats.sleepPerDay.value, '0');
     assert.equal(vm.stats.diapersPerDay.value, '0');
@@ -2715,6 +2715,9 @@ async function runAsyncChecks(): Promise<void> {
         makeBottleAt('ins-feed-1', 'ins-cid-feed-1', localTime(0, 6)),
         makeBottleAt('ins-feed-2', 'ins-cid-feed-2', localTime(0, 8, 45)),
         makeBottleAt('ins-feed-3', 'ins-cid-feed-3', localTime(0, 11, 30)),
+        // Three completed sleeps → two wake windows, so the gated wake card quotes a
+        // real average (a single gap is held back as too thin — see the checks below).
+        makeCompletedSleepAt('ins-sleep-0', 'ins-cid-sleep-0', localTime(1, 16), localTime(1, 17)),
         makeCompletedSleepAt('ins-sleep-1', 'ins-cid-sleep-1', localTime(1, 20), localTime(1, 23)),
         makeCompletedSleepAt('ins-sleep-2', 'ins-cid-sleep-2', localTime(0, 1), localTime(0, 7, 10)),
         makeDiaper('ins-diaper-1', 'ins-cid-diaper-1', { occurredAt: iso(localTime(2, 9)) }),
@@ -2725,13 +2728,31 @@ async function runAsyncChecks(): Promise<void> {
       assert.equal(vm.hasEnoughData, true);
       assert.equal(vm.weeklySleep.length, 7);
       assert.ok(vm.weeklySleep.some((day) => day.minutes === 370));
-      assert.equal(vm.cards[0].text, 'Feeds are settling into a 2h 45m rhythm based on recent logs.');
+      assert.equal(vm.cards[0].text, 'Feeds are settling into a 2h 45m rhythm.');
       assert.equal(vm.cards[0].source, 'From 3 recent feeds');
-      assert.equal(vm.cards[1].text, 'Longest sleep stretch is around 6h 10m based on recent sleep logs.');
-      assert.equal(vm.cards[2].text, 'Wake windows are around 2h based on recent sleep times.');
+      assert.equal(vm.cards[1].text, 'Longest sleep stretch is around 6h 10m.');
+      // Two windows (3h then 2h) → a real 2h 30m average; the math is unchanged.
+      assert.equal(vm.cards[2].text, 'Wake windows are around 2h 30m.');
       assert.equal(vm.stats.feedsPerDay.label, 'Feeds / day');
       assert.equal(vm.stats.sleepPerDay.unit, 'h');
       assert.equal(vm.stats.diapersPerDay.label, 'Diapers / day');
+
+      // Honesty gate: thin data holds its placeholder instead of quoting a
+      // fake-precise figure. One nap is not a "longest stretch"…
+      const oneSleep = buildInsightsViewModel({
+        events: [makeCompletedSleepAt('ins-1s', 'ins-cid-1s', localTime(0, 1), localTime(0, 7, 10))],
+        now,
+      });
+      assert.equal(oneSleep.cards[1].text, "Sleep patterns show once you've logged a couple of sleeps.");
+      // …and a single wake window (2 sleeps, 1 gap) is not an "around" average.
+      const oneGap = buildInsightsViewModel({
+        events: [
+          makeCompletedSleepAt('ins-1g-a', 'ins-cid-1g-a', localTime(1, 20), localTime(1, 23)),
+          makeCompletedSleepAt('ins-1g-b', 'ins-cid-1g-b', localTime(0, 1), localTime(0, 7, 10)),
+        ],
+        now,
+      });
+      assert.equal(oneGap.cards[2].text, "Wake windows show once you've logged a few sleeps.");
     },
   );
 
@@ -5459,7 +5480,7 @@ check('Y3. the weekly export leaks no name / notes / ids / secrets / volumes / p
     cards: [
       {
         id: '7f3a9b2c-1234-4d5e-8a9b-0011deadbeef',
-        emoji: '🍼',
+        icon: 'bottle',
         text: 'Mia fussed at 3am',
         source: 'x',
         tone: 'feed',
