@@ -78,6 +78,7 @@ export function Screen({
         scrollEventThrottle={16}
         scrollEnabled={scrollEnabled}
         contentOffset={contentOffset}
+        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
         keyboardShouldPersistTaps={keyboardShouldPersistTaps}
         keyboardDismissMode={keyboardDismissMode}>
         {children}

@@ -31,6 +31,7 @@ import {
 } from 'react-native';
 
 import * as Haptics from 'expo-haptics';
+import { StatusBar } from 'expo-status-bar';
 import Reanimated, {
   useAnimatedStyle,
   useSharedValue,
@@ -1186,6 +1187,9 @@ export function OnboardingScreen({ onComplete }: Props) {
     const showReassurancePill = !isOpening && !completionFailed;
     return (
       <View style={{ flex: 1, backgroundColor: '#101124' }}>
+        {/* Dark surface → light status-bar glyphs (nested entry wins while mounted,
+            then reverts to the app's theme-driven bar on the cream steps). */}
+        <StatusBar style="light" />
         <OnboardingNightSky reduceMotion={reduceMotion} />
         <View
           style={{
@@ -1217,7 +1221,7 @@ export function OnboardingScreen({ onComplete }: Props) {
                 style={{
                   fontFamily: fonts.display,
                   fontSize: 36,
-                  lineHeight: 40,
+                  lineHeight: 46,
                   color: '#FFF8F0',
                 }}>
                 {handoffTitle}
@@ -1290,6 +1294,8 @@ export function OnboardingScreen({ onComplete }: Props) {
   // Fallback only; the reducer should only leave the screen after completion.
   return (
     <View style={{ flex: 1, backgroundColor: '#101124' }}>
+      {/* Dark surface → light status-bar glyphs (see the primary handoff branch). */}
+      <StatusBar style="light" />
       <OnboardingNightSky reduceMotion={reduceMotion} />
       <View
         style={{
@@ -1304,7 +1310,7 @@ export function OnboardingScreen({ onComplete }: Props) {
             style={{
               fontFamily: fonts.display,
               fontSize: 36,
-              lineHeight: 40,
+              lineHeight: 46,
               color: '#FFF8F0',
             }}>
             Opening Tonight…

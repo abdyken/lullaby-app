@@ -150,7 +150,7 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
       style={{
         marginTop: 14,
         borderRadius: radii.medium,
-        overflow: 'hidden',
+        backgroundColor: palette.card,
         opacity: progress,
         transform: [
           {
@@ -160,6 +160,10 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
         ],
         ...shadows.card,
       }}>
+      {/* Inner clip node: rounds the gradient header's corners. Kept SEPARATE from
+          the shadow node above — on iOS overflow:'hidden' on the same view clips the
+          drop shadow away; Android still elevates via `elevation`. */}
+      <View style={{ borderRadius: radii.medium, overflow: 'hidden' }}>
       {/* header */}
       <LinearGradient colors={headerColors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
         <View
@@ -409,6 +413,7 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
                     setDraftNumber(phone);
                     setEditingNumber(true);
                   }}
+                  hitSlop={8}
                   style={{ alignItems: 'center', paddingVertical: 2 }}>
                   <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, color: palette.inkSoft }}>
                     {UPDATE_NUMBER_ACTION}
@@ -538,6 +543,7 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
           accessibilityRole="button"
           accessibilityLabel="Dismiss answer"
           onPress={onDismiss}
+          hitSlop={8}
           style={{ paddingTop: 14, alignItems: 'center' }}>
           <Text
             style={{
@@ -548,6 +554,7 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
             {dismissLabel}
           </Text>
         </Pressable>
+      </View>
       </View>
     </Animated.View>
   );
