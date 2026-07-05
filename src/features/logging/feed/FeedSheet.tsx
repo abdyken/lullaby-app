@@ -37,6 +37,12 @@ const FEED_TAB_OPTIONS: FeedSegmentedOption<FeedTab>[] = [
   { value: 'bottle', label: 'Bottle' },
 ];
 
+// Remembered last feed method for the session (in-memory, resets on app restart
+// — mirrors BottleFeedForm's lastAmountMl). The sheet opens on whichever method
+// the parent committed to last, so a bottle parent doesn't re-tap the Bottle tab
+// every feed. Set only on a real start/save, never on an idle tab peek.
+let lastFeedMethod: FeedTab = 'breast';
+
 function formatStartedAt(iso: string | null): string {
   if (!iso) return '';
   const date = new Date(iso);
@@ -57,7 +63,7 @@ export function FeedSheet({ onClose }: Props) {
     saveBottle,
   } = useLogging();
 
-  const [tab, setTab] = useState<FeedTab>('breast');
+  const [tab, setTab] = useState<FeedTab>(lastFeedMethod);
   // One idempotency key per sheet-open: a double-tap on Save dedupes to one event.
   const bottleClientId = useRef(newClientEventId());
 
@@ -82,7 +88,10 @@ export function FeedSheet({ onClose }: Props) {
 
   const handleSaveBottle = async (amountMl: number, milkType: MilkType): Promise<boolean> => {
     const ok = await saveBottle({ amountMl, milkType, clientEventId: bottleClientId.current });
-    if (ok) handleClose();
+    if (ok) {
+      lastFeedMethod = 'bottle';
+      handleClose();
+    }
     return ok;
   };
 
@@ -180,6 +189,7 @@ export function FeedSheet({ onClose }: Props) {
             <BreastFeedIdle
               accentColor={accentColor}
               onStart={(side: BreastSide) => {
+                lastFeedMethod = 'breast';
                 void startBreast(side);
               }}
             />
