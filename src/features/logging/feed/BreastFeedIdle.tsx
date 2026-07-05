@@ -52,6 +52,7 @@ export function BreastFeedIdle({ accentColor, defaultSide = 'left', onStart }: P
         <PrimaryActionButton
           label={`Start ${SIDE_LABEL[side].toLowerCase()} side`}
           accentColor={accentColor}
+          pressOpacity={0.86}
           onPress={() => onStart(side)}
         />
       </View>
