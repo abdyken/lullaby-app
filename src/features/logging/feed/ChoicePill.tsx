@@ -44,8 +44,7 @@ export function ChoicePill({
       disabled={disabled}
       style={({ pressed }) => ({
         flex: flex ? 1 : undefined,
-        opacity: disabled ? 0.45 : 1,
-        transform: [{ scale: pressed ? 0.97 : 1 }],
+        opacity: disabled ? 0.45 : pressed ? 0.86 : 1,
       })}>
       <View
         style={{
