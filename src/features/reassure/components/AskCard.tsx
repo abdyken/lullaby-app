@@ -65,7 +65,7 @@ export function AskCard({ surfaceMode, onAsk, inputRef }: Props) {
         paddingVertical: 9,
         borderRadius: radii.pill,
         justifyContent: 'center',
-        transform: [{ scale: pressed ? 0.95 : 1 }],
+        opacity: pressed ? 0.86 : 1,
       })}>
       <Text
         style={{
@@ -143,7 +143,7 @@ export function AskCard({ surfaceMode, onAsk, inputRef }: Props) {
             backgroundColor: colors.sleep,
             alignItems: 'center',
             justifyContent: 'center',
-            transform: [{ scale: pressed ? 0.92 : 1 }],
+            opacity: pressed ? 0.86 : 1,
           })}>
           <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
             <Path
