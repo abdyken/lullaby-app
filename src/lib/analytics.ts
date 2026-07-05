@@ -35,8 +35,8 @@ export type AnalyticsEvent =
   | 'insights_recap_available'
   | 'upgrade_card_tapped'
   | 'export_tapped'
-  // Pro Phase 2 — paywall entry points (no purchase/restore events yet; those
-  // land with RevenueCat in a later phase). Props stay coarse: source / surface /
+  // Pro Phase 2 — paywall entry points (the RevenueCat purchase/restore events
+  // landed later, in Phase 4 below). Props stay coarse: source / surface /
   // gate / mode only — never names, notes, volumes, or store/RevenueCat ids.
   | 'paywall_opened'
   | 'pro_gate_seen'
