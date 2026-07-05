@@ -66,7 +66,6 @@ debug/
 # Local Claude run logs
 .claude/logs/
 
-# Overnight Apple-review fixer runtime state (keep tasks manifest, README, reports tracked)
-.claude-night/state/
-.claude-night/logs/
-.claude-night/tmp/
+# Retired agent/autopilot scaffolding — keep it from returning
+.claude/prompts/
+.claude-night/
