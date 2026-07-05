@@ -94,6 +94,9 @@ export default function ReassureScreen() {
   const scrollRef = useRef<ScrollView | null>(null);
   const inputRef = useRef<TextInput | null>(null);
   const answerYRef = useRef(0);
+  // Set when a new answer is requested; consumed once by the answer block's
+  // onLayout so the scroll fires exactly once per answer with the measured y.
+  const pendingAnswerScrollRef = useRef(false);
 
   const [answer, setAnswer] = useState<RouteResult | null>(null);
   const [voiceFallback, setVoiceFallback] = useState<VoiceFallback | null>(null);
@@ -136,19 +139,18 @@ export default function ReassureScreen() {
   } = useNightRead(recap);
   const currentRecapHeading = recapHeading(recap);
 
-  const scrollToAnswer = useCallback(
-    (delayMs = 120) => {
-      setTimeout(() => {
-        requestAnimationFrame(() => {
-          scrollRef.current?.scrollTo({
-            y: Math.max(0, answerYRef.current - 24),
-            animated: !reduceMotion,
-          });
-        });
-      }, delayMs);
-    },
-    [reduceMotion],
-  );
+  // ONE smooth scroll to the answer. Driven by the answer block's own onLayout
+  // (which carries the freshly-measured y), so it never chases a stale
+  // answerYRef and never double-jumps. A single rAF lands it after the layout
+  // commit; animated only when motion is allowed.
+  const scrollToAnswer = useCallback(() => {
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({
+        y: Math.max(0, answerYRef.current - 24),
+        animated: !reduceMotion,
+      });
+    });
+  }, [reduceMotion]);
 
   /** The single funnel: every input path lands here. Never routes empty text. */
   const ask = useCallback(
@@ -167,10 +169,13 @@ export default function ReassureScreen() {
         topic: result.kind === 'topic' ? result.key : null,
       });
       if (result.kind === 'triage') track('reassure_triage_shown');
-      // Bring the answer into view once it has risen in.
-      scrollToAnswer(source === 'text' ? 260 : 120);
+      // Mark the freshly-set answer for a single scroll-into-view. The scroll
+      // itself fires from the answer block's onLayout (correct measured y) —
+      // never here, where answerYRef could still hold the previous answer's
+      // position, which is what caused the stale jump-then-correct.
+      pendingAnswerScrollRef.current = true;
     },
-    [recap.isEmpty, scrollToAnswer, track],
+    [recap.isEmpty, track],
   );
 
   const showVoiceFallback = useCallback((message: string, kind: VoiceFallback['kind']) => {
@@ -407,7 +412,13 @@ export default function ReassureScreen() {
           testID="reassure-answer-scroll-target"
           onLayout={(event) => {
             answerYRef.current = event.nativeEvent.layout.y;
-            scrollToAnswer(0);
+            // Scroll exactly once per new answer: consume the pending intent set
+            // in ask(). Later layout passes (e.g. expanding the emergency note)
+            // update the y but do NOT re-scroll, so the screen never yanks.
+            if (pendingAnswerScrollRef.current) {
+              pendingAnswerScrollRef.current = false;
+              scrollToAnswer();
+            }
           }}>
           <AnswerCard
             result={answer}
