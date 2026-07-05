@@ -41,7 +41,7 @@ const REVIEW_PENDING_LINE =
 const REVIEW_PENDING_BODY =
   'Your pediatrician or nurse line is the best place for questions like this. If anything feels urgent, call your doctor right away.';
 
-/* UX copy (not medical) — still listed in docs/reassure-content-review.md. */
+/* UX copy (not medical) — still listed in docs/plans/reassure-content-review.md. */
 const EMERGENCY_INFO =
   'Emergency numbers differ by country (for example 911 or 112). If baby is struggling to breathe, can’t be woken, or is turning blue, call yours right away.';
 

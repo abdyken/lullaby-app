@@ -12,7 +12,7 @@ Implement the main logging system for:
 
 Use this document as the product and technical source of truth:
 
-- `docs/LULLABY_LOGGING_IMPLEMENTATION_PLAN_EN.md`
+- `docs/plans/LULLABY_LOGGING_IMPLEMENTATION_PLAN_EN.md`
 
 ## Existing project rule
 

@@ -2,7 +2,7 @@
  * The Reassure router — every input (voice transcript, example chip, typed
  * text) resolves through this ONE function into exactly one bounded outcome.
  *
- * Layering (v1.5 — see docs/reassure-scope-matrix.md):
+ * Layering (v1.5 — see docs/plans/reassure-scope-matrix.md):
  *   1. RED FLAGS FIRST. If any red-flag substring matches, return triage —
  *      before and regardless of anything below. Safety overrides everything, and
  *      no classifier or model is consulted before this. Triage is code-only.
