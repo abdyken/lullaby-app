@@ -16,7 +16,7 @@ import { Pressable, Text, View } from 'react-native';
 import { colors, fonts, radii } from '@/theme';
 
 import type { SleepEvent } from '../domain/types';
-import { elapsedMs, formatClock } from '../timer/sessionMath';
+import { elapsedMs, formatCompactDuration } from '../timer/sessionMath';
 
 type Props = {
   event: SleepEvent;
@@ -151,7 +151,7 @@ export function SleepActive({ event, accentColor, errorMessage, onFinish, onCanc
             lineHeight: 46,
             marginTop: 4,
           }}>
-          {formatClock(elapsed, { alwaysHours: true })}
+          {formatCompactDuration(elapsed)}
         </Text>
         <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12, color: colors.inkSoft, marginTop: 4 }}>
           The timer continues after closing the app
