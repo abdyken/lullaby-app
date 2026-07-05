@@ -59,7 +59,7 @@ function getInsightsStateCopy(viewModel: InsightsViewModel): InsightsStateCopy {
       sectionTitle: 'Getting started',
       intro: {
         label: 'First day of logs',
-        text: 'Today is your first day of logs. Keep logging to unlock weekly insights.',
+        text: 'Today is your first day of logging. Keep going and weekly insights will appear here.',
       },
     };
   }
@@ -351,10 +351,9 @@ export function InsightsScreen() {
             {viewModel.cards.map((card) => (
               <InsightCard
                 key={card.id}
-                emoji={card.emoji}
+                icon={card.icon}
                 tone={card.tone}
                 source={card.source}
-                sourceTone={card.sourceTone}
                 text={card.text}
               />
             ))}

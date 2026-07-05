@@ -98,10 +98,9 @@ export function ExtendedInsightsCard({ viewModel }: { viewModel: InsightsViewMod
             {viewModel.cards.map((card) => (
               <InsightCard
                 key={card.id}
-                emoji={card.emoji}
+                icon={card.icon}
                 tone={card.tone}
                 source={card.source}
-                sourceTone={card.sourceTone}
                 text={card.text}
               />
             ))}

@@ -236,10 +236,8 @@ function buildFeedRhythmCard(feedEvents: CareEvent[]): InsightsViewModel['cards'
   if (feedEvents.length < 3) {
     return {
       id: 'feed-rhythm',
-      emoji: '🍼',
-      text: 'Feed rhythm will appear after a few more logs.',
-      source: 'Keep logging',
-      sourceTone: 'muted',
+      icon: 'bottle',
+      text: "Feed rhythm shows once you've logged a few feeds.",
       tone: 'feed',
     };
   }
@@ -253,21 +251,21 @@ function buildFeedRhythmCard(feedEvents: CareEvent[]): InsightsViewModel['cards'
 
   return {
     id: 'feed-rhythm',
-    emoji: '🍼',
-    text: `Feeds are settling into a ${formatDuration(averageMinutes)} rhythm based on recent logs.`,
+    icon: 'bottle',
+    text: `Feeds are settling into a ${formatDuration(averageMinutes)} rhythm.`,
     source: `From ${feedEvents.length} recent feeds`,
     tone: 'feed',
   };
 }
 
 function buildSleepInsightCard(sleeps: SleepEvent[]): InsightsViewModel['cards'][number] {
-  if (sleeps.length === 0) {
+  // Honesty gate: one nap isn't a "longest stretch". Hold the placeholder until
+  // there are at least two completed sleeps to compare. The max below is unchanged.
+  if (sleeps.length < 2) {
     return {
       id: 'sleep-pattern',
-      emoji: '🌙',
-      text: 'Sleep patterns will build as you log more completed sleeps.',
-      source: 'Building pattern',
-      sourceTone: 'muted',
+      icon: 'moon',
+      text: "Sleep patterns show once you've logged a couple of sleeps.",
       tone: 'sleep',
     };
   }
@@ -279,9 +277,8 @@ function buildSleepInsightCard(sleeps: SleepEvent[]): InsightsViewModel['cards']
 
   return {
     id: 'sleep-pattern',
-    emoji: '🌙',
-    text: `Longest sleep stretch is around ${formatDuration(longestMinutes)} based on recent sleep logs.`,
-    source: 'Based on recent sleep logs',
+    icon: 'moon',
+    text: `Longest sleep stretch is around ${formatDuration(longestMinutes)}.`,
     tone: 'sleep',
   };
 }
@@ -295,13 +292,13 @@ function buildWakeWindowCard(sleeps: SleepEvent[]): InsightsViewModel['cards'][n
     return [gapMinutes];
   });
 
-  if (sleeps.length < 2 || gaps.length === 0) {
+  // Honesty gate: a single gap is one sample, not an "around X" average. Hold the
+  // placeholder until there are at least two wake windows. The mean below is unchanged.
+  if (sleeps.length < 2 || gaps.length < 2) {
     return {
       id: 'wake-windows',
-      emoji: '💡',
-      text: 'Wake windows need a few completed sleeps to estimate.',
-      source: 'A few more logs needed',
-      sourceTone: 'muted',
+      icon: 'sun',
+      text: "Wake windows show once you've logged a few sleeps.",
       tone: 'neutral',
     };
   }
@@ -309,9 +306,8 @@ function buildWakeWindowCard(sleeps: SleepEvent[]): InsightsViewModel['cards'][n
   const averageMinutes = Math.round(gaps.reduce((sum, value) => sum + value, 0) / gaps.length);
   return {
     id: 'wake-windows',
-    emoji: '💡',
-    text: `Wake windows are around ${formatDuration(averageMinutes)} based on recent sleep times.`,
-    source: 'Based on wake times',
+    icon: 'sun',
+    text: `Wake windows are around ${formatDuration(averageMinutes)}.`,
     tone: 'neutral',
   };
 }
