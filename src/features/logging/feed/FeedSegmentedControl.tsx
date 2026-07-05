@@ -79,7 +79,7 @@ function Segment<T extends string>({
         accessibilityState={{ selected }}
         accessibilityLabel={option.accessibilityLabel ?? option.label}
         onPress={onPress}
-        style={({ pressed }) => [styles.pressable, { transform: [{ scale: pressed ? 0.98 : 1 }] }]}>
+        style={({ pressed }) => [styles.pressable, { opacity: pressed ? 0.86 : 1 }]}>
         <View style={styles.optionSurface}>
           <Animated.Text numberOfLines={1} style={[styles.optionText, textStyle]}>
             {option.label}
