@@ -259,16 +259,15 @@ export default function ReassureScreen() {
         bottomGapExtra={REASSURE_TABBAR_EXTRA_CLEARANCE}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}>
-      <Text
-        style={{ fontFamily: fonts.bodyBold, fontSize: 10, letterSpacing: 1.4, color: colors.sleep }}>
-        IS THIS NORMAL?
-      </Text>
-      <Text style={{ fontFamily: fonts.display, fontSize: 30, color: palette.ink, marginTop: 6 }}>
+      {/* One calm header line. The "is this normal?" question now lives in the
+          hero; the non-medical disclaimer lives in the quiet footer (RG3) and the
+          bounded-promise card, so it is not repeated here. */}
+      <Text style={{ fontFamily: fonts.display, fontSize: 30, color: palette.ink }}>
         Reassure
       </Text>
       <Text
         style={{ fontFamily: fonts.body, fontSize: 14, lineHeight: 20, color: palette.inkSoft, marginTop: 2 }}>
-        General supportive information for tonight — not medical advice, never a diagnosis.
+        A calm companion for the small hours.
       </Text>
 
       {/* night-sky hero + ambient agent orb (the signature moment). The orb
