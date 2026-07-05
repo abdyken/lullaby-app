@@ -31,7 +31,7 @@ create table if not exists public.reassure_audit (
   created_at  timestamptz not null default now(),
   -- Retention TTL (spec §6): audit rows are a safety-review log, not an
   -- archive. A scheduled purge deletes expired rows; see
-  -- docs/reassure-ai-layer.md for the pg_cron statement to schedule at
+  -- docs/plans/reassure-ai-layer.md for the pg_cron statement to schedule at
   -- deploy time (this migration deliberately does not assume pg_cron).
   expires_at  timestamptz not null default now() + interval '90 days'
 );

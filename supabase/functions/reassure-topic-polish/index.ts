@@ -2,7 +2,7 @@
  * reassure-topic-polish — the Phase-3 edge function (built + tested; client
  * wiring intentionally deferred until the consent copy AND the clinician
  * sign-off of the system prompt land — manifest items #10/#13 in
- * docs/reassure-content-review.md. Do NOT call this from the app until both
+ * docs/plans/reassure-content-review.md. Do NOT call this from the app until both
  * gates clear; smoke §X22 enforces the dark state).
  *
  * Rephrases ONE clinician-owned topic line in the parent's own words. The

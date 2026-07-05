@@ -4,7 +4,7 @@
  * ⚠️ CLINICIAN-OWNED CONTENT — PLACEHOLDER, PENDING CLINICIAN REVIEW.
  * Every string in this module is ported verbatim from
  * .reference/reassure-demo.html and is a placeholder until a clinician signs
- * it off (see docs/reassure-content-review.md). REASSURE_CONTENT.status stays
+ * it off (see docs/plans/reassure-content-review.md). REASSURE_CONTENT.status stays
  * 'draft' until then; the release checklist blocks a public launch on
  * status === 'approved'. Do not edit copy without a review-log entry.
  *
@@ -130,7 +130,7 @@ export type ReassureGuideTag = 'App help' | 'Support' | 'Your logs';
  * A bounded NON-medical guide. Deliberately NOT the medical normal/helps/call
  * shape — rendered as a plain calm card with no "When to call" block. Used for
  * app-experience help, gentle parent support, and pointing at the (code-computed)
- * logs recap. See docs/reassure-scope-matrix.md.
+ * logs recap. See docs/plans/reassure-scope-matrix.md.
  */
 export type ReassureGuide = {
   key: ReassureGuideKey;
@@ -143,7 +143,7 @@ export type ReassureGuide = {
 };
 
 /*
- * PLACEHOLDER product copy — pending review (docs/reassure-content-review.md).
+ * PLACEHOLDER product copy — pending review (docs/plans/reassure-content-review.md).
  * NON-MEDICAL by construction: parent_support explicitly says it is not medical
  * advice and points to a real person for anything serious; nothing here diagnoses,
  * treats, or reassures about an emergency.
@@ -221,7 +221,7 @@ export const EXAMPLE_CHIPS: ExampleChip[] = [
 
 /**
  * Review metadata — the launch gate. Reassure ships publicly only when
- * status === 'approved' (release checklist + docs/reassure-content-review.md).
+ * status === 'approved' (release checklist + docs/plans/reassure-content-review.md).
  */
 export const REASSURE_CONTENT = {
   version: '2026-07-02',

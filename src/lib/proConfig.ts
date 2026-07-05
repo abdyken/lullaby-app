@@ -16,7 +16,7 @@
  *
  * Precedence: real Pro supersedes the preview. If PRO_ENABLED is on the mode is
  * "enabled" regardless of the preview flag, so we never show a fake-door and a
- * real paywall at once (see docs/pro-implementation-plan.md §11).
+ * real paywall at once (see docs/plans/pro-implementation-plan.md §11).
  *
  * Pure, dependency-light leaf: it reads only process.env (and re-exports the
  * preview flag). It must NOT import RevenueCat, Supabase, auth, or React — so it

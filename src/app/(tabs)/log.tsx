@@ -272,7 +272,7 @@ export default function LogScreen() {
       {/* Dev/demo-only: quietly return the local store to its seeded state before
           QA or a demo. Gated by __DEV__ so it is stripped from production bundles.
           resetLocalEvents() clears AsyncStorage, restores the seed, and dismisses
-          any active toast. Prototype-only — see docs/demo-readiness.md. */}
+          any active toast. Prototype-only — see docs/plans/demo-readiness.md. */}
       {__DEV__ && SHOW_DEMO_RESET && (
         <Pressable
           onPress={resetLocalEvents}
