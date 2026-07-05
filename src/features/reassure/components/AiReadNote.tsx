@@ -16,8 +16,10 @@
  * through — the RecapCard above already shows the local read in every state.
  */
 import { Text, View } from 'react-native';
+import Reanimated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
 import type { NightReadStatus } from '@/features/reassure/application/nightRead';
+import { useReduceMotion } from '@/lib/useReduceMotion';
 import { colors, fonts, radii, surfaces, type SurfaceMode } from '@/theme';
 
 type Props = {
@@ -30,12 +32,20 @@ const UNAVAILABLE_LINE =
   "The AI read isn’t available right now. Here’s the local read based on your logs.";
 
 export function AiReadNote({ surfaceMode, status }: Props) {
+  // Hook must run before any early return (Rules of Hooks). Default to reduced
+  // until the OS preference resolves, so no fade fires on an unknown pref.
+  const reduceMotion = useReduceMotion() ?? true;
+  // Fade the honest label in/out instead of hard mount/unmount. Presentation
+  // only — the live region still announces; under reduce-motion it is instant.
+  const entering = reduceMotion ? undefined : FadeIn.duration(240);
+  const exiting = reduceMotion ? undefined : FadeOut.duration(180);
+
   if (status !== 'ai' && status !== 'unavailable') return null;
   const palette = surfaces[surfaceMode];
 
   if (status === 'unavailable') {
     return (
-      <View style={{ marginTop: 8, paddingHorizontal: 2 }}>
+      <Reanimated.View entering={entering} exiting={exiting} style={{ marginTop: 8, paddingHorizontal: 2 }}>
         <Text
           accessibilityLiveRegion="polite"
           style={{
@@ -46,13 +56,13 @@ export function AiReadNote({ surfaceMode, status }: Props) {
           }}>
           {UNAVAILABLE_LINE}
         </Text>
-      </View>
+      </Reanimated.View>
     );
   }
 
   // status === 'ai'
   return (
-    <View style={{ marginTop: 8, paddingHorizontal: 2, gap: 6 }}>
+    <Reanimated.View entering={entering} exiting={exiting} style={{ marginTop: 8, paddingHorizontal: 2, gap: 6 }}>
       <View
         style={{
           alignSelf: 'flex-start',
@@ -86,6 +96,6 @@ export function AiReadNote({ surfaceMode, status }: Props) {
         }}>
         {AI_DISCLAIMER}
       </Text>
-    </View>
+    </Reanimated.View>
   );
 }
