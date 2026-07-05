@@ -198,17 +198,24 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
 
       {/* body */}
       <View style={{ backgroundColor: palette.card, paddingHorizontal: 18, paddingBottom: 18 }}>
-        <Text
-          style={{
-            fontFamily: fonts.bodyBold,
-            fontSize: 14,
-            lineHeight: 21,
-            color: palette.ink,
-            paddingTop: 14,
-            paddingBottom: 10,
-          }}>
-          {line}
-        </Text>
+        {/* one-sentence summary — the takeaway. A soft accent bar frames it as the
+            summary above the "what I'm seeing / what you can do" detail (the
+            AnswerBlocks below). Content, copy, and gating are unchanged. */}
+        <View style={{ flexDirection: 'row', gap: 11, paddingTop: 14, paddingBottom: 10 }}>
+          <View
+            style={{ width: 3, borderRadius: 2, backgroundColor: isTriage ? colors.alert : colors.sleep }}
+          />
+          <Text
+            style={{
+              flex: 1,
+              fontFamily: fonts.bodyBold,
+              fontSize: 14,
+              lineHeight: 21,
+              color: palette.ink,
+            }}>
+            {line}
+          </Text>
+        </View>
 
         {result.kind === 'topic' && showClinical ? (
           <>
