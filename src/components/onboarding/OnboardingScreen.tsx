@@ -333,17 +333,16 @@ function StepDots({
   );
 }
 
-// Each chip keeps its own accent identity; `check` is the tick colour chosen to
-// stay legible on that accent — white on the dark indigo, dark ink on the lighter
-// warm accents (orange/teal/amber) where a white tick washes out.
+// Each chip keeps its own accent identity, carried on the box/border/icon/label.
+// The selected state reads via the tint fill + 2px accent border (no checkmark).
 const FOCUS_CHIP_META: Record<
   OnboardingFocusNeed,
-  { label: string; tint: string; accent: string; check: string }
+  { label: string; tint: string; accent: string }
 > = {
-  sleep: { label: 'Sleep', tint: colors.sleepTint, accent: colors.sleep, check: colors.white },
-  feeding: { label: 'Feeding', tint: colors.feedTint, accent: colors.feed, check: colors.ink },
-  reassurance: { label: 'Reassurance', tint: colors.diaperTint, accent: colors.diaper, check: colors.ink },
-  everything: { label: 'A bit of everything', tint: colors.pumpTint, accent: colors.pump, check: colors.ink },
+  sleep: { label: 'Sleep', tint: colors.sleepTint, accent: colors.sleep },
+  feeding: { label: 'Feeding', tint: colors.feedTint, accent: colors.feed },
+  reassurance: { label: 'Reassurance', tint: colors.diaperTint, accent: colors.diaper },
+  everything: { label: 'A bit of everything', tint: colors.pumpTint, accent: colors.pump },
 };
 
 function FocusNeedIcon({ need, color }: { need: OnboardingFocusNeed; color: string }) {
@@ -399,36 +398,6 @@ function FocusNeedIcon({ need, color }: { need: OnboardingFocusNeed; color: stri
         strokeLinejoin="round"
       />
     </Svg>
-  );
-}
-
-function FocusCheck({
-  active,
-  color,
-  checkColor,
-}: {
-  active: boolean;
-  /** The filled box colour (the chip's accent). */
-  color: string;
-  /** The tick colour, picked for contrast on that accent. */
-  checkColor: string;
-}) {
-  return (
-    <View
-      style={{
-        width: 16,
-        height: 16,
-        borderRadius: 8,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: active ? color : 'transparent',
-      }}>
-      {active ? (
-        <Svg width={11} height={11} viewBox="0 0 12 12" fill="none">
-          <Path d="M2.4 6.1 4.9 8.5 9.6 3.6" stroke={checkColor} strokeWidth={2} strokeLinecap="round" />
-        </Svg>
-      ) : null}
-    </View>
   );
 }
 
@@ -521,7 +490,6 @@ function FocusChip({
           }}>
           {chip.label}
         </Text>
-        <FocusCheck active={active} color={chip.accent} checkColor={chip.check} />
       </Reanimated.View>
     </Pressable>
   );

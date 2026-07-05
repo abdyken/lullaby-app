@@ -43,18 +43,40 @@ const ICON_COLOR = {
 /**
  * In-house line glyphs matching the app's icon style (24 viewBox, ~1.9 stroke,
  * rounded joins, single passed-in color). bottle = feed, moon = sleep, and a sun
- * for wake windows (the awake time between sleeps).
+ * for wake windows (the awake time between sleeps). Each glyph is drawn optically
+ * centered on x=12 so the three read as an even, aligned set across the cards.
  */
 function InsightGlyph({ icon, color }: { icon: InsightIcon; color: string }) {
   if (icon === 'bottle') {
+    // A recognizable baby bottle: teat + collar ring + body + two measurement
+    // ticks — symmetric about x=12 (the old single outline read like a vial).
     return (
-      <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+      <Svg width={30} height={30} viewBox="0 0 24 24" fill="none">
         <Path
-          d="M9 2h6M10 2v3.5a4 4 0 0 0-1.2 2.8L8 19a3 3 0 0 0 3 3h2a3 3 0 0 0 3-3l-.8-10.7A4 4 0 0 0 14 5.5V2"
+          d="M10.9 4.6V3.4a1.1 1.1 0 0 1 2.2 0v1.2"
           stroke={color}
           strokeWidth={1.9}
           strokeLinecap="round"
           strokeLinejoin="round"
+        />
+        <Path
+          d="M9 4.6h6v2.4H9z"
+          stroke={color}
+          strokeWidth={1.9}
+          strokeLinejoin="round"
+        />
+        <Path
+          d="M9.4 7v10.6a2.6 2.6 0 0 0 2.6 2.6h0a2.6 2.6 0 0 0 2.6-2.6V7"
+          stroke={color}
+          strokeWidth={1.9}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <Path
+          d="M9.9 10.6h2.3M9.9 13.4h2.3"
+          stroke={color}
+          strokeWidth={1.9}
+          strokeLinecap="round"
         />
       </Svg>
     );
@@ -63,7 +85,7 @@ function InsightGlyph({ icon, color }: { icon: InsightIcon; color: string }) {
     return (
       <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
         <Path
-          d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"
+          d="M20.5 13A8.5 8.5 0 1 1 11 3.5 6.6 6.6 0 0 0 20.5 13Z"
           stroke={color}
           strokeWidth={1.9}
           strokeLinejoin="round"
@@ -73,9 +95,9 @@ function InsightGlyph({ icon, color }: { icon: InsightIcon; color: string }) {
   }
   return (
     <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-      <Circle cx={12} cy={12} r={4.6} stroke={color} strokeWidth={1.9} />
+      <Circle cx={12} cy={12} r={4.4} stroke={color} strokeWidth={1.9} />
       <Path
-        d="M12 2v1.7M12 20.3V22M5 5l1.2 1.2M17.8 17.8l1.2 1.2M2 12h1.7M20.3 12H22M5 19l1.2-1.2M17.8 6.2l1.2-1.2"
+        d="M12 2.5v1.7M12 19.8v1.7M5.6 5.6l1.2 1.2M17.2 17.2l1.2 1.2M2.5 12h1.7M19.8 12h1.7M5.6 18.4l1.2-1.2M17.2 6.8l1.2-1.2"
         stroke={color}
         strokeWidth={1.9}
         strokeLinecap="round"
@@ -92,14 +114,16 @@ export function InsightCard({ icon, text, source, tone = 'neutral' }: InsightCar
     <View
       style={{
         flexDirection: 'row',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         gap: 13,
         paddingVertical: 14,
         paddingHorizontal: 16,
         borderRadius: radii.small,
         backgroundColor: mode === 'night' ? NIGHT_TINT[tone] : DAY_TINT[tone],
       }}>
-      <View style={{ width: 28, alignItems: 'center', marginTop: 1 }}>
+      {/* Fixed 24×24 slot, centered on both axes, so the three glyphs sit even
+          regardless of each one's internal extent (was horizontal-center only). */}
+      <View style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}>
         <InsightGlyph icon={icon} color={ICON_COLOR[tone]} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
