@@ -4,7 +4,7 @@
  * ⚠️ CLINICIAN-OWNED CONTENT — PLACEHOLDER, PENDING CLINICIAN REVIEW.
  * This list is ported verbatim from .reference/reassure-demo.html. It must be
  * validated by a clinician before any public launch (see
- * docs/reassure-content-review.md and REASSURE_CONTENT in content/kb.ts).
+ * docs/plans/reassure-content-review.md and REASSURE_CONTENT in content/kb.ts).
  * Do not edit the list without adding a review-log entry.
  *
  * Engineering owns the MATCHING SEMANTICS (lowercase substring match over

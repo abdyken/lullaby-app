@@ -9,7 +9,7 @@
  * crash on a missing env value. These are public URLs inlined into the JS
  * bundle at build time; no secret may ever live here. The real hosted URLs
  * must be in place (or configured here) before an App Store submission — see
- * docs/release-env.md.
+ * docs/plans/release-env.md.
  *
  * Pure, dependency-free leaf (reads only process.env, no react-native), so
  * the Node smoke runner covers it directly (§SL in

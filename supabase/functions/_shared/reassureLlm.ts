@@ -1,6 +1,6 @@
 /**
  * Shared LLM configuration + THE output guardrail for the Reassure edge
- * functions (spec §2 + §5, docs/reassure-ai-layer-spec.md).
+ * functions (spec §2 + §5, docs/plans/reassure-ai-layer-spec.md).
  *
  * IMPORT-FREE ON PURPOSE: the smoke runner (§X18/§X20 in
  * scripts/check-local-interactions.ts) require()s this file from Node, so it

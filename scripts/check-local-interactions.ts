@@ -4873,7 +4873,7 @@ check('DV4. the dev launcher gives Expo a real TTY so terminal hotkeys work', ()
 
 // W. Pro foundation (Phase 1) — proConfig (mode flags + dev override), proGates
 // (pure feature predicates), and the ProProvider skeleton. These checks lock the
-// invariants the plan (docs/pro-implementation-plan.md §§3,5,7,11,12) depends on:
+// invariants the plan (docs/plans/pro-implementation-plan.md §§3,5,7,11,12) depends on:
 // real Pro (PRO_ENABLED) supersedes the fake-door preview; the four gates are
 // pure and never gate the FIRST caregiver invite or core logging; and no
 // RevenueCat SDK / paywall / purchase / external-payment code has landed yet.
@@ -6466,7 +6466,7 @@ check('X17e. Reassure recap title uses active-window wording', () => {
 });
 
 // ---------------------------------------------------------------------------
-// §X (cont.) — the Reassure AI layer (docs/reassure-ai-layer-spec.md).
+// §X (cont.) — the Reassure AI layer (docs/plans/reassure-ai-layer-spec.md).
 // X18–X23: the shared output guardrail, the night-read core, pinned model
 // config, code-decides-before-model source order, the client contract, and
 // audit privacy. The LLM itself is never called here — everything around it
@@ -7269,7 +7269,7 @@ check('RG3. the Reassure screen states plainly that it is not medical advice', (
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RE. Release env hygiene — .env.example safe beta defaults (docs/release-env.md)
+// RE. Release env hygiene — .env.example safe beta defaults (docs/plans/release-env.md)
 //
 // Beta posture: Pro is OFF unless a build explicitly enables it AND provides
 // real RevenueCat keys. These checks pin the example env file to safe-by-default
