@@ -27,9 +27,10 @@ import { TIMELINE_LIMIT } from '@/data/localInteractions';
 import type { TimelineEntry } from '@/data/mock';
 import type { Caregiver } from '@/data/models';
 import type { QuickLogKind } from '@/components/QuickLogButton';
+import { hapticSave } from '@/lib/haptics';
 
 import type { CareEvent } from '../domain/types';
-import { formatClock, sessionElapsedMs } from '../timer/sessionMath';
+import { sessionElapsedMs } from '../timer/sessionMath';
 import { useElapsedTime } from '../timer/useElapsedTime';
 import { useLogging } from './LoggingProvider';
 import {
@@ -152,7 +153,11 @@ export function useV2TodayView(params: { now?: number; caregivers: Caregiver[] }
         state: 'sleep',
         skyTone: 'night',
         eyebrow: 'Asleep',
-        timerText: formatClock(elapsed),
+        // Minute-resolution (like the awake branch's heroDuration), NOT a live
+        // seconds stopwatch: a ticking "42:17…" on the ambient Home hero reads as
+        // anxiety ("still not asleep") for a night parent. Value still derived
+        // from startedAt every tick; only the seconds are dropped from display.
+        timerText: heroDuration(elapsed),
         title: 'Sleep started',
         description: `Started ${clockLabel(activeSleep.startedAt)} · still asleep`,
         actionLabel: 'Baby woke up',
@@ -206,7 +211,14 @@ export function useV2TodayView(params: { now?: number; caregivers: Caregiver[] }
       });
 
     const onPrimaryAction = () => {
-      void (logging.activeSleep ? logging.finishSleep() : logging.startSleep());
+      if (logging.activeSleep) {
+        // Finish confirms via recordMutation (haptic + toast) already — no extra buzz.
+        void logging.finishSleep();
+      } else {
+        // Match the sheet's start-confirmation: a soft tap on a one-tap Orb start.
+        hapticSave();
+        void logging.startSleep();
+      }
     };
 
     return { orb, activeTile, timeline, quickLogMeta, tonightStatus, onPrimaryAction };

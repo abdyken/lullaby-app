@@ -54,7 +54,7 @@ function StepButton({
       accessibilityLabel={accessibilityLabel}
       onPress={onPress}
       hitSlop={8}
-      style={({ pressed }) => ({ transform: [{ scale: pressed ? 0.94 : 1 }] })}>
+      style={({ pressed }) => ({ opacity: pressed ? 0.92 : 1 })}>
       <View
         style={{
           width: 52,
@@ -141,6 +141,7 @@ export function BottleFeedForm({ accentColor, accentTint, onSave }: Props) {
         <PrimaryActionButton
           label={`Save bottle · ${amountMl} ml`}
           accentColor={accentColor}
+          pressOpacity={0.86}
           onPress={canSave ? handleSave : undefined}
         />
       </View>

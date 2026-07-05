@@ -107,7 +107,7 @@ function ChoiceCard({
         width: '100%',
         alignSelf: 'stretch',
         borderRadius: 20,
-        transform: [{ scale: pressed ? 0.97 : 1 }],
+        opacity: pressed ? 0.86 : 1,
       })}>
       <View
         style={{
@@ -167,7 +167,7 @@ function SoftButton({ label, onPress }: { label: string; onPress: () => void }) 
       style={({ pressed }) => ({
         width: '100%',
         borderRadius: 19,
-        transform: [{ scale: pressed ? 0.98 : 1 }],
+        opacity: pressed ? 0.86 : 1,
       })}>
       <View
         style={{
@@ -206,8 +206,7 @@ function FilledButton({
       style={({ pressed }) => ({
         width: '100%',
         borderRadius: 20,
-        opacity: disabled ? 0.5 : 1,
-        transform: [{ scale: pressed && !disabled ? 0.98 : 1 }],
+        opacity: disabled ? 0.5 : pressed ? 0.86 : 1,
       })}>
       <View
         style={{
@@ -250,7 +249,7 @@ function StepperButton({
         width: 52,
         height: 52,
         borderRadius: 26,
-        transform: [{ scale: pressed ? 0.92 : 1 }],
+        opacity: pressed ? 0.92 : 1,
       })}>
       <View
         style={{

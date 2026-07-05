@@ -35,7 +35,7 @@ import {
   type PumpVolumeDraft,
   type SleepEvent,
 } from '../domain/types';
-import { breastSegmentTotals, formatClock, formatCompactDuration, sessionElapsedMs } from '../timer/sessionMath';
+import { breastSegmentTotals, formatCompactDuration, sessionElapsedMs } from '../timer/sessionMath';
 import { pumpTotalVolumeMl } from './loggingSelectors';
 
 /* --------------------------- small label helpers --------------------------- */
@@ -291,7 +291,9 @@ function diaperSubtitle(input: V2QuickLogInput, now: number): string {
 
 function pumpSubtitle(input: V2QuickLogInput, now: number): string {
   if (input.activePump && isRunningPump(input.activePump)) {
-    return `Pumping · ${formatClock(sessionElapsedMs(input.activePump, now))}`;
+    // Minute-resolution, matching the sleep/feed tiles — the Home tiles are an
+    // ambient glance surface, not a live seconds stopwatch (calm-timer pass).
+    return `Pumping · ${formatCompactDuration(sessionElapsedMs(input.activePump, now))}`;
   }
   if (input.pumpVolumeDraft) return 'Finished · add volume';
   const last = newest(input.todayEvents, (e) => e.type === 'pump' && e.status === 'completed');

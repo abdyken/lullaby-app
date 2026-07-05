@@ -95,7 +95,7 @@ export function BreastFeedActive({
         accessibilityLabel="Finish feeding"
         onPress={onFinish}
         hitSlop={8}
-        style={({ pressed }) => [styles.finishPressable, { transform: [{ scale: pressed ? 0.98 : 1 }] }]}>
+        style={({ pressed }) => [styles.finishPressable, { opacity: pressed ? 0.86 : 1 }]}>
         <View style={[styles.finishSurface, { backgroundColor: accentColor, shadowColor: accentColor }]}>
           <Text style={styles.finishText}>Finish feeding</Text>
         </View>

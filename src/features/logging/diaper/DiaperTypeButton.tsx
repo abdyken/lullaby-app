@@ -97,8 +97,7 @@ export function DiaperTypeButton({
       style={({ pressed }) => ({
         width: '100%',
         alignSelf: 'stretch',
-        opacity: disabled ? 0.45 : 1,
-        transform: [{ scale: pressed ? 0.96 : 1 }],
+        opacity: disabled ? 0.45 : pressed ? 0.86 : 1,
       })}>
       <View
         style={{
