@@ -27,6 +27,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Reanimated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
 import { Screen } from '@/components/Screen';
 import { AiConsentCard } from '@/features/reassure/components/AiConsentCard';
@@ -438,8 +439,13 @@ export default function ReassureScreen() {
           AI-eligible + consented parents. The local read above is already fully
           shown, so this never blocks; it disappears the moment the read resolves. */}
       {nightReadStatus === 'loading' ? (
-        <Text
+        <Reanimated.Text
           accessibilityLiveRegion="polite"
+          // Fade the transient reading line in/out instead of hard mount/unmount.
+          // Presentation only — the live region still announces the text; under
+          // reduce-motion it appears/disappears instantly (held static).
+          entering={reduceMotion ? undefined : FadeIn.duration(240)}
+          exiting={reduceMotion ? undefined : FadeOut.duration(180)}
           style={{
             fontFamily: fonts.body,
             fontSize: 12,
@@ -449,7 +455,7 @@ export default function ReassureScreen() {
             paddingHorizontal: 2,
           }}>
           Reading tonight’s logs…
-        </Text>
+        </Reanimated.Text>
       ) : null}
 
       {/* Honest label under the read: an 'AI-phrased' badge when the AI read is
