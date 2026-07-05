@@ -59,7 +59,6 @@ import { OnboardingNightSky } from './OnboardingNightSky';
 import { OnboardingStepLayout } from './OnboardingStepLayout';
 import {
   ONBOARDING_FOCUS_NEEDS,
-  hasOnboardingFocusNeed,
   toggleOnboardingFocusNeed,
   type OnboardingFocusNeed,
 } from './onboardingFocus';
@@ -868,7 +867,11 @@ export function OnboardingScreen({ onComplete }: Props) {
   const [ageKey, setAgeKey] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [focusNeeds, setFocusNeeds] = useState<OnboardingFocusNeed[]>([]);
-  const [nightShiftChoice, setNightShiftChoice] = useState<OnboardingNightShiftChoice | null>(null);
+  // Pre-select the most common answer ("Just me tonight") so Continue advances
+  // with zero selection taps; the parent can still change it. The choice is not
+  // persisted, so the default is presentational only.
+  const [nightShiftChoice, setNightShiftChoice] =
+    useState<OnboardingNightShiftChoice | null>('solo');
 
   const selectedAge = AGE_CHOICES.find((a) => a.key === ageKey) ?? null;
   const trimmedName = name.trim();
@@ -1077,7 +1080,7 @@ export function OnboardingScreen({ onComplete }: Props) {
         }
         title={`What's hardest with ${focusTitleName} right now?`}
         subtitle="We'll start tonight with what you need most. Tap any that fit."
-        cta={<AuthButton label="Continue" onPress={flow.submit} disabled={!hasOnboardingFocusNeed(focusNeeds)} />}
+        cta={<AuthButton label="Continue" onPress={flow.submit} />}
         secondaryCta={
           <LinkButton
             label="Skip for now"
@@ -1117,16 +1120,6 @@ export function OnboardingScreen({ onComplete }: Props) {
             label="Continue"
             onPress={flow.submit}
             disabled={!hasOnboardingNightShiftChoice(nightShiftChoice)}
-          />
-        }
-        secondaryCta={
-          <LinkButton
-            label="Skip for now"
-            color={colors.sleep}
-            onPress={() => {
-              setNightShiftChoice(null);
-              flow.skip();
-            }}
           />
         }>
         <NightShiftChoicePicker
