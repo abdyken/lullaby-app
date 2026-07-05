@@ -7,7 +7,7 @@
  * deliberately non-destructive: old rows stay valid; mapping is lossy only where
  * the old model never captured the field (see notes per type).
  *
- * Field mapping follows docs/LULLABY_LOGGING_MVP_AUDIT.md §10. Pure & type-only
+ * Field mapping follows docs/plans/LULLABY_LOGGING_MVP_AUDIT.md §10. Pure & type-only
  * imports, so this runs under the Node smoke test.
  */
 import type { LogEvent, LogEventMeta } from '@/data/models';

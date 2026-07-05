@@ -11,7 +11,7 @@
  * which is why the mirror exists instead of a cross-tree import.
  *
  * ⚠️ CLINICIAN-OWNED CONTENT — PLACEHOLDER, PENDING CLINICIAN REVIEW
- * (docs/reassure-content-review.md). Same status as the app-side copies.
+ * (docs/plans/reassure-content-review.md). Same status as the app-side copies.
  */
 
 export const REDFLAGS = [

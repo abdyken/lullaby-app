@@ -6,7 +6,7 @@
  * the existing flat `LogEvent` (src/data/models.ts); old rows are read through
  * `LegacyLoggingMapper` while all new product writes use this model.
  *
- * Source of truth: docs/LULLABY_LOGGING_IMPLEMENTATION_PLAN_EN.md §4.
+ * Source of truth: docs/plans/LULLABY_LOGGING_IMPLEMENTATION_PLAN_EN.md §4.
  */
 
 /** ISO-8601 timestamp, e.g. "2026-06-21T03:16:00.000Z". */

@@ -4,7 +4,7 @@
  * Each gate answers "does this caregiver's entitlement unlock this feature?" from
  * a single `isPro` boolean, so the gating rule lives in ONE dependency-free leaf
  * (no React, no env, no network) that both the UI and the smoke test can call.
- * See docs/pro-implementation-plan.md §7.
+ * See docs/plans/pro-implementation-plan.md §7.
  *
  * HARD RULE — core logging is NEVER gated. Feed / Sleep / Diaper / Pump, the
  * Tonight loop, onboarding, and the first log stay free for everyone. These gates
