@@ -337,7 +337,7 @@ export default function ReassureScreen() {
                   paddingHorizontal: 20,
                   alignItems: 'center',
                   justifyContent: 'center',
-                  transform: [{ scale: pressed ? 0.96 : 1 }],
+                  opacity: pressed ? 0.86 : 1,
                 })}>
                 <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.sleep }}>
                   Try again
@@ -356,7 +356,7 @@ export default function ReassureScreen() {
                   paddingHorizontal: 20,
                   alignItems: 'center',
                   justifyContent: 'center',
-                  transform: [{ scale: pressed ? 0.96 : 1 }],
+                  opacity: pressed ? 0.86 : 1,
                 })}>
                 <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.white }}>
                   Open Settings
@@ -376,7 +376,7 @@ export default function ReassureScreen() {
                 paddingHorizontal: 20,
                 alignItems: 'center',
                 justifyContent: 'center',
-                transform: [{ scale: pressed ? 0.96 : 1 }],
+                opacity: pressed ? 0.86 : 1,
               })}>
               <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.sleep }}>
                 Type instead
