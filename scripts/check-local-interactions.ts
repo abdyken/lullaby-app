@@ -3871,7 +3871,7 @@ async function runAsyncChecks(): Promise<void> {
     const subs = buildV2QuickLogSubtitles(state, clock.now());
     assert.equal(subs.feed, 'Feeding · 12m · right');
     assert.equal(subs.sleep, 'Sleeping · 12m');
-    assert.equal(subs.pump, 'Pumping · 12:00');
+    assert.equal(subs.pump, 'Pumping · 12m');
   });
 
   await checkAsync('BB6. buildV2QuickLogSubtitles: pump draft "Finished · add volume", then last-pump line', async () => {
