@@ -271,13 +271,17 @@ export default function ReassureScreen() {
         General supportive information for tonight — not medical advice, never a diagnosis.
       </Text>
 
-      {/* night-sky hero + voice orb (the signature moment) */}
+      {/* night-sky hero + ambient agent orb (the signature moment). The orb
+          READS the night-read status only — it reflects Resting/Thinking/Ready
+          and never triggers a read, gates content, or routes. */}
       <ReassureHero>
         <VoiceOrb
           state={voice.state}
           reduceMotion={reduceMotion}
           onPress={onOrbPress}
           interimText={voice.interim}
+          nightReadStatus={nightReadStatus}
+          isResolving={nightReadStatus === 'loading'}
         />
       </ReassureHero>
 
