@@ -53,7 +53,7 @@ function FilledButton({
       style={({ pressed }) => ({
         width: '100%',
         borderRadius: 20,
-        transform: [{ scale: pressed ? 0.98 : 1 }],
+        opacity: pressed ? 0.86 : 1,
       })}>
       <View
         style={{
