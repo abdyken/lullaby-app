@@ -1,15 +1,16 @@
 import type * as React from 'react';
 import { Text, View } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Circle, Path } from 'react-native-svg';
 
+import type { InsightIcon } from '@/features/insights/types';
 import { useTheme } from '@/state/ThemeProvider';
 import { colors, fonts, radii, surfaces } from '@/theme';
 
 export type InsightCardProps = {
-  emoji: string;
+  icon: InsightIcon;
   text: React.ReactNode;
+  /** Quiet helper line under the body; rendered as plain text, never a link. */
   source?: string;
-  sourceTone?: 'accent' | 'muted';
   tone?: 'feed' | 'sleep' | 'diaper' | 'growth' | 'neutral';
 };
 
@@ -29,7 +30,9 @@ const NIGHT_TINT = {
   neutral: 'rgba(255,255,255,0.05)',
 } as const;
 
-const SOURCE_COLOR = {
+// The glyph is tinted with the card's accent so it reads the same on iOS and
+// Android (emoji don't tint and vary per platform).
+const ICON_COLOR = {
   feed: colors.feed,
   sleep: colors.sleep2,
   diaper: colors.diaper,
@@ -37,36 +40,92 @@ const SOURCE_COLOR = {
   neutral: colors.feed,
 } as const;
 
-function SourceIcon({ color }: { color: string }) {
+/**
+ * In-house line glyphs matching the app's icon style (24 viewBox, ~1.9 stroke,
+ * rounded joins, single passed-in color). bottle = feed, moon = sleep, and a sun
+ * for wake windows (the awake time between sleeps). Each glyph is drawn optically
+ * centered on x=12 so the three read as an even, aligned set across the cards.
+ */
+function InsightGlyph({ icon, color }: { icon: InsightIcon; color: string }) {
+  if (icon === 'bottle') {
+    // A recognizable baby bottle: teat + collar ring + body + two measurement
+    // ticks — symmetric about x=12 (the old single outline read like a vial).
+    return (
+      <Svg width={30} height={30} viewBox="0 0 24 24" fill="none">
+        <Path
+          d="M10.9 4.6V3.4a1.1 1.1 0 0 1 2.2 0v1.2"
+          stroke={color}
+          strokeWidth={1.9}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <Path
+          d="M9 4.6h6v2.4H9z"
+          stroke={color}
+          strokeWidth={1.9}
+          strokeLinejoin="round"
+        />
+        <Path
+          d="M9.4 7v10.6a2.6 2.6 0 0 0 2.6 2.6h0a2.6 2.6 0 0 0 2.6-2.6V7"
+          stroke={color}
+          strokeWidth={1.9}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <Path
+          d="M9.9 10.6h2.3M9.9 13.4h2.3"
+          stroke={color}
+          strokeWidth={1.9}
+          strokeLinecap="round"
+        />
+      </Svg>
+    );
+  }
+  if (icon === 'moon') {
+    return (
+      <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+        <Path
+          d="M20.5 13A8.5 8.5 0 1 1 11 3.5 6.6 6.6 0 0 0 20.5 13Z"
+          stroke={color}
+          strokeWidth={1.9}
+          strokeLinejoin="round"
+        />
+      </Svg>
+    );
+  }
   return (
-    <Svg width={11} height={11} viewBox="0 0 24 24" fill="none">
+    <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={4.4} stroke={color} strokeWidth={1.9} />
       <Path
-        d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"
+        d="M12 2.5v1.7M12 19.8v1.7M5.6 5.6l1.2 1.2M17.2 17.2l1.2 1.2M2.5 12h1.7M19.8 12h1.7M5.6 18.4l1.2-1.2M17.2 6.8l1.2-1.2"
         stroke={color}
-        strokeWidth={2.4}
+        strokeWidth={1.9}
         strokeLinecap="round"
       />
     </Svg>
   );
 }
 
-export function InsightCard({ emoji, text, source, sourceTone = 'accent', tone = 'neutral' }: InsightCardProps) {
+export function InsightCard({ icon, text, source, tone = 'neutral' }: InsightCardProps) {
   const { mode } = useTheme();
   const palette = surfaces[mode];
-  const sourceColor = sourceTone === 'muted' ? palette.inkSoft : SOURCE_COLOR[tone];
 
   return (
     <View
       style={{
         flexDirection: 'row',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         gap: 13,
         paddingVertical: 14,
         paddingHorizontal: 16,
         borderRadius: radii.small,
         backgroundColor: mode === 'night' ? NIGHT_TINT[tone] : DAY_TINT[tone],
       }}>
-      <Text style={{ width: 28, fontSize: 24, lineHeight: 26, textAlign: 'center', marginTop: 1 }}>{emoji}</Text>
+      {/* Fixed 24×24 slot, centered on both axes, so the three glyphs sit even
+          regardless of each one's internal extent (was horizontal-center only). */}
+      <View style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}>
+        <InsightGlyph icon={icon} color={ICON_COLOR[tone]} />
+      </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text
           style={{
@@ -78,12 +137,9 @@ export function InsightCard({ emoji, text, source, sourceTone = 'accent', tone =
           {text}
         </Text>
         {source ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
-            <SourceIcon color={sourceColor} />
-            <Text style={{ flex: 1, fontFamily: fonts.bodyBold, fontSize: 11, color: sourceColor }}>
-              {source}
-            </Text>
-          </View>
+          <Text style={{ fontFamily: fonts.bodyBold, fontSize: 11, color: palette.inkSoft, marginTop: 6 }}>
+            {source}
+          </Text>
         ) : null}
       </View>
     </View>

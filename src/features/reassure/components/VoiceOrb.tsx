@@ -1,23 +1,38 @@
 /**
- * VoiceOrb — the signature glass circle inside the night-sky hero.
+ * VoiceOrb — the ambient agent orb: the signature glowing circle inside the
+ * night-sky hero. It is Lullaby's calm intelligence, and voice is ONE of its
+ * inputs (not its whole identity).
  *
- * States:
- *  - 'available_idle'    breathing halo, mic, "Tap to talk"
+ * Voice states (the `state` prop, owned by useVoiceInput — unchanged):
+ *  - 'available_idle'    at rest, mic, "Tap to talk"
  *  - 'listening'         three staggered pulse rings + live label
  *  - 'unavailable'       no speech service / module absent
  *  - 'permission_denied' mic permission refused
  *  - 'no_match'          speech ran but produced no usable transcript
  *  - 'error'             temporary recognition failure
  *
- * All loops are gated on reduce-motion. The orb itself never routes — it only
- * reports taps; the owner decides whether that means "listen" or "focus the
- * text input" (degradation is a first-class state, never a crash).
+ * Ambient phase (derived from the read-only night-read status): while voice is
+ * available the halo reflects Resting -> Thinking -> Ready as the AI night read
+ * resolves. The orb only READS status; it never triggers a read, gates content,
+ * reorders anything, or calls route(). Degraded voice states are shown exactly
+ * as before (they carry actionable text), so Thinking/Ready appear only from the
+ * calm 'available_idle' rest.
+ *
+ * The breath/thinking/ready halo runs on Reanimated (UI thread) via
+ * useAmbientAgentAnimation; the listening pulse rings keep their existing
+ * feedback. All motion is gated on reduce-motion. The orb reports taps only —
+ * the owner decides "listen" vs "focus the text input" (degradation is a
+ * first-class state, never a crash).
  */
 import { useEffect, useState } from 'react';
 import { Animated, Easing, Pressable, Text, View } from 'react-native';
+import Reanimated from 'react-native-reanimated';
 import Svg, { Circle, Defs, Path, RadialGradient, Stop } from 'react-native-svg';
 
+import type { NightReadStatus } from '@/features/reassure/domain/nightReadView';
 import { colors, fonts } from '@/theme';
+
+import { useAmbientAgentAnimation, type OrbPhase } from './useAmbientAgentAnimation';
 
 export type VoiceOrbState =
   | 'available_idle'
@@ -117,37 +132,49 @@ type Props = {
   onPress: () => void;
   /** interim transcript shown while listening (optional) */
   interimText?: string | null;
+  /**
+   * Coarse, read-only AI night-read status, so the orb can reflect Thinking /
+   * Ready. The orb never acts on it beyond animating.
+   */
+  nightReadStatus?: NightReadStatus;
+  /**
+   * Derived "a read/answer is resolving" flag. Defaults to
+   * nightReadStatus === 'loading'; the orb only reflects it visually.
+   */
+  isResolving?: boolean;
 };
 
-export function VoiceOrb({ state, reduceMotion, onPress, interimText }: Props) {
-  const [breathe] = useState(() => new Animated.Value(0));
+/** The thinking label the ambient orb shows while a read is resolving. */
+const THINKING_LABEL = 'Reading your night';
+
+export function VoiceOrb({
+  state,
+  reduceMotion,
+  onPress,
+  interimText,
+  nightReadStatus,
+  isResolving,
+}: Props) {
   const degraded =
     state === 'permission_denied' || state === 'unavailable' || state === 'no_match' || state === 'error';
 
-  useEffect(() => {
-    if (reduceMotion || degraded) {
-      breathe.setValue(0);
-      return;
-    }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(breathe, {
-          toValue: 1,
-          duration: 2500,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(breathe, {
-          toValue: 0,
-          duration: 2500,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [breathe, degraded, reduceMotion]);
+  // Read-only: derive whether the AI night read is resolving. Never triggers it.
+  const resolving = isResolving ?? nightReadStatus === 'loading';
+
+  // Ambient phase. Voice is one input: listening wins; otherwise, from the calm
+  // 'available_idle' rest, reflect Thinking while a read resolves, else Resting.
+  // Degraded voice states keep their own (still) presentation.
+  const phase: OrbPhase =
+    state === 'listening'
+      ? 'listening'
+      : state === 'available_idle' && resolving
+        ? 'thinking'
+        : 'resting';
+
+  // Static when reduce-motion is on OR voice is degraded — a calm still, never a
+  // frozen mid-pose (the hook rests every driver at neutral).
+  const still = reduceMotion || degraded;
+  const { haloStyle } = useAmbientAgentAnimation(phase, still);
 
   const label: Record<VoiceOrbState, string> = {
     available_idle: 'Tap to talk',
@@ -158,7 +185,7 @@ export function VoiceOrb({ state, reduceMotion, onPress, interimText }: Props) {
     error: 'Try again',
   };
 
-  const accessibilityLabel = (() => {
+  const baseAccessibilityLabel = (() => {
     switch (state) {
       case 'unavailable':
         return 'Voice unavailable in this build. Tap to type your question instead.';
@@ -175,6 +202,13 @@ export function VoiceOrb({ state, reduceMotion, onPress, interimText }: Props) {
     }
   })();
 
+  // While reading, announce the thinking state (motion-independent, so a
+  // reduced-motion / screen-reader parent still hears it).
+  const accessibilityLabel = phase === 'thinking' ? THINKING_LABEL : baseAccessibilityLabel;
+
+  // Reflect the thinking label visually; every voice state keeps its own label.
+  const displayLabel = phase === 'thinking' ? THINKING_LABEL : label[state];
+
   return (
     <View style={{ alignItems: 'center' }}>
       <Pressable
@@ -188,17 +222,17 @@ export function VoiceOrb({ state, reduceMotion, onPress, interimText }: Props) {
           justifyContent: 'center',
           transform: [{ scale: pressed ? 0.96 : 1 }],
         })}>
-        {/* breathing halo */}
-        <Animated.View
+        {/* breathing / thinking / ready halo (Reanimated, UI thread) */}
+        <Reanimated.View
           pointerEvents="none"
-          style={{
-            position: 'absolute',
-            width: ORB_SIZE + 12,
-            height: ORB_SIZE + 12,
-            transform: [
-              { scale: breathe.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1.04] }) },
-            ],
-          }}>
+          style={[
+            {
+              position: 'absolute',
+              width: ORB_SIZE + 12,
+              height: ORB_SIZE + 12,
+            },
+            haloStyle,
+          ]}>
           <Svg width="100%" height="100%" viewBox="0 0 100 100">
             <Defs>
               <RadialGradient id="orbHalo" cx="50%" cy="50%" r="50%">
@@ -208,7 +242,7 @@ export function VoiceOrb({ state, reduceMotion, onPress, interimText }: Props) {
             </Defs>
             <Circle cx={50} cy={50} r={50} fill="url(#orbHalo)" />
           </Svg>
-        </Animated.View>
+        </Reanimated.View>
 
         {/* pulse rings while listening */}
         {Array.from({ length: RING_COUNT }, (_, ix) => (
@@ -249,7 +283,7 @@ export function VoiceOrb({ state, reduceMotion, onPress, interimText }: Props) {
               textAlign: 'center',
               color: colors.sleep,
             }}>
-            {label[state]}
+            {displayLabel}
           </Text>
         </View>
       </Pressable>

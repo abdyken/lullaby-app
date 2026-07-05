@@ -3,6 +3,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, useWindowDimensions, View } from 'react-native';
 
 import { Screen } from '@/components/Screen';
+import { ExtendedInsightsCard } from '@/features/insights/components/ExtendedInsightsCard';
 import { InsightCard } from '@/features/insights/components/InsightCard';
 import { InsightStatCard } from '@/features/insights/components/InsightStatCard';
 import { InsightsSectionCard } from '@/features/insights/components/InsightsSectionCard';
@@ -10,7 +11,10 @@ import { ProPreviewCard } from '@/features/insights/components/ProPreviewCard';
 import { WeeklyRecapCard } from '@/features/insights/components/WeeklyRecapCard';
 import { WeeklySleepBars } from '@/features/insights/components/WeeklySleepBars';
 import { getInsightsViewModel } from '@/features/insights/getInsightsViewModel';
-import { buildInsightsViewModel } from '@/features/insights/insightSelectors';
+import {
+  EXTENDED_INSIGHTS_WINDOW_DAYS,
+  buildInsightsViewModel,
+} from '@/features/insights/insightSelectors';
 import type { InsightStatViewModel, InsightsViewModel } from '@/features/insights/types';
 import { useLogging } from '@/features/logging/state/LoggingProvider';
 import { useAnalytics } from '@/lib/useAnalytics';
@@ -55,7 +59,7 @@ function getInsightsStateCopy(viewModel: InsightsViewModel): InsightsStateCopy {
       sectionTitle: 'Getting started',
       intro: {
         label: 'First day of logs',
-        text: 'Today is your first day of logs. Keep logging to unlock weekly insights.',
+        text: 'Today is your first day of logging. Keep going and weekly insights will appear here.',
       },
     };
   }
@@ -94,9 +98,11 @@ function statForDataState(
   return { value: stat.value, unit: stat.unit, label: dataDays <= 1 ? labels.today : labels.average };
 }
 
+const EXTENDED_INSIGHTS_WINDOW_MS = EXTENDED_INSIGHTS_WINDOW_DAYS * 86_400_000;
+
 export function InsightsScreen() {
   const { mode, isTransitioning } = useTheme();
-  const { loadInsightsHistory } = useLogging();
+  const { loadInsightsHistory, loadEventsInRange } = useLogging();
   const { session, baby } = useAuth();
   const track = useAnalytics();
   const { width, height } = useWindowDimensions();
@@ -105,6 +111,10 @@ export function InsightsScreen() {
   const statsGap = isShortDesktop ? 18 : 22;
   const initialViewModel = useMemo(() => buildInsightsViewModel({ events: [], now: resolveInsightsNow() }), []);
   const [loadedViewModel, setLoadedViewModel] = useState<InsightsViewModel | null>(null);
+  // Pro extended (30-day) view model — loaded alongside the 7-day one when real
+  // Pro is enabled, so the section is ready the moment `isPro` flips true (e.g.
+  // right after a purchase) without another fetch round-trip.
+  const [extendedViewModel, setExtendedViewModel] = useState<InsightsViewModel | null>(null);
   // 'loading' until the first successful read; 'error' only when the *first* load
   // fails (no data to show yet). A refresh failure while data is already on screen
   // keeps the last good view model instead of wiping it — calmer than an error flash.
@@ -118,16 +128,42 @@ export function InsightsScreen() {
 
   const loadHistory = useCallback((nowMs: number) => loadInsightsHistory(nowMs), [loadInsightsHistory]);
 
+  // The Pro window needs more history than the 7-day helper loads; the logging
+  // repository already supports arbitrary ranges.
+  const loadExtendedHistory = useCallback(
+    (nowMs: number) => loadEventsInRange({ fromMs: nowMs - EXTENDED_INSIGHTS_WINDOW_MS, toMs: nowMs }),
+    [loadEventsInRange],
+  );
+
   // Load the 7-day history and build the view model. Called on tab focus and by
   // the Retry button. On failure it keeps any previously loaded data on screen and
   // only surfaces the error UI when there is nothing to fall back to.
   const load = useCallback(() => {
     const requestId = (requestIdRef.current += 1);
     if (!loadedRef.current) setStatus('loading');
+    const nowMs = resolveInsightsNow();
+
+    // Extended (30-day) Pro view — only in a real-Pro build. A failure keeps the
+    // last good extended view (the card shows a calm loading line otherwise);
+    // the free 7-day path below is never blocked by this load.
+    if (getProMode() === 'enabled') {
+      void getInsightsViewModel({
+        loadHistory: loadExtendedHistory,
+        nowMs,
+        windowDays: EXTENDED_INSIGHTS_WINDOW_DAYS,
+      })
+        .then((next) => {
+          if (requestId !== requestIdRef.current) return;
+          setExtendedViewModel(next);
+        })
+        .catch((error) => {
+          if (__DEV__) console.warn('[insights] failed to load extended history', error);
+        });
+    }
 
     void getInsightsViewModel({
       loadHistory,
-      nowMs: resolveInsightsNow(),
+      nowMs,
     })
       .then((next) => {
         if (requestId !== requestIdRef.current) return;
@@ -147,7 +183,7 @@ export function InsightsScreen() {
         if (__DEV__) console.warn('[insights] failed to load history', error);
         setStatus(loadedRef.current ? 'ready' : 'error');
       });
-  }, [loadHistory, track, session?.user.id, baby?.id]);
+  }, [loadHistory, loadExtendedHistory, track, session?.user.id, baby?.id]);
 
   // Reload on tab focus so backdated logs inside the 7-day window are picked up.
   // insights_opened fires once per visit; the recap preview + once-ever 4-data-days
@@ -315,10 +351,9 @@ export function InsightsScreen() {
             {viewModel.cards.map((card) => (
               <InsightCard
                 key={card.id}
-                emoji={card.emoji}
+                icon={card.icon}
                 tone={card.tone}
                 source={card.source}
-                sourceTone={card.sourceTone}
                 text={card.text}
               />
             ))}
@@ -351,6 +386,15 @@ export function InsightsScreen() {
         {getProMode() !== 'off' && viewModel.dataDays >= 4 ? (
           <View style={{ marginTop: 13 }}>
             <ProPreviewCard viewModel={viewModel} />
+          </View>
+        ) : null}
+
+        {/* Extended 30-day insights — real Pro only. Free sees a teaser that
+            opens the paywall; Pro sees the genuine 30-day view with computed
+            trends. Additive depth; the free 7-day view above never changes. */}
+        {getProMode() === 'enabled' && viewModel.dataDays >= 4 ? (
+          <View style={{ marginTop: 13 }}>
+            <ExtendedInsightsCard viewModel={extendedViewModel} />
           </View>
         ) : null}
           </>

@@ -10,6 +10,16 @@
 > The output guardrail was NOT weakened; the prompt was steered away from the words
 > it forbids. Added an honest UI label (AI-phrased vs local fallback) and smoke
 > checks NR1–NR6.
+>
+> **2026-07-04 (client display fix).** After the prompt fix the first live call
+> succeeded server-side (`outcome='llm'`, cached) but the UI still showed the local
+> fallback: the client abandoned the invoke at a hard 3 s ceiling while the uncached
+> call legitimately took ~7 s, then mislabeled the abandonment as "unavailable".
+> Fixed by raising the client wait-cap to 12 s (> the 8 s server LLM timeout),
+> letting the invoke run to completion, and treating a cap-hit as *pending* (calm
+> loading, retry next open — which hits the fast server cache), never a failure.
+> Display logic extracted to the pure leaf `domain/nightReadView.ts`; smoke NR7
+> pins it. Checks are now NR1–NR7.
 
 ## What the AI layer is
 
@@ -47,7 +57,7 @@ All safety lives in code around the model:
 | Temperature | 0.3 |
 | `max_tokens` | Night Read 200 · Topic Polish 120 |
 | Output | structured JSON (`output_config.format` json_schema), parsed defensively |
-| Timeout / retries | 8 s server-side / 0 retries; client adds its own 3 s ceiling |
+| Timeout / retries | 8 s server-side / 0 retries; client waits up to a 12 s cap (must exceed the 8 s server timeout, else a slow success is dropped), then treats a cap-hit as *pending* / retry-next-open, never a failure |
 | Prompt caching | `cache_control: ephemeral` on the system prompt. Dormant today: Haiku 4.5's minimum cacheable prefix is 4096 tokens and the placeholder prompts are far below it; it starts paying automatically if the reviewed prompts grow |
 
 ### Token / cost profile (Haiku 4.5: $1 in / $5 out per MTok)
@@ -232,9 +242,12 @@ supabase functions logs reassure-night-read --tail # watch the [reassure-audit] 
 1. Dev build with the *Local Pro QA* env above; sign in; make sure the linked baby
    has at least one feed/diaper/sleep logged tonight (a non-empty recap).
 2. Open the **Reassure** tab → tap **Turn on AI read** on the consent card.
-3. Within ~3 s the recap read swaps to the AI-phrased text and the **AI-phrased
-   read** badge appears. If it stays on the local read with the *"AI read isn't
-   available right now"* note, the call fell back — check the audit row's `outcome`.
+3. Within a few seconds (an uncached call takes ~5–8 s; the client waits up to a
+   12 s cap) the recap read swaps to the AI-phrased text and the **AI-phrased read**
+   badge appears. If it stays on the local read with the *"AI read isn't available
+   right now"* note, the function *resolved* with no read — check the audit
+   `outcome`. (A read still in flight past the cap shows no note, just the local
+   read; the next open serves it from the server cache.)
 4. The function log prints one `[reassure-audit] kind=night-read outcome=llm … usage={…}` line.
 
 **SQL verification** (Supabase SQL editor / `execute_sql`):
@@ -272,15 +285,15 @@ caregiver of the same baby opens it) for the same night: the read renders from t
 key is the once-per-night rate limit. Query 2 should still show a single row and
 query 1's `created_at` should not advance. A `guardrail_block`/fallback caches
 nothing (by design, so a fixed prompt or re-enabled kill-switch takes effect on the
-next open); with 0 SDK retries and the 8 s/3 s timeouts, a block is one call, never
-an auto-retry loop.
+next open); with 0 SDK retries and the 8 s server / 12 s client caps, a block is one
+call, never an auto-retry loop.
 
 ## Rollback
 
 The night-read layer is fail-safe by construction: the client renders the
 local descriptive read first and only overlays the LLM read if the function
-answers within its 3 s ceiling. So a bad deploy degrades to the local read, it
-does not break Reassure.
+answers within the client wait-cap (12 s). So a bad deploy degrades to the local
+read, it does not break Reassure.
 
 - **Roll back the function** (fastest kill switch, no client release needed):
   ```sh
@@ -330,7 +343,8 @@ does not break Reassure.
 - X21 — source order: cache and red-flag scan precede the model; triage/oos
   short-circuit; the verbatim KB line pre-seeds the fallback; both functions
   use the shared audit writer.
-- X22 — client: local read renders first, 3 s ceiling, Pro gate; topic polish
+- X22 — client: local read renders first, 12 s wait-cap (> the 8 s server timeout;
+  a cap-hit is pending, not unavailable), Pro gate; topic polish
   has zero client references.
 - X23 — audit: minimized parent text, `usage` captured, zero client policies,
   90-day TTL columns present.
@@ -341,10 +355,12 @@ does not break Reassure.
   branch precedes any Anthropic construction/call (`outcome='disabled'`, no
   token spend); consent state never leaks to phone/analytics/LLM, and topic
   polish / parent-answer stay dark.
-- NR1–NR6 — release readiness: the real shipped read is a vocab block ("okay")
+- NR1–NR7 — release readiness: the real shipped read is a vocab block ("okay")
   and a prompt-following read passes (NR1); medical/diagnostic/false-reassurance
   wording is still blocked (NR2); the prompt names the forbidden words and keeps
   the single-`read` schema (NR3); every code-built prompt fact is red-flag- and
   vocab-clean (NR4); cache-hit returns before any model call and a blocked read
   caches nothing / doesn't retry (NR5); the honest AI/fallback label is wired and
-  keeps the non-medical disclaimer visible (NR6).
+  keeps the non-medical disclaimer visible (NR6); the display path maps an
+  llm/cached read → AI status, a resolved fallback → the unavailable note, and a
+  not-attempted/pending state → silent local read (NR7).

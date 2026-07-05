@@ -150,7 +150,7 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
       style={{
         marginTop: 14,
         borderRadius: radii.medium,
-        overflow: 'hidden',
+        backgroundColor: palette.card,
         opacity: progress,
         transform: [
           {
@@ -160,6 +160,10 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
         ],
         ...shadows.card,
       }}>
+      {/* Inner clip node: rounds the gradient header's corners. Kept SEPARATE from
+          the shadow node above — on iOS overflow:'hidden' on the same view clips the
+          drop shadow away; Android still elevates via `elevation`. */}
+      <View style={{ borderRadius: radii.medium, overflow: 'hidden' }}>
       {/* header */}
       <LinearGradient colors={headerColors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
         <View
@@ -198,17 +202,24 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
 
       {/* body */}
       <View style={{ backgroundColor: palette.card, paddingHorizontal: 18, paddingBottom: 18 }}>
-        <Text
-          style={{
-            fontFamily: fonts.bodyBold,
-            fontSize: 14,
-            lineHeight: 21,
-            color: palette.ink,
-            paddingTop: 14,
-            paddingBottom: 10,
-          }}>
-          {line}
-        </Text>
+        {/* one-sentence summary — the takeaway. A soft accent bar frames it as the
+            summary above the "what I'm seeing / what you can do" detail (the
+            AnswerBlocks below). Content, copy, and gating are unchanged. */}
+        <View style={{ flexDirection: 'row', gap: 11, paddingTop: 14, paddingBottom: 10 }}>
+          <View
+            style={{ width: 3, borderRadius: 2, backgroundColor: isTriage ? colors.alert : colors.sleep }}
+          />
+          <Text
+            style={{
+              flex: 1,
+              fontFamily: fonts.bodyBold,
+              fontSize: 14,
+              lineHeight: 21,
+              color: palette.ink,
+            }}>
+            {line}
+          </Text>
+        </View>
 
         {result.kind === 'topic' && showClinical ? (
           <>
@@ -402,6 +413,7 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
                     setDraftNumber(phone);
                     setEditingNumber(true);
                   }}
+                  hitSlop={8}
                   style={{ alignItems: 'center', paddingVertical: 2 }}>
                   <Text style={{ fontFamily: fonts.bodyBold, fontSize: 12.5, color: palette.inkSoft }}>
                     {UPDATE_NUMBER_ACTION}
@@ -531,6 +543,7 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
           accessibilityRole="button"
           accessibilityLabel="Dismiss answer"
           onPress={onDismiss}
+          hitSlop={8}
           style={{ paddingTop: 14, alignItems: 'center' }}>
           <Text
             style={{
@@ -541,6 +554,7 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
             {dismissLabel}
           </Text>
         </Pressable>
+      </View>
       </View>
     </Animated.View>
   );

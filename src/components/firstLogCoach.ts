@@ -25,7 +25,7 @@ function possessive(name: string): string {
 
 /** Calibrating empty-state line (Napper) — honest, never fake-precise. */
 export function tonightCalibratingText(babyName: string): string {
-  return `Getting to know ${possessive(babyName)} nights — log a few and the rhythm will fill in.`;
+  return `Getting to know ${possessive(babyName)} nights. The rhythm fills in as you log.`;
 }
 
 /** Coach nudge shown over the quick-log row while nothing is logged yet. */

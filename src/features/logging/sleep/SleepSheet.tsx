@@ -15,6 +15,7 @@
 import { Modal, Pressable, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { hapticSave } from '@/lib/haptics';
 import { colors, radii, shadows } from '@/theme';
 
 import { useLogging } from '../state/LoggingProvider';
@@ -55,6 +56,7 @@ export function SleepSheet({ onClose }: Props) {
   const handleStart = (minutesAgo: number) => {
     const startedAt =
       minutesAgo > 0 ? new Date(Date.now() - minutesAgo * 60_000).toISOString() : undefined;
+    hapticSave();
     void startSleep(startedAt ? { startedAt } : {});
   };
 

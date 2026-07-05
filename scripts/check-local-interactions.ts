@@ -274,6 +274,7 @@ import {
   canExportWeeklyRecap,
   canSharePediatricianSummary,
   canUseLlmNightRead,
+  canViewExtendedInsights,
   canViewFullHistory,
 } from '../src/lib/proGates';
 // Pro Phase 3 — the PURE weekly-export text builder (imports only a type, so it is
@@ -1364,7 +1365,7 @@ check('Z1. formatBabyAge reads "Newborn" in week 0, singular at 1, plural after'
 
 check('Z2. the Calibrating + coach copy is personal, honest, and not fake-precise', () => {
   assert.match(tonightCalibratingText('Mia'), /Mia's nights/);
-  assert.match(tonightCalibratingText('Mia'), /rhythm will fill in/);
+  assert.match(tonightCalibratingText('Mia'), /rhythm fills in/);
   assert.match(firstLogNudgeText('Mia'), /Mia's first feed/);
   assert.match(firstLogNudgeText('Mia'), /timeline/);
   assert.match(firstLogThreadText(), /thread/);
@@ -1765,9 +1766,17 @@ check('AE7. the main app has an explicit, labeled account entry (not only the ba
 });
 
 check('AE8. public account entry copy is truthful for local-only Shape A', () => {
-  for (const honest of ['Saved on this device', 'Optional account', 'Privacy-first']) {
-    assert.ok(ACCOUNT_ENTRY_SRC.includes(honest), `account entry has honest chip: ${honest}`);
-  }
+  // The decorative value chips were removed in the UX pass; the honest local-only
+  // promise (no account, data on device) now lives in the subtitle copy itself.
+  assert.ok(
+    ACCOUNT_ENTRY_SRC.includes('No account needed. Everything you log stays on this phone.'),
+    'account entry subtitle must state the truthful local-only promise (no account, on-device)',
+  );
+  // Internal "for this build" dev-speak must never ship in public account-entry copy.
+  assert.ok(
+    !/[Ff]or this build/.test(ACCOUNT_ENTRY_SRC),
+    'public account-entry copy must not contain internal "for this build" phrasing',
+  );
   for (const [name, src] of [
     ['AccountEntryScreen', ACCOUNT_ENTRY_SRC],
     ['AccountSheet', ACCOUNT_SHEET_SRC],
@@ -2687,12 +2696,12 @@ async function runAsyncChecks(): Promise<void> {
     assert.equal(vm.dataDays, 0);
     assert.equal(vm.weeklySleep.length, 7);
     assert.ok(vm.weeklySleep.every((day) => day.minutes === 0));
-    assert.equal(vm.cards[0].text, 'Feed rhythm will appear after a few more logs.');
-    assert.equal(vm.cards[0].source, 'Keep logging');
-    assert.equal(vm.cards[1].text, 'Sleep patterns will build as you log more completed sleeps.');
-    assert.equal(vm.cards[1].source, 'Building pattern');
-    assert.equal(vm.cards[2].text, 'Wake windows need a few completed sleeps to estimate.');
-    assert.equal(vm.cards[2].source, 'A few more logs needed');
+    assert.equal(vm.cards[0].text, "Feed rhythm shows once you've logged a few feeds.");
+    assert.equal(vm.cards[0].source, undefined);
+    assert.equal(vm.cards[1].text, "Sleep patterns show once you've logged a couple of sleeps.");
+    assert.equal(vm.cards[1].source, undefined);
+    assert.equal(vm.cards[2].text, "Wake windows show once you've logged a few sleeps.");
+    assert.equal(vm.cards[2].source, undefined);
     assert.equal(vm.stats.feedsPerDay.value, '0');
     assert.equal(vm.stats.sleepPerDay.value, '0');
     assert.equal(vm.stats.diapersPerDay.value, '0');
@@ -2706,6 +2715,9 @@ async function runAsyncChecks(): Promise<void> {
         makeBottleAt('ins-feed-1', 'ins-cid-feed-1', localTime(0, 6)),
         makeBottleAt('ins-feed-2', 'ins-cid-feed-2', localTime(0, 8, 45)),
         makeBottleAt('ins-feed-3', 'ins-cid-feed-3', localTime(0, 11, 30)),
+        // Three completed sleeps → two wake windows, so the gated wake card quotes a
+        // real average (a single gap is held back as too thin — see the checks below).
+        makeCompletedSleepAt('ins-sleep-0', 'ins-cid-sleep-0', localTime(1, 16), localTime(1, 17)),
         makeCompletedSleepAt('ins-sleep-1', 'ins-cid-sleep-1', localTime(1, 20), localTime(1, 23)),
         makeCompletedSleepAt('ins-sleep-2', 'ins-cid-sleep-2', localTime(0, 1), localTime(0, 7, 10)),
         makeDiaper('ins-diaper-1', 'ins-cid-diaper-1', { occurredAt: iso(localTime(2, 9)) }),
@@ -2716,13 +2728,31 @@ async function runAsyncChecks(): Promise<void> {
       assert.equal(vm.hasEnoughData, true);
       assert.equal(vm.weeklySleep.length, 7);
       assert.ok(vm.weeklySleep.some((day) => day.minutes === 370));
-      assert.equal(vm.cards[0].text, 'Feeds are settling into a 2h 45m rhythm based on recent logs.');
+      assert.equal(vm.cards[0].text, 'Feeds are settling into a 2h 45m rhythm.');
       assert.equal(vm.cards[0].source, 'From 3 recent feeds');
-      assert.equal(vm.cards[1].text, 'Longest sleep stretch is around 6h 10m based on recent sleep logs.');
-      assert.equal(vm.cards[2].text, 'Wake windows are around 2h based on recent sleep times.');
+      assert.equal(vm.cards[1].text, 'Longest sleep stretch is around 6h 10m.');
+      // Two windows (3h then 2h) → a real 2h 30m average; the math is unchanged.
+      assert.equal(vm.cards[2].text, 'Wake windows are around 2h 30m.');
       assert.equal(vm.stats.feedsPerDay.label, 'Feeds / day');
       assert.equal(vm.stats.sleepPerDay.unit, 'h');
       assert.equal(vm.stats.diapersPerDay.label, 'Diapers / day');
+
+      // Honesty gate: thin data holds its placeholder instead of quoting a
+      // fake-precise figure. One nap is not a "longest stretch"…
+      const oneSleep = buildInsightsViewModel({
+        events: [makeCompletedSleepAt('ins-1s', 'ins-cid-1s', localTime(0, 1), localTime(0, 7, 10))],
+        now,
+      });
+      assert.equal(oneSleep.cards[1].text, "Sleep patterns show once you've logged a couple of sleeps.");
+      // …and a single wake window (2 sleeps, 1 gap) is not an "around" average.
+      const oneGap = buildInsightsViewModel({
+        events: [
+          makeCompletedSleepAt('ins-1g-a', 'ins-cid-1g-a', localTime(1, 20), localTime(1, 23)),
+          makeCompletedSleepAt('ins-1g-b', 'ins-cid-1g-b', localTime(0, 1), localTime(0, 7, 10)),
+        ],
+        now,
+      });
+      assert.equal(oneGap.cards[2].text, "Wake windows show once you've logged a few sleeps.");
     },
   );
 
@@ -2766,6 +2796,96 @@ async function runAsyncChecks(): Promise<void> {
       assert.ok(vm.cards[0].text.includes('rhythm')); // real rhythm card from 3 feeds
     },
   );
+
+  // EI. Extended (Pro) insights — a REAL 30-day window with REAL computed trends.
+  // The premium pillar must never be fake: the window parameter genuinely widens
+  // the aggregation, and trend chips are computed from the logs (recent half of
+  // the window vs the earlier half). Up, down, AND steady must all be reachable
+  // from data alone, and the free 7-day view carries no trend chip at all.
+
+  await checkAsync('EI1. windowDays=30 genuinely widens the window (a 20-day-old feed counts)', async () => {
+    const now = localTime(0, 12);
+    const events: CareEvent[] = [
+      makeBottleAt('ei-old-feed', 'ei-cid-old-feed', localTime(20, 9)),
+      makeBottleAt('ei-new-feed', 'ei-cid-new-feed', localTime(0, 9)),
+    ];
+    const week = buildInsightsViewModel({ events, now });
+    const month = buildInsightsViewModel({ events, now, windowDays: 30 });
+    assert.equal(week.windowDays, 7);
+    assert.equal(month.windowDays, 30);
+    assert.equal(week.dataDays, 1); // the 20-day-old feed is outside the free window…
+    assert.equal(month.dataDays, 2); // …but inside the Pro window
+    assert.equal(month.weeklySleep.length, 30); // the per-day series spans the window
+  });
+
+  await checkAsync('EI2. an increase across the month computes a real "up" trend (never hardcoded)', async () => {
+    const now = localTime(0, 12);
+    const events: CareEvent[] = [
+      // Earlier half (~3 weeks ago): 1 feed + 1h sleep on each of two days.
+      makeBottleAt('ei-up-e1', 'ei-cid-up-e1', localTime(20, 9)),
+      makeBottleAt('ei-up-e2', 'ei-cid-up-e2', localTime(18, 9)),
+      makeCompletedSleepAt('ei-up-s1', 'ei-cid-up-s1', localTime(20, 14), localTime(20, 15)),
+      makeCompletedSleepAt('ei-up-s2', 'ei-cid-up-s2', localTime(18, 14), localTime(18, 15)),
+      // Recent half: 2 feeds + 2h sleep on each of two days → both double.
+      makeBottleAt('ei-up-r1', 'ei-cid-up-r1', localTime(3, 9)),
+      makeBottleAt('ei-up-r2', 'ei-cid-up-r2', localTime(3, 13)),
+      makeBottleAt('ei-up-r3', 'ei-cid-up-r3', localTime(1, 9)),
+      makeBottleAt('ei-up-r4', 'ei-cid-up-r4', localTime(1, 13)),
+      makeCompletedSleepAt('ei-up-s3', 'ei-cid-up-s3', localTime(3, 14), localTime(3, 16)),
+      makeCompletedSleepAt('ei-up-s4', 'ei-cid-up-s4', localTime(1, 14), localTime(1, 16)),
+    ];
+    const vm = buildInsightsViewModel({ events, now, windowDays: 30 });
+    assert.equal(vm.stats.feedsPerDay.delta, 'up 100%');
+    assert.equal(vm.stats.feedsPerDay.deltaTone, 'up');
+    assert.equal(vm.stats.sleepPerDay.delta, 'up 100%');
+    assert.equal(vm.stats.sleepPerDay.deltaTone, 'up');
+  });
+
+  await checkAsync('EI3. decreases and flat rhythms compute "down" and "steady" from data alone', async () => {
+    const now = localTime(0, 12);
+    const events: CareEvent[] = [
+      // Diapers: 2/day in the earlier half → 1/day recently (down 50%).
+      makeDiaper('ei-d-e1', 'ei-cid-d-e1', { occurredAt: iso(localTime(20, 8)) }),
+      makeDiaper('ei-d-e2', 'ei-cid-d-e2', { occurredAt: iso(localTime(20, 16)) }),
+      makeDiaper('ei-d-e3', 'ei-cid-d-e3', { occurredAt: iso(localTime(18, 8)) }),
+      makeDiaper('ei-d-e4', 'ei-cid-d-e4', { occurredAt: iso(localTime(18, 16)) }),
+      makeDiaper('ei-d-r1', 'ei-cid-d-r1', { occurredAt: iso(localTime(3, 8)) }),
+      makeDiaper('ei-d-r2', 'ei-cid-d-r2', { occurredAt: iso(localTime(1, 8)) }),
+      // Feeds: 1/day on the same active days in both halves → steady.
+      makeBottleAt('ei-f-e1', 'ei-cid-f-e1', localTime(20, 9)),
+      makeBottleAt('ei-f-e2', 'ei-cid-f-e2', localTime(18, 9)),
+      makeBottleAt('ei-f-r1', 'ei-cid-f-r1', localTime(3, 9)),
+      makeBottleAt('ei-f-r2', 'ei-cid-f-r2', localTime(1, 9)),
+    ];
+    const vm = buildInsightsViewModel({ events, now, windowDays: 30 });
+    assert.equal(vm.stats.diapersPerDay.delta, 'down 50%');
+    assert.equal(vm.stats.diapersPerDay.deltaTone, 'down');
+    assert.equal(vm.stats.feedsPerDay.delta, 'steady');
+    assert.equal(vm.stats.feedsPerDay.deltaTone, 'neutral');
+  });
+
+  await checkAsync('EI4. the free 7-day view and sparse halves carry NO trend chip (nothing fake)', async () => {
+    const now = localTime(0, 12);
+    const weekEvents: CareEvent[] = [
+      makeBottleAt('ei-w-f1', 'ei-cid-w-f1', localTime(6, 9)),
+      makeBottleAt('ei-w-f2', 'ei-cid-w-f2', localTime(4, 9)),
+      makeBottleAt('ei-w-f3', 'ei-cid-w-f3', localTime(2, 9)),
+      makeBottleAt('ei-w-f4', 'ei-cid-w-f4', localTime(0, 9)),
+    ];
+    const week = buildInsightsViewModel({ events: weekEvents, now });
+    assert.equal(week.dataDays, 4);
+    // The old fake chip attached 'steady' here whenever dataDays >= 4 — gone.
+    assert.equal(week.stats.feedsPerDay.delta, undefined);
+    assert.equal(week.stats.sleepPerDay.delta, undefined);
+    assert.equal(week.stats.diapersPerDay.delta, undefined);
+
+    // A 30-day window whose earlier half has no logs claims no trend either —
+    // there is no baseline, so nothing honest to say.
+    const month = buildInsightsViewModel({ events: weekEvents, now, windowDays: 30 });
+    assert.equal(month.stats.feedsPerDay.delta, undefined);
+    assert.equal(month.stats.sleepPerDay.delta, undefined);
+    assert.equal(month.stats.diapersPerDay.delta, undefined);
+  });
 
   await checkAsync('V1. createEvent stores an event; getTodayEvents returns it; retry is idempotent by clientEventId', async () => {
     const repo = createLoggingRepository(createInMemoryLoggingPersistence(), createManualClock(NOW));
@@ -5096,17 +5216,26 @@ check('W7. fake-door preview survives: preview mode resolves and the interest an
   assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('export_tapped'"), 'ProPreviewCard fires export_tapped');
 });
 
-check('W7b. Pro public copy stays future-facing for Apple review', () => {
+check('W7b. Pro public copy names only REAL features and keeps stale claims out', () => {
+  // Rescoped when the v1 pillars became real: the copy now names exactly the
+  // two working features (shareable weekly TEXT summary + 30-day rhythm
+  // insights) and the old future-facing claims joined the ban list — "Fuller
+  // history" is unbuilt vaporware and must never reappear on a sale surface.
   for (const [name, src] of [
     ['UpgradeCard.tsx', UPGRADE_CARD_SRC],
     ['ProPreviewCard.tsx', PRO_PREVIEW_CARD_SRC],
     ['PaywallSheet.tsx', PAYWALL_SHEET_SRC],
   ] as const) {
-    assert.ok(
-      src.includes('Fuller history') || src.includes('gentle weekly recaps') || src.includes('Export-ready summaries'),
-      `${name} keeps softened future-facing Pro copy`,
-    );
-    for (const stale of ['doctor-ready', 'more caregivers', 'share with your pediatrician']) {
+    assert.ok(/weekly summary/i.test(src), `${name} names the real shareable weekly summary`);
+    assert.ok(/rhythm insights/i.test(src), `${name} names the real rhythm insights`);
+    for (const stale of [
+      'doctor-ready',
+      'more caregivers',
+      'share with your pediatrician',
+      'Fuller history',
+      'gentle weekly recaps',
+      'Export-ready summaries',
+    ]) {
       assert.ok(!src.includes(stale), `${name} must not include stale Pro claim: ${stale}`);
     }
   }
@@ -5273,6 +5402,21 @@ check('X7. analytics union carries the paywall entry events (paywall_opened + pr
   assert.ok(ANALYTICS_SRC.includes("'pro_gate_seen'"), 'pro_gate_seen in the union');
 });
 
+check('X9. the live paywall sells ONLY real, working features (no vaporware, no Soon)', () => {
+  // Apple 2.1/2.3.2: everything advertised on a purchasable paywall must
+  // genuinely work when tapped. The v1 sell-list is exactly the two built
+  // pillars: the shareable weekly TEXT summary and the 30-day rhythm insights.
+  assert.ok(!/fuller history/i.test(PAYWALL_SHEET_SRC), 'fuller history (unbuilt) is never advertised');
+  assert.ok(!/coming later/i.test(PAYWALL_SHEET_SRC), 'a live paywall never says "coming later"');
+  assert.ok(!/>\s*Soon\s*</.test(PAYWALL_SHEET_SRC), 'no "Soon" badge on a purchasable paywall');
+  assert.ok(!/PDF|CSV/.test(PAYWALL_SHEET_SRC), 'the text export is never sold as PDF/CSV');
+  assert.ok(/weekly summary/i.test(PAYWALL_SHEET_SRC), 'sells the real shareable weekly summary');
+  assert.ok(/30-day/.test(PAYWALL_SHEET_SRC), 'sells the real 30-day rhythm insights');
+  // The live (enabled-mode) card sublines match the same honest sell-list.
+  assert.ok(!/FEATURE_LIVE[^;]*fuller history/i.test(PRO_PREVIEW_CARD_SRC), 'live card copy drops fuller history');
+  assert.ok(!/SUBLINE_LIVE[^;]*fuller history/i.test(UPGRADE_CARD_SRC), 'live upsell copy drops fuller history');
+});
+
 check('X8. parent call sites render the Pro card in preview + enabled, hide it when off', () => {
   assert.ok(INSIGHTS_SCREEN_SRC.includes("getProMode() !== 'off'"), 'Insights renders the card unless Pro is off');
   assert.ok(ACCOUNT_SHEET_SRC.includes("getProMode() !== 'off'"), 'AccountSheet renders the card unless Pro is off');
@@ -5291,6 +5435,7 @@ const EXPORT_RICH_VM: InsightsViewModel = {
   updatedAt: 0,
   hasEnoughData: true,
   dataDays: 5,
+  windowDays: 7,
   cards: [],
   weeklySleep: Array.from({ length: 7 }, (_, index) => ({
     date: `2026-06-0${index + 1}`,
@@ -5335,7 +5480,7 @@ check('Y3. the weekly export leaks no name / notes / ids / secrets / volumes / p
     cards: [
       {
         id: '7f3a9b2c-1234-4d5e-8a9b-0011deadbeef',
-        emoji: '🍼',
+        icon: 'bottle',
         text: 'Mia fussed at 3am',
         source: 'x',
         tone: 'feed',
@@ -5480,6 +5625,34 @@ check('Z6. PaywallSheet shows real package price strings and a real restore', ()
   assert.ok(PAYWALL_SHEET_SRC.includes('canRestore'), 'restore is enabled when configured + signed-in');
 });
 
+check('Z8. a guest with no account can purchase (anonymous RevenueCat identity)', () => {
+  // Apple 2.1: the app is fully usable with no account, so a local/guest parent
+  // must be able to buy Pro. RevenueCat configures ANONYMOUSLY when there is no
+  // session; ProProvider never dead-ends the paywall on "sign in first".
+  assert.ok(
+    REVENUECAT_SRC.includes('userId: string | null'),
+    'configureRevenueCat accepts a null userId (anonymous configure)',
+  );
+  assert.ok(
+    !PRO_PROVIDER_SRC.includes('signed_out'),
+    'ProProvider no longer forces a signed_out paywall state for guests',
+  );
+  assert.ok(
+    /const canPurchase = proMode === 'enabled' && paywallStatus === 'ready'/.test(PRO_PROVIDER_SRC),
+    'canPurchase requires only enabled mode + a ready paywall',
+  );
+  assert.ok(
+    !/canPurchase[^;]*userId/.test(PRO_PROVIDER_SRC),
+    'canPurchase must not require a signed-in userId',
+  );
+  assert.ok(
+    !/sign in to subscribe/i.test(PAYWALL_SHEET_SRC),
+    'PaywallSheet has no sign-in-to-subscribe dead end',
+  );
+  // Sign-out still sheds the identity so entitlement never leaks between users.
+  assert.ok(/Purchases\.logOut/.test(REVENUECAT_SRC), 'the service can revert to anonymous on sign-out');
+});
+
 check('Z7. analytics union has the six purchase/restore events (coarse props only)', () => {
   for (const event of [
     'purchase_started',
@@ -5491,6 +5664,62 @@ check('Z7. analytics union has the six purchase/restore events (coarse props onl
   ]) {
     assert.ok(ANALYTICS_SRC.includes("'" + event + "'"), event + ' present in the union');
   }
+});
+
+// EIG. Extended (Pro) insights source guards — the premium pillar must be
+// genuinely computed and correctly gated. (The trend MATH itself is pinned
+// behaviorally in §EI inside the async checks.)
+const INSIGHT_SELECTORS_SRC = readFileSync(
+  new URL('../src/features/insights/insightSelectors.ts', import.meta.url),
+  'utf8',
+);
+const EXTENDED_INSIGHTS_CARD_SRC = readFileSync(
+  new URL('../src/features/insights/components/ExtendedInsightsCard.tsx', import.meta.url),
+  'utf8',
+);
+
+check('EIG1. trend chips are computed, never hardcoded (the old delta:steady stub is gone)', () => {
+  const steadyLiterals = INSIGHT_SELECTORS_SRC.match(/'steady'/g) ?? [];
+  assert.equal(
+    steadyLiterals.length,
+    1,
+    "exactly one 'steady' literal may exist — the computed steady band inside computeTrend",
+  );
+  const computeTrendIdx = INSIGHT_SELECTORS_SRC.indexOf('function computeTrend');
+  assert.ok(computeTrendIdx >= 0, 'a real computeTrend function exists');
+  assert.ok(
+    INSIGHT_SELECTORS_SRC.indexOf("'steady'") > computeTrendIdx,
+    "the single 'steady' literal lives inside computeTrend (thresholded on real change)",
+  );
+  assert.ok(
+    INSIGHT_SELECTORS_SRC.includes('buildWindowTrends'),
+    'trends compare the two window halves from real events',
+  );
+});
+
+check('EIG2. extended insights gate: Pro sees the real 30-day view, free routes to the paywall', () => {
+  // The gate predicate is a real Pro gate.
+  assert.equal(canViewExtendedInsights(true), true);
+  assert.equal(canViewExtendedInsights(false), false);
+  // The card gates on the predicate and the free path records + opens the paywall.
+  assert.ok(
+    EXTENDED_INSIGHTS_CARD_SRC.includes('canViewExtendedInsights(isPro)'),
+    'the card gates on canViewExtendedInsights',
+  );
+  assert.ok(EXTENDED_INSIGHTS_CARD_SRC.includes("track('pro_gate_seen'"), 'free tap records the gate');
+  assert.ok(EXTENDED_INSIGHTS_CARD_SRC.includes("track('paywall_opened'"), 'free tap records the paywall open');
+  assert.ok(EXTENDED_INSIGHTS_CARD_SRC.includes('openPaywall('), 'free tap opens the shared paywall');
+  // The screen renders the card only in real-Pro builds, over the shared window
+  // constant (no inline magic 30).
+  assert.ok(
+    INSIGHTS_SCREEN_SRC.includes('ExtendedInsightsCard') &&
+      INSIGHTS_SCREEN_SRC.includes("getProMode() === 'enabled'"),
+    'InsightsScreen renders the extended card only when real Pro is enabled',
+  );
+  assert.ok(
+    INSIGHTS_SCREEN_SRC.includes('EXTENDED_INSIGHTS_WINDOW_DAYS'),
+    'the Pro window flows through the shared 30-day constant',
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -6426,8 +6655,17 @@ check('X22. client contract: local read first, 3s ceiling, Pro-gated; topic poli
     new URL('../src/features/reassure/application/nightRead.ts', import.meta.url),
     'utf8',
   );
-  assert.ok(hookSrc.includes('FETCH_TIMEOUT_MS = 3_000'), 'hard 3s client ceiling');
-  assert.ok(hookSrc.includes('Promise.race'), 'the LLM read races the ceiling — UI never blocks');
+  // The client wait-cap must EXCEED the function's own 8s server-side LLM
+  // timeout, or an uncached call (~5-8s: model + guardrail + audit + cache write)
+  // gets abandoned before it answers and mislabeled "unavailable" while the
+  // server is still succeeding + caching (the exact bug the first live test hit).
+  assert.ok(hookSrc.includes('FETCH_TIMEOUT_MS = 12_000'), 'client wait-cap is 12s');
+  const capMatch = hookSrc.match(/FETCH_TIMEOUT_MS = (\d[\d_]*)/);
+  assert.ok(capMatch && Number(capMatch[1].replace(/_/g, '')) > RX_LLM.LLM_TIMEOUT_MS,
+    'the client wait-cap exceeds the 8s server-side LLM timeout');
+  assert.ok(hookSrc.includes('Promise.race'), 'the read races a wait-cap — the UI never blocks (local read is already shown)');
+  // A cap-hit is UNKNOWN, never a failure: pending → keep loading, retry next open.
+  assert.ok(hookSrc.includes("return { kind: 'pending' }"), 'a wait-cap timeout is pending, not unavailable');
   assert.ok(hookSrc.includes('canUseLlmNightRead(isPro)'), 'the LLM read is Pro-gated');
   const cardSrc = readFileSync(
     new URL('../src/features/reassure/components/RecapCard.tsx', import.meta.url),
@@ -6659,7 +6897,7 @@ check('X24e. consent never leaks: no phone, no analytics, no LLM in the consent 
 });
 
 // ---------------------------------------------------------------------------
-// NR1–NR5: night-read release-readiness. The real deployed calls (2026-07-02
+// NR1–NR7: night-read release-readiness. The real deployed calls (2026-07-02
 // audit) all ended in guardrail_block: valid JSON, short, end_turn — but every
 // response reached for the word "okay" ("that's okay"), which is judgement
 // vocabulary the night read has no source text to exempt, so it was a VOCAB
@@ -6784,14 +7022,78 @@ check('NR6. the honest AI/fallback label is wired and keeps the non-medical disc
     noteSrc.includes('the local read based on your logs'),
     'the unavailable note points at the local read, not a technical failure',
   );
-  // The screen renders it, driven by the hook status; the hook models all four states.
+  // The screen renders it, driven by the hook status; the four states live in
+  // the pure view leaf, and the hook derives its status from it.
   assert.ok(
     RX_REASSURE_SCREEN_SRC.includes('<AiReadNote surfaceMode={mode} status={nightReadStatus} />'),
     'the reassure screen renders the honest label under the recap',
   );
+  const viewSrc = readFileSync(
+    new URL('../src/features/reassure/domain/nightReadView.ts', import.meta.url),
+    'utf8',
+  );
   for (const s of ['idle', 'loading', 'ai', 'unavailable']) {
-    assert.ok(RX_NIGHTREAD_HOOK_SRC.includes(`'${s}'`), `the hook models the "${s}" status`);
+    assert.ok(viewSrc.includes(`'${s}'`), `the view leaf models the "${s}" status`);
   }
+  assert.ok(
+    RX_NIGHTREAD_HOOK_SRC.includes('nightReadView('),
+    'the hook derives its status from the pure view leaf',
+  );
+});
+
+check('NR7. display path: an llm/cached read shows AI status; a resolved fallback shows unavailable; idle is silent', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const view = require('../src/features/reassure/domain/nightReadView') as {
+    classifyNightReadResponse: (body: unknown) => { kind: 'read'; text: string } | { kind: 'fallback' };
+    nightReadView: (
+      eligible: boolean,
+      resolved: { text: string | null } | null,
+    ) => { read: string | null; status: 'idle' | 'loading' | 'ai' | 'unavailable' };
+  };
+
+  // A fresh llm answer and a server CACHE HIT both arrive as { read, source:'llm' }.
+  const fresh = view.classifyNightReadResponse({ read: 'Nothing has been logged yet tonight.', source: 'llm' });
+  assert.deepEqual(fresh, { kind: 'read', text: 'Nothing has been logged yet tonight.' });
+  const cached = view.classifyNightReadResponse({ read: 'Two feeds are logged so far.', source: 'llm' });
+  assert.deepEqual(cached, { kind: 'read', text: 'Two feeds are logged so far.' });
+  // Fallbacks: null read, missing read, empty/whitespace, or no body → local read.
+  for (const body of [
+    { read: null, source: 'fallback' },
+    { source: 'fallback' },
+    { read: '   ', source: 'llm' },
+    null,
+    undefined,
+  ]) {
+    assert.deepEqual(
+      view.classifyNightReadResponse(body),
+      { kind: 'fallback' },
+      `fallback for ${JSON.stringify(body)}`,
+    );
+  }
+
+  // The view maps eligibility + resolved outcome to the read + honest status.
+  // 1) llm response displays AI status (read shown).
+  assert.deepEqual(view.nightReadView(true, { text: fresh.text }), { read: fresh.text, status: 'ai' });
+  // 2) cached llm response displays AI status.
+  assert.deepEqual(view.nightReadView(true, { text: cached.text }), { read: cached.text, status: 'ai' });
+  // 3) resolved fallback displays the unavailable note (no read).
+  assert.deepEqual(view.nightReadView(true, { text: null }), { read: null, status: 'unavailable' });
+  // 4) local-only idle shows NO AI failure (not eligible → idle, nothing rendered).
+  assert.deepEqual(view.nightReadView(false, null), { read: null, status: 'idle' });
+  assert.deepEqual(view.nightReadView(false, { text: null }), { read: null, status: 'idle' });
+  // 5) in-flight / wait-cap pending stays a calm loading state (never the note).
+  assert.deepEqual(view.nightReadView(true, null), { read: null, status: 'loading' });
+
+  // AiReadNote renders nothing for idle/loading — a not-attempted state can never
+  // surface as an AI failure.
+  const noteSrc = readFileSync(
+    new URL('../src/features/reassure/components/AiReadNote.tsx', import.meta.url),
+    'utf8',
+  );
+  assert.ok(
+    noteSrc.includes("if (status !== 'ai' && status !== 'unavailable') return null;"),
+    'idle/loading render nothing (no scary AI failure surface)',
+  );
 });
 
 // §PC — the Reassure triage "Call pediatrician" phone action (local + private).

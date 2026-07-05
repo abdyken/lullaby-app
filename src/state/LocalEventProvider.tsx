@@ -136,7 +136,15 @@ type LocalEventContextValue = {
 const LocalEventContext = createContext<LocalEventContextValue | null>(null);
 
 export function LocalEventProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<TonightState>(() => initTonightState(seedEvents));
+  // Production/guest sessions must never surface fabricated activity: the demo
+  // seed (Mia + Mom/Dad's feed/diaper/sleep) is a dev-only fixture, so a real
+  // account starts with an empty legacy store. HandoffCard — the only screen that
+  // renders this store unfiltered — then shows its honest empty state instead of a
+  // fake partner handoff on a zero-log night. (__DEV__ keeps the zero-backend local
+  // demo pre-populated.) buildSeedEvents stays exported for the demo + smoke tests.
+  const [state, setState] = useState<TonightState>(() =>
+    initTonightState(__DEV__ ? seedEvents : []),
+  );
   // Gate saving on hydration: we must NOT write the seed back over real saved
   // data before the initial load completes.
   const [isHydrated, setIsHydrated] = useState(false);
@@ -406,7 +414,9 @@ export function LocalEventProvider({ children }: { children: ReactNode }) {
       return;
     }
     void repositoryRef.current.clear();
-    setState(initTonightState(seedEvents));
+    // Debug reset restores the seed only in dev; a production reset lands on the
+    // honest empty night (same guard as the initial state above).
+    setState(initTonightState(__DEV__ ? seedEvents : []));
     // Also forget the device-local "caught up" cursor so the reseeded night
     // shows its catch-up story again (not "Nothing new"). Bump the nonce once
     // the clear lands so the cursor hook re-reads it without a reload.

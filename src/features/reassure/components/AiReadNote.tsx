@@ -25,9 +25,9 @@ type Props = {
   status: NightReadStatus;
 };
 
-const AI_DISCLAIMER = 'General information, not medical advice — never a diagnosis.';
+const AI_DISCLAIMER = 'General information, not medical advice. Never a diagnosis.';
 const UNAVAILABLE_LINE =
-  "AI read isn’t available right now — here’s the local read based on your logs.";
+  "The AI read isn’t available right now. Here’s the local read based on your logs.";
 
 export function AiReadNote({ surfaceMode, status }: Props) {
   if (status !== 'ai' && status !== 'unavailable') return null;

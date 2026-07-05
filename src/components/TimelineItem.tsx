@@ -6,6 +6,9 @@
 import { Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
+import DiaperIcon from '@/assets/icons/quicklog/diaper.svg';
+import PumpIcon from '@/assets/icons/quicklog/pump.svg';
+import SleepIcon from '@/assets/icons/quicklog/sleep.svg';
 import type { TimelineEntry } from '@/data/mock';
 import { colors, fonts, surfaces, type SurfaceMode } from '@/theme';
 
@@ -39,6 +42,8 @@ const KIND_COLOR: Record<TimelineEntry['kind'], string> = {
 function DotIcon({ kind, color }: { kind: TimelineEntry['kind']; color: string }) {
   const sw = 1.9;
   if (kind === 'feed') {
+    // Crisp hand-drawn bottle kept for feed: the tile's filled breastfeeding SVG
+    // turns muddy at this 14px marker, so the timeline keeps its own legible glyph.
     return (
       <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
         <Path
@@ -49,26 +54,19 @@ function DotIcon({ kind, color }: { kind: TimelineEntry['kind']; color: string }
       </Svg>
     );
   }
+  // Diaper / pump / sleep reuse the imported quick-log tile SVGs (filled, recolored
+  // to the row accent via currentColor) so the timeline matches the tiles. These
+  // three stay legible at 14px; sleep here replaces the old moon fallback.
   if (kind === 'diaper') {
-    return (
-      <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
-        <Path d="M3 7h18l-1.5 4.5A8 8 0 0 1 12 17a8 8 0 0 1-7.5-5.5L3 7Z" stroke={color} strokeWidth={sw} />
-      </Svg>
-    );
+    return <DiaperIcon width={14} height={14} color={color} />;
   }
   if (kind === 'pump') {
-    return (
-      <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
-        <Path
-          d="M7 21h10M8 21V11h8v10M6 11h12M9 11V7a3 3 0 0 1 6 0v4"
-          stroke={color}
-          strokeWidth={sw}
-          strokeLinejoin="round"
-        />
-      </Svg>
-    );
+    return <PumpIcon width={14} height={14} color={color} />;
   }
-  // sleep + note fall back to the moon glyph
+  if (kind === 'sleep') {
+    return <SleepIcon width={14} height={14} color={color} />;
+  }
+  // note (and any unmapped kind) keeps the moon glyph — no longer shared with sleep
   return (
     <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
       <Path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke={color} strokeWidth={sw} />

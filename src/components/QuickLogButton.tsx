@@ -9,9 +9,14 @@
  * memory note). The Pressable only carries calm opacity feedback.
  */
 import { LinearGradient } from 'expo-linear-gradient';
+import type { ComponentType } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import type { SvgProps } from 'react-native-svg';
 
+import DiaperIcon from '@/assets/icons/quicklog/diaper.svg';
+import FeedIcon from '@/assets/icons/quicklog/feed.svg';
+import PumpIcon from '@/assets/icons/quicklog/pump.svg';
+import SleepIcon from '@/assets/icons/quicklog/sleep.svg';
 import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
 export type QuickLogKind = 'feed' | 'sleep' | 'diaper' | 'pump';
@@ -63,57 +68,20 @@ const TILE_GRADIENT: Record<QuickLogKind, [string, string]> = {
   pump: ['#FFF0D2', '#FCE6B6'],
 };
 
+// Each tile renders its imported single-color SVG (Flaticon), recolored to the
+// tile accent. The assets bake their fill on an inner <g>, so a root `fill` prop
+// can't override it; they carry fill="currentColor" and take the accent via the
+// `color` prop. Sized 22×22 to match the outgoing hand-drawn glyphs.
+const TILE_ICON: Record<QuickLogKind, ComponentType<SvgProps>> = {
+  feed: FeedIcon,
+  sleep: SleepIcon,
+  diaper: DiaperIcon,
+  pump: PumpIcon,
+};
+
 function TileIcon({ kind, color }: { kind: QuickLogKind; color: string }) {
-  const sw = 1.9;
-  if (kind === 'feed') {
-    return (
-      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-        <Path
-          d="M9 2h6M10 2v3.5a4 4 0 0 0-1.2 2.8L8 19a3 3 0 0 0 3 3h2a3 3 0 0 0 3-3l-.8-10.7A4 4 0 0 0 14 5.5V2"
-          stroke={color}
-          strokeWidth={sw}
-          strokeLinejoin="round"
-        />
-        <Path d="M8.4 12h7.2" stroke={color} strokeWidth={sw} />
-      </Svg>
-    );
-  }
-  if (kind === 'sleep') {
-    return (
-      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-        <Path
-          d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"
-          stroke={color}
-          strokeWidth={sw}
-          strokeLinejoin="round"
-        />
-      </Svg>
-    );
-  }
-  if (kind === 'diaper') {
-    return (
-      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-        <Path
-          d="M3 7h18l-1.5 4.5A8 8 0 0 1 12 17a8 8 0 0 1-7.5-5.5L3 7Z"
-          stroke={color}
-          strokeWidth={sw}
-          strokeLinejoin="round"
-        />
-        <Path d="M9 11c1 1.2 5 1.2 6 0" stroke={color} strokeWidth={sw} strokeLinecap="round" />
-      </Svg>
-    );
-  }
-  // pump — the reference's bottle/pump glyph
-  return (
-    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M7 21h10M8 21V11h8v10M6 11h12M9 11V7a3 3 0 0 1 6 0v4"
-        stroke={color}
-        strokeWidth={sw}
-        strokeLinejoin="round"
-      />
-    </Svg>
-  );
+  const Glyph = TILE_ICON[kind];
+  return <Glyph width={22} height={22} color={color} />;
 }
 
 export function QuickLogButton({
