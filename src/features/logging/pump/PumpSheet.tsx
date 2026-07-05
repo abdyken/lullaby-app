@@ -18,6 +18,7 @@ import { useMemo, useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { hapticSave } from '@/lib/haptics';
 import { colors, fonts, radii, shadows } from '@/theme';
 
 import { isPumpEvent, type PumpEvent, type PumpSide } from '../domain/types';
@@ -204,7 +205,13 @@ export function PumpSheet({ onClose }: Props) {
               onCancel={handleCancel}
             />
           ) : (
-            <PumpIdle accentColor={accentColor} onStart={(side) => void startPump(side)} />
+            <PumpIdle
+              accentColor={accentColor}
+              onStart={(side) => {
+                hapticSave();
+                void startPump(side);
+              }}
+            />
           )}
         </View>
       </View>

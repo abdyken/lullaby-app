@@ -15,6 +15,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { hapticSave } from '@/lib/haptics';
 import { colors, fonts, radii, shadows } from '@/theme';
 
 import { newClientEventId } from '../domain/ids';
@@ -206,6 +207,7 @@ export function FeedSheet({ onClose }: Props) {
               defaultSide={defaultBreastSide}
               onStart={(side: BreastSide) => {
                 lastFeedMethod = 'breast';
+                hapticSave();
                 void startBreast(side);
               }}
             />
