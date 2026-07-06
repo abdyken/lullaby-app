@@ -172,6 +172,11 @@ export default function SettingsScreen() {
   // Both account actions land on a surface UNDER this screen (AuthGate swaps the
   // tab shell's content), so pop back first — same order as AccountSheet's
   // onClose-then-navigate.
+  // Sign out is REVERSIBLE (local logs are preserved), so it gets a LIGHT inline
+  // confirm — one calm "Sign out?" gate against a misclick — deliberately gentler
+  // than the delete card's permanent/irreversible treatment, so the two never
+  // read as equally dangerous.
+  const [signOutConfirming, setSignOutConfirming] = useState(false);
   const handleSignOut = () => {
     router.back();
     void signOut();
@@ -250,27 +255,82 @@ export default function SettingsScreen() {
                       ? `Signed in as ${email}`
                       : 'Signed in'}
                 </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Sign out"
-                  accessibilityState={{ busy }}
-                  onPress={handleSignOut}
-                  disabled={busy}
-                  style={({ pressed }) => ({
-                    marginTop: 18,
-                    minHeight: 48,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: radii.medium,
-                    backgroundColor: isNight ? 'rgba(255,255,255,0.06)' : colors.surfaceSoft,
-                    borderWidth: 1,
-                    borderColor: palette.line,
-                    opacity: pressed || busy ? 0.6 : 1,
-                  })}>
-                  <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.feed }}>
-                    Sign out
-                  </Text>
-                </Pressable>
+                {signOutConfirming ? (
+                  <View style={{ marginTop: 18 }}>
+                    <Text
+                      style={{
+                        fontFamily: fonts.body,
+                        fontSize: 13,
+                        lineHeight: 18,
+                        color: palette.inkSoft,
+                      }}>
+                      Sign out? Your logs stay safe on this phone.
+                    </Text>
+                    <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Cancel sign out"
+                        onPress={() => setSignOutConfirming(false)}
+                        disabled={busy}
+                        style={({ pressed }) => ({
+                          flex: 1,
+                          minHeight: 48,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderRadius: radii.medium,
+                          borderWidth: 1,
+                          borderColor: palette.line,
+                          opacity: pressed ? 0.6 : 1,
+                        })}>
+                        <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: palette.inkSoft }}>
+                          Cancel
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Sign out"
+                        accessibilityState={{ busy }}
+                        onPress={handleSignOut}
+                        disabled={busy}
+                        style={({ pressed }) => ({
+                          flex: 1,
+                          minHeight: 48,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderRadius: radii.medium,
+                          backgroundColor: isNight ? 'rgba(255,255,255,0.06)' : colors.surfaceSoft,
+                          borderWidth: 1,
+                          borderColor: palette.line,
+                          opacity: pressed || busy ? 0.6 : 1,
+                        })}>
+                        <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.feed }}>
+                          Sign out
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Sign out"
+                    onPress={() => setSignOutConfirming(true)}
+                    disabled={busy}
+                    style={({ pressed }) => ({
+                      marginTop: 18,
+                      minHeight: 48,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: radii.medium,
+                      backgroundColor: isNight ? 'rgba(255,255,255,0.06)' : colors.surfaceSoft,
+                      borderWidth: 1,
+                      borderColor: palette.line,
+                      opacity: pressed || busy ? 0.6 : 1,
+                    })}>
+                    <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.feed }}>
+                      Sign out
+                    </Text>
+                  </Pressable>
+                )}
               </>
             ) : (
               <>
