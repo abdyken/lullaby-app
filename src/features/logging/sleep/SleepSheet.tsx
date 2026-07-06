@@ -15,7 +15,9 @@
 import { Modal, Pressable, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { caregiverDisplayName } from '@/data/currentState';
 import { hapticSave } from '@/lib/haptics';
+import { useAuth } from '@/state/AuthProvider';
 import { colors, radii, shadows } from '@/theme';
 
 import { useLogging } from '../state/LoggingProvider';
@@ -31,6 +33,13 @@ export function SleepSheet({ onClose }: Props) {
   const insets = useSafeAreaInsets();
   const { todayEvents, activeSleep, error, clearError, startSleep, finishSleep, cancelSleep, saveCompletedSleep } =
     useLogging();
+  // Attribution for the active-sleep start line — resolved from the same
+  // caregiver roster the timeline rows use (createdByUserId → displayName),
+  // so a Dad / second-caregiver session isn't mislabeled "by Mom". Null when
+  // the id can't be resolved (unknown / solo-local) → the suffix is dropped.
+  const { caregivers } = useAuth();
+  const startedByName =
+    activeSleep !== null ? caregiverDisplayName(caregivers, activeSleep.createdByUserId) : null;
 
   const accentColor = colors.sleep;
   const accentTint = colors.sleepTint;
@@ -119,6 +128,7 @@ export function SleepSheet({ onClose }: Props) {
             <SleepActive
               event={activeSleep}
               accentColor={accentColor}
+              startedByName={startedByName}
               errorMessage={error?.message}
               onFinish={handleFinish}
               onCancel={handleCancel}

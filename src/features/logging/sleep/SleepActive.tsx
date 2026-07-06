@@ -21,6 +21,9 @@ import { elapsedMs, formatCompactDuration } from '../timer/sessionMath';
 type Props = {
   event: SleepEvent;
   accentColor: string;
+  /** Display name of who started the session (resolved by the sheet from the
+   *  caregiver roster). Null → attribution unknown, so the suffix is dropped. */
+  startedByName?: string | null;
   errorMessage?: string;
   onFinish: () => void;
   onCancel: () => void;
@@ -77,7 +80,7 @@ function FilledButton({
   );
 }
 
-export function SleepActive({ event, accentColor, errorMessage, onFinish, onCancel }: Props) {
+export function SleepActive({ event, accentColor, startedByName, errorMessage, onFinish, onCancel }: Props) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const startedLabel = formatStartedAt(event.startedAt);
   // Display-only tick; the value is derived from `startedAt`, not stored.
@@ -106,7 +109,8 @@ export function SleepActive({ event, accentColor, errorMessage, onFinish, onCanc
               textAlign: 'center',
               marginTop: 3,
             }}>
-            Started {startedLabel} · by Mom
+            Started {startedLabel}
+            {startedByName ? ` · by ${startedByName}` : ''}
           </Text>
         )}
         {errorMessage && (
