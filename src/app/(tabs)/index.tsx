@@ -113,7 +113,7 @@ export default function TonightScreen() {
     resetNonce,
   } = useLocalEvents();
   const logging = useLogging();
-  const { baby: activeBaby, caregivers: activeCaregivers, caregiver: ownCaregiver } = useAuth();
+  const { baby: activeBaby, caregivers: activeCaregivers, caregiver: ownCaregiver, session } = useAuth();
 
   // Identity comes from the active baby/caregiver the AuthProvider owns: the
   // linked baby + caregivers in Supabase mode, the seeded Mia / Mom+Dad in
@@ -172,9 +172,12 @@ export default function TonightScreen() {
   const [pumpV2Open, setPumpV2Open] = useState(false);
   // Account surfaces live behind the baby header (blueprint settings home),
   // reachable in EVERY build — signed-in caregiver, "continue locally" guest, and
-  // the unconfigured local demo alike. Tapping the baby header opens the quick
-  // AccountSheet; the explicit header account button pushes the full /settings
-  // screen (dedicated account/settings home — no fifth tab).
+  // the unconfigured local demo alike. The baby avatar is the SINGLE account
+  // entry, branched by auth state: a signed-in tap pushes the full /settings
+  // screen (dedicated account/settings home — no fifth tab), while a guest tap
+  // opens the thin AccountSheet router (Continue locally / Create account or sign
+  // in). Guests have no Pro/appearance/delete to manage, so the light sheet is
+  // the right surface for them.
   const [accountOpen, setAccountOpen] = useState(false);
 
   // Live render-only clock for elapsed labels and the hero progress ring. During
@@ -246,8 +249,7 @@ export default function TonightScreen() {
         ageWeeks={ageWeeks}
         caregivers={caregivers}
         surfaceMode={bodyMode}
-        onPress={() => setAccountOpen(true)}
-        onAccount={() => router.push('/settings')}
+        onPress={() => (session ? router.push('/settings') : setAccountOpen(true))}
         onThemeToggle={handleThemeToggle}
         themeToggleDisabled={isTransitioning}
       />

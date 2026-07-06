@@ -1722,15 +1722,24 @@ check('AE4. the account entry keeps "Continue locally" and a calm state when Sup
   );
 });
 
-check('AE5. the account surface is reopenable from Tonight in any build (not gated on Supabase config)', () => {
-  assert.ok(TONIGHT_SRC.includes('setAccountOpen(true)'), 'Tonight must open the account surface');
+check('AE5. the baby avatar is the single Tonight account entry, branched by auth (guest → AccountSheet, signed-in → /settings)', () => {
+  // The avatar is the ONE account entry now (the separate person-glyph button was
+  // removed). Tonight branches it by auth: a signed-in tap opens the full
+  // /settings screen; a guest tap opens the thin AccountSheet router — so the
+  // "continue locally" guest still reaches a real account surface in ANY build,
+  // never gated on Supabase config.
+  assert.ok(
+    /session\s*\?\s*router\.push\('\/settings'\)\s*:\s*setAccountOpen\(true\)/.test(TONIGHT_SRC),
+    'the avatar routes signed-in → /settings and guest → the AccountSheet',
+  );
   // The old gate (`isSupabaseConfigured ? () => setAccountOpen(true) : undefined`)
-  // left the header inert in a local build, so the baby head was the only entry.
+  // left the header inert in a local build, so the account surface was hidden.
   assert.ok(
     !/isSupabaseConfigured\s*\?\s*\(\)\s*=>\s*setAccountOpen/.test(TONIGHT_SRC),
     'the account surface must not be gated behind isSupabaseConfigured',
   );
-  // The in-app surface still shows a guest a calm local-only state.
+  // The thin guest AccountSheet stays a real router: it still shows a guest a
+  // calm local-only state.
   assert.ok(ACCOUNT_SHEET_SRC.includes('isSupabaseConfigured'));
 });
 
@@ -1753,16 +1762,34 @@ check('AE6. reaching the account entry never clears guest baby/log data (only th
   }
 });
 
-check('AE7. the main app has an explicit, labeled account entry (not only the baby-head tap)', () => {
-  // BabyHeader exposes a dedicated, labeled account affordance separate from the
-  // baby-profile press, so the account entry is discoverable.
-  assert.ok(BABY_HEADER_SRC.includes('onAccount'), 'BabyHeader must expose a dedicated account affordance');
+check('AE7. the single account entry is the labeled, accessible baby avatar (not a hidden/bare image)', () => {
+  // AE7 exists because of a real "hidden account entry" bug — the account entry
+  // must stay DISCOVERABLE. The person-glyph button was removed and the baby
+  // avatar became the single entry, so the avatar must carry exactly what the
+  // glyph guaranteed: an explicit account label + button role + onPress. It must
+  // never regress into a bare decorative image.
+  assert.ok(
+    BABY_HEADER_SRC.includes('accessibilityLabel="Account and settings"'),
+    'the avatar entry announces itself as account/settings for discoverability + a11y',
+  );
   assert.ok(
     /accessibilityLabel="Account/.test(BABY_HEADER_SRC),
-    'the account button must be labeled for discoverability + a11y',
+    'the account entry is labeled',
   );
-  // …and Tonight actually wires it.
-  assert.ok(TONIGHT_SRC.includes('onAccount='), 'Tonight must wire the dedicated account entry');
+  assert.ok(
+    BABY_HEADER_SRC.includes('accessibilityRole="button"'),
+    'the account entry is a button role, not a bare image',
+  );
+  assert.ok(
+    BABY_HEADER_SRC.includes('onPress={onPress}'),
+    'the avatar entry has an onPress that opens the account surface',
+  );
+  // The redundant person-glyph account button is gone — the avatar is the ONE entry.
+  assert.ok(!BABY_HEADER_SRC.includes('onAccount'), 'the separate person-glyph account button was removed');
+  assert.ok(!BABY_HEADER_SRC.includes('AccountIconButton'), 'the person-glyph icon button component was removed');
+  // …and Tonight actually wires the avatar to both account surfaces.
+  assert.ok(TONIGHT_SRC.includes("router.push('/settings')"), 'Tonight routes the signed-in avatar to /settings');
+  assert.ok(TONIGHT_SRC.includes('setAccountOpen(true)'), 'Tonight routes the guest avatar to the AccountSheet');
 });
 
 check('AE8. public account entry copy is truthful for local-only Shape A', () => {
