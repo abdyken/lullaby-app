@@ -69,3 +69,6 @@ debug/
 # Retired agent/autopilot scaffolding — keep it from returning
 .claude/prompts/
 .claude-night/
+
+credentials/
+*.p8
