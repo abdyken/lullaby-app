@@ -238,7 +238,7 @@ export default function SettingsScreen() {
         </View>
 
         {/* ---- Account ---- */}
-        <View style={{ marginTop: 16 }}>
+        <View style={{ marginTop: 18 }}>
           <SectionLabel palette={palette}>Account</SectionLabel>
           <SettingsCard palette={palette}>
             {signedIn ? (
@@ -257,7 +257,7 @@ export default function SettingsScreen() {
                   onPress={handleSignOut}
                   disabled={busy}
                   style={({ pressed }) => ({
-                    marginTop: 16,
+                    marginTop: 18,
                     minHeight: 48,
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -271,92 +271,6 @@ export default function SettingsScreen() {
                     Sign out
                   </Text>
                 </Pressable>
-
-                {/* Delete account — armed inline so the destructive step is
-                    always an explicit second tap, never a slip. */}
-                <View style={{ height: 1, backgroundColor: palette.line, marginTop: 14 }} />
-                {deleteConfirming ? (
-                  <View style={{ marginTop: 12 }}>
-                    <Text
-                      style={{
-                        fontFamily: fonts.body,
-                        fontSize: 12,
-                        lineHeight: 18,
-                        color: palette.inkSoft,
-                      }}>
-                      This permanently deletes your online account and erases this baby{'’'}s
-                      profile and every log from this phone. If you created your baby{'’'}s
-                      profile, it and its shared history are removed for all caregivers too. This
-                      can{'’'}t be undone.
-                    </Text>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Permanently delete account"
-                      accessibilityState={{ busy }}
-                      onPress={() => void handleDeleteAccount()}
-                      disabled={busy}
-                      style={({ pressed }) => ({
-                        marginTop: 12,
-                        minHeight: 48,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderRadius: radii.medium,
-                        backgroundColor: colors.alertTint,
-                        opacity: pressed || busy ? 0.6 : 1,
-                      })}>
-                      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.alert }}>
-                        {busy ? 'Deleting…' : 'Permanently delete account'}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Keep my account"
-                      onPress={() => setDeleteConfirming(false)}
-                      disabled={busy}
-                      style={({ pressed }) => ({
-                        marginTop: 8,
-                        minHeight: 44,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        opacity: pressed ? 0.6 : 1,
-                      })}>
-                      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, color: palette.inkSoft }}>
-                        Keep my account
-                      </Text>
-                    </Pressable>
-                  </View>
-                ) : (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Delete account"
-                    onPress={() => {
-                      setDeleteNotice(null);
-                      setDeleteConfirming(true);
-                    }}
-                    disabled={busy}
-                    style={({ pressed }) => ({
-                      marginTop: 6,
-                      minHeight: 44,
-                      justifyContent: 'center',
-                      opacity: pressed ? 0.6 : 1,
-                    })}>
-                    <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.alert }}>
-                      Delete account
-                    </Text>
-                  </Pressable>
-                )}
-                {deleteNotice && (
-                  <Text
-                    style={{
-                      fontFamily: fonts.body,
-                      fontSize: 12,
-                      lineHeight: 18,
-                      color: palette.inkFaint,
-                      marginTop: 8,
-                    }}>
-                    {deleteNotice}
-                  </Text>
-                )}
               </>
             ) : (
               <>
@@ -369,7 +283,7 @@ export default function SettingsScreen() {
                     accessibilityLabel="Create account or sign in"
                     onPress={handleAccountEntry}
                     style={({ pressed }) => ({
-                      marginTop: 14,
+                      marginTop: 18,
                       minHeight: 48,
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -513,6 +427,99 @@ export default function SettingsScreen() {
             </Text>
           </SettingsCard>
         </View>
+
+        {/* ---- Delete account ---- */}
+        {/* The irreversible action lives in its OWN card, apart from Sign out and
+            set lower on the screen (a calm "danger zone", not a loud red banner):
+            structurally separated so it never reads as a sibling of Sign out.
+            Signed-in only; the two-step confirm + wipe order are unchanged. */}
+        {signedIn ? (
+          <View style={{ marginTop: 28 }}>
+            <SettingsCard palette={palette}>
+              {deleteConfirming ? (
+                <View>
+                  <Text
+                    style={{
+                      fontFamily: fonts.body,
+                      fontSize: 12,
+                      lineHeight: 18,
+                      color: palette.inkSoft,
+                    }}>
+                    This permanently deletes your online account and erases this baby{'’'}s
+                    profile and every log from this phone. If you created your baby{'’'}s
+                    profile, it and its shared history are removed for all caregivers too. This
+                    can{'’'}t be undone.
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Permanently delete account"
+                    accessibilityState={{ busy }}
+                    onPress={() => void handleDeleteAccount()}
+                    disabled={busy}
+                    style={({ pressed }) => ({
+                      marginTop: 14,
+                      minHeight: 48,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: radii.medium,
+                      backgroundColor: colors.alertTint,
+                      opacity: pressed || busy ? 0.6 : 1,
+                    })}>
+                    <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.alert }}>
+                      {busy ? 'Deleting…' : 'Permanently delete account'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Keep my account"
+                    onPress={() => setDeleteConfirming(false)}
+                    disabled={busy}
+                    style={({ pressed }) => ({
+                      marginTop: 8,
+                      minHeight: 44,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      opacity: pressed ? 0.6 : 1,
+                    })}>
+                    <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, color: palette.inkSoft }}>
+                      Keep my account
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete account"
+                  onPress={() => {
+                    setDeleteNotice(null);
+                    setDeleteConfirming(true);
+                  }}
+                  disabled={busy}
+                  style={({ pressed }) => ({
+                    minHeight: 44,
+                    justifyContent: 'center',
+                    opacity: pressed ? 0.6 : 1,
+                  })}>
+                  <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.alert }}>
+                    Delete account
+                  </Text>
+                </Pressable>
+              )}
+              {deleteNotice && (
+                <Text
+                  style={{
+                    fontFamily: fonts.body,
+                    fontSize: 12,
+                    lineHeight: 18,
+                    color: palette.inkFaint,
+                    marginTop: 12,
+                  }}>
+                  {deleteNotice}
+                </Text>
+              )}
+            </SettingsCard>
+          </View>
+        ) : null}
       </ScrollView>
     </>
   );
