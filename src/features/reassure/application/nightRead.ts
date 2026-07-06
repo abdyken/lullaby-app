@@ -163,6 +163,12 @@ export function useNightRead(recap: ReassureNightRecap): NightReadState {
 
     void (async () => {
       try {
+        // Cache-FIRST, keyed per (baby, night). A hit short-circuits the entire
+        // edge call — no invoke, no server work, no token spend on this device.
+        // But this local cache is only a per-DEVICE fast path; it is NOT the
+        // re-spend guarantee. The authoritative once-per-night guard is the
+        // server-side PK on reassure_night_reads (see the edge function): even a
+        // miss here returns the already-stored row without ever calling Haiku.
         const cached = await AsyncStorage.getItem(cacheKey);
         if (cancelled) return;
         if (cached != null && cached.length > 0) {
@@ -170,11 +176,19 @@ export function useNightRead(recap: ReassureNightRecap): NightReadState {
           track('reassure_night_read_shown', { source: 'cache' });
           return;
         }
+        // Local cache miss → invoke the edge function. This is the ONLY client
+        // path that can reach the model, and only after the eligible + consent
+        // gate on this effect has already passed. The server still re-checks its
+        // own cache PK first, so this actually spends a token only on the very
+        // first uncached night for this baby.
         const fetched = await fetchNightRead(babyId, nightKey);
         if (cancelled) return;
         if (fetched.kind === 'read') {
           setOutcome({ key: cacheKey, text: fetched.text });
           track('reassure_night_read_shown', { source: 'llm' });
+          // Persist locally so this device never re-invokes for this night;
+          // best-effort — a write failure just means the next open re-fetches
+          // from the fast server cache (still no re-spend, thanks to the PK).
           void AsyncStorage.setItem(cacheKey, fetched.text).catch(() => {});
           return;
         }
