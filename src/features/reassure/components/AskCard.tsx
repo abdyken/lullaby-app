@@ -10,11 +10,12 @@
  */
 import type { RefObject } from 'react';
 import { useState } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { Animated, Pressable, Text, TextInput, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { EXAMPLE_CHIPS, type ExampleChip } from '@/features/reassure/content/kb';
 import type { AskSource } from '@/features/reassure/domain/types';
+import { usePressScale } from '@/lib/usePressScale';
 import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/theme';
 
 type Props = {
@@ -28,6 +29,9 @@ export function AskCard({ surfaceMode, onAsk, inputRef }: Props) {
   const palette = surfaces[surfaceMode];
   const night = surfaceMode === 'night';
   const [text, setText] = useState('');
+  // Settled scale-0.96 press-down on the Send button; Reduce Motion ON →
+  // opacity 0.86 fallback. (The example chips stay opacity-only, out of scope.)
+  const sendPress = usePressScale();
 
   const submitText = () => {
     const trimmed = text.trim();
@@ -135,25 +139,36 @@ export function AskCard({ surfaceMode, onAsk, inputRef }: Props) {
           accessibilityRole="button"
           accessibilityLabel="Ask"
           onPress={submitText}
+          onPressIn={sendPress.onPressIn}
+          onPressOut={sendPress.onPressOut}
           hitSlop={8}
           style={({ pressed }) => ({
-            width: 38,
-            height: 38,
-            borderRadius: 19,
-            backgroundColor: colors.sleep,
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: pressed ? 0.86 : 1,
+            // RM fallback: opacity 0.86 press (no scale animation).
+            opacity: !sendPress.animate && pressed ? 0.86 : 1,
           })}>
-          <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
-            <Path
-              d="M4 12h15M13 6l6 6-6 6"
-              stroke="#fff"
-              strokeWidth={2.2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </Svg>
+          {/* Scale press-down rides the circle (transform only → no reflow). */}
+          <Animated.View
+            style={[
+              {
+                width: 38,
+                height: 38,
+                borderRadius: 19,
+                backgroundColor: colors.sleep,
+                alignItems: 'center',
+                justifyContent: 'center',
+              },
+              sendPress.transformStyle,
+            ]}>
+            <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
+              <Path
+                d="M4 12h15M13 6l6 6-6 6"
+                stroke="#fff"
+                strokeWidth={2.2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </Svg>
+          </Animated.View>
         </Pressable>
       </View>
 
