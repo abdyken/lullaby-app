@@ -1,5 +1,6 @@
-import { Pressable, Text, View } from 'react-native';
+import { Animated, Pressable, Text, View } from 'react-native';
 
+import { usePressScale } from '@/lib/usePressScale';
 import { colors, fonts } from '@/theme';
 
 type PumpActionStackProps = {
@@ -25,6 +26,9 @@ function PumpPrimaryButton({
   disabled?: boolean;
 }) {
   const inactive = disabled || !onPress;
+  // Settled scale-0.96 press-down; Reduce Motion ON → opacity 0.86 fallback.
+  // Never presses while inactive.
+  const press = usePressScale();
   return (
     <Pressable
       accessibilityRole="button"
@@ -32,12 +36,14 @@ function PumpPrimaryButton({
       accessibilityState={{ disabled: inactive }}
       disabled={inactive}
       onPress={onPress}
+      onPressIn={inactive ? undefined : press.onPressIn}
+      onPressOut={inactive ? undefined : press.onPressOut}
       style={({ pressed }) => ({
         width: '100%',
         borderRadius: 20,
-        opacity: inactive ? 0.58 : pressed ? 0.86 : 1,
+        opacity: inactive ? 0.58 : !press.animate && pressed ? 0.86 : 1,
       })}>
-      <View
+      <Animated.View
         style={{
           width: '100%',
           minHeight: 52,
@@ -52,6 +58,7 @@ function PumpPrimaryButton({
           shadowRadius: 10,
           shadowOffset: { width: 0, height: 6 },
           elevation: 5,
+          ...(inactive ? null : press.transformStyle),
         }}>
         <Text
           numberOfLines={1}
@@ -67,7 +74,7 @@ function PumpPrimaryButton({
           }}>
           {label}
         </Text>
-      </View>
+      </Animated.View>
     </Pressable>
   );
 }

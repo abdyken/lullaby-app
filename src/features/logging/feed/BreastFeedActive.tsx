@@ -11,8 +11,9 @@
  * feed, Cancel discards the session entirely (never reaches the timeline).
  */
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { usePressScale } from '@/lib/usePressScale';
 import { colors, fonts, shadows } from '@/theme';
 
 import type { BreastFeedEvent, BreastSide } from '../domain/types';
@@ -41,6 +42,8 @@ export function BreastFeedActive({
   onCancel,
 }: Props) {
   const [nowMs, setNowMs] = useState(() => Date.now());
+  // Settled scale-0.96 press-down on Finish; Reduce Motion ON → opacity 0.86.
+  const finishPress = usePressScale();
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -94,11 +97,21 @@ export function BreastFeedActive({
         accessibilityRole="button"
         accessibilityLabel="Finish feeding"
         onPress={onFinish}
+        onPressIn={finishPress.onPressIn}
+        onPressOut={finishPress.onPressOut}
         hitSlop={8}
-        style={({ pressed }) => [styles.finishPressable, { opacity: pressed ? 0.86 : 1 }]}>
-        <View style={[styles.finishSurface, { backgroundColor: accentColor, shadowColor: accentColor }]}>
+        style={({ pressed }) => [
+          styles.finishPressable,
+          { opacity: !finishPress.animate && pressed ? 0.86 : 1 },
+        ]}>
+        <Animated.View
+          style={[
+            styles.finishSurface,
+            { backgroundColor: accentColor, shadowColor: accentColor },
+            finishPress.transformStyle,
+          ]}>
           <Text style={styles.finishText}>Finish feeding</Text>
-        </View>
+        </Animated.View>
       </Pressable>
       <View style={{ height: 28 }} />
 
