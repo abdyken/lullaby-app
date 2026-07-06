@@ -5032,6 +5032,7 @@ const CORE_LOGGING_SRCS: Array<[string, string]> = [
 
 const PAYWALL_SHEET_SRC = readFileSync(new URL('../src/components/pro/PaywallSheet.tsx', import.meta.url), 'utf8');
 const PRO_PAYWALL_HOST_SRC = readFileSync(new URL('../src/components/pro/ProPaywallHost.tsx', import.meta.url), 'utf8');
+const PAYWALL_INTENT_SRC = readFileSync(new URL('../src/components/pro/paywallIntent.ts', import.meta.url), 'utf8');
 const BUILD_EXPORT_SRC = readFileSync(
   new URL('../src/features/insights/buildWeeklyExportText.ts', import.meta.url),
   'utf8',
@@ -5053,6 +5054,7 @@ const PRO_SURFACE_SRCS: Array<[string, string]> = [
   ['InsightsScreen.tsx', INSIGHTS_SCREEN_SRC],
   ['PaywallSheet.tsx', PAYWALL_SHEET_SRC],
   ['ProPaywallHost.tsx', PRO_PAYWALL_HOST_SRC],
+  ['paywallIntent.ts', PAYWALL_INTENT_SRC],
   ['buildWeeklyExportText.ts', BUILD_EXPORT_SRC],
   ['shareWeeklyExport.ts', SHARE_EXPORT_SRC],
   ['revenueCat.ts', REVENUECAT_SRC],
@@ -5482,9 +5484,9 @@ check('X8b. /settings surfaces Pro READ-ONLY via SettingsProCard (never usePro i
   // (gated on Pro-on + signed-in) and must never call usePro itself.
   assert.ok(SETTINGS_SCREEN_SRC.includes('<SettingsProCard'), 'settings renders the read-only Pro card');
   assert.ok(!/\busePro\s*\(/.test(SETTINGS_SCREEN_SRC), 'settings must not call usePro() in root scope');
-  // SettingsProCard reads entitlement via the standalone hook and must never open
-  // a paywall, purchase, or restore in root scope (that lives only in the tabs
-  // ProProvider paywall).
+  // SettingsProCard reads entitlement via the standalone hook and must never
+  // render a paywall, purchase, or restore in root scope (that lives only in the
+  // tabs ProProvider paywall).
   assert.ok(
     SETTINGS_PRO_CARD_SRC.includes('useProStatusStandalone'),
     'SettingsProCard reads Pro via the read-only standalone hook',
@@ -5496,9 +5498,33 @@ check('X8b. /settings surfaces Pro READ-ONLY via SettingsProCard (never usePro i
       `SettingsProCard must not reference ${forbidden} (purchase/paywall stays in the tabs tree)`,
     );
   }
-  // The upgrade affordance routes back into the tabs tree instead of opening a
-  // paywall in root scope.
+  // The enabled-mode upgrade affordance is a REAL paywall entry point: it records
+  // a pending paywall intent, fires paywall_opened, and routes back into the tabs
+  // tree, where the shared host consumes the intent and opens the one shared
+  // PaywallSheet. This is the data-independent route to the paywall — a signed-in
+  // free user with ZERO logged days can always buy from /settings (the Insights
+  // entry points stay gated on dataDays >= 4).
+  assert.ok(SETTINGS_PRO_CARD_SRC.includes('requestPaywall('), 'the enabled-mode affordance records the paywall intent');
+  assert.ok(
+    SETTINGS_PRO_CARD_SRC.includes("track('paywall_opened'"),
+    'the enabled-mode affordance fires paywall_opened (mirrors the Insights cards)',
+  );
   assert.ok(SETTINGS_PRO_CARD_SRC.includes('router.back()'), 'the settings upgrade affordance routes back into the tabs tree');
+  assert.ok(
+    SETTINGS_PRO_CARD_SRC.includes("track('upgrade_card_tapped'"),
+    'the preview fake-door keeps the interest signal',
+  );
+  // The host side of the handoff: consume the intent, open via the real
+  // usePro().openPaywall — the SAME shared paywall the Insights cards open.
+  assert.ok(PRO_PAYWALL_HOST_SRC.includes('consumePaywallRequest'), 'the paywall host consumes the pending intent');
+  assert.ok(PRO_PAYWALL_HOST_SRC.includes('openPaywall'), 'the paywall host opens the shared paywall on a consumed intent');
+  // The intent module itself is a pure handoff: no entitlement, no SDK, no paywall UI.
+  for (const forbidden of ['usePro', 'RevenueCat', 'Purchases', 'PaywallSheet', 'purchase', 'restore']) {
+    assert.ok(
+      !PAYWALL_INTENT_SRC.includes(forbidden),
+      `paywallIntent must not reference ${forbidden} (it is a pure pending-intent handoff)`,
+    );
+  }
   // Honest copy: names only the two real pillars.
   assert.ok(/weekly summary/i.test(SETTINGS_PRO_CARD_SRC), 'SettingsProCard names the real weekly summary');
   assert.ok(/rhythm insights/i.test(SETTINGS_PRO_CARD_SRC), 'SettingsProCard names the real rhythm insights');
