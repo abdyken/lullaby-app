@@ -17,6 +17,7 @@ import { TimelineItem } from '@/components/TimelineItem';
 import type { CareEvent } from '@/features/logging/domain/types';
 import { buildV2HistoryTimeline } from '@/features/logging/state/historyTimeline';
 import { useLogging } from '@/features/logging/state/LoggingProvider';
+import { deferToIdle } from '@/lib/deferToIdle';
 import { useLocalEvents } from '@/state/LocalEventProvider';
 import { useAuth } from '@/state/AuthProvider';
 import { useTheme } from '@/state/ThemeProvider';
@@ -193,11 +194,20 @@ export default function LogScreen() {
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      void loadAllEvents().then((events) => {
-        if (!cancelled) setHistoryEvents(events);
+      // Defer the full-history AsyncStorage read off the tab-switch frame: let
+      // the switch commit/paint first, THEN load a beat later (deferToIdle →
+      // requestIdleCallback). Same read, same result — only the timing moves,
+      // so the first focus on this tab no longer hitches. Cancel the pending
+      // idle callback on blur (plus the `cancelled` guard) so there's no
+      // setState-after-blur.
+      const cancelDeferred = deferToIdle(() => {
+        void loadAllEvents().then((events) => {
+          if (!cancelled) setHistoryEvents(events);
+        });
       });
       return () => {
         cancelled = true;
+        cancelDeferred();
       };
     }, [loadAllEvents]),
   );

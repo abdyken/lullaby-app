@@ -25,6 +25,7 @@ import { ProPaywallHost } from '@/components/pro/ProPaywallHost';
 import { LoggingProvider, useLogging } from '@/features/logging/state/LoggingProvider';
 import { LoggingToast } from '@/features/logging/ui/LoggingToast';
 import { logStartupStep } from '@/lib/startupDiagnostics';
+import { useReduceMotion } from '@/lib/useReduceMotion';
 import { useAuth } from '@/state/AuthProvider';
 import { LocalEventProvider, useLocalEvents } from '@/state/LocalEventProvider';
 import { ProProvider } from '@/state/ProProvider';
@@ -66,6 +67,13 @@ export default function TabsLayout() {
   const { mode } = useTheme();
   const background = surfaces[mode].bg;
 
+  // Reduce Motion gate for the page transition. useReduceMotion() is null until
+  // its first async read resolves — treat null (unknown) as "no motion" so an
+  // RM-ON user never catches a flash of the shift before the preference loads.
+  // Only a CONFIRMED RM-off plays the calm built-in 'shift'.
+  const reduceMotion = useReduceMotion();
+  const tabAnimation = reduceMotion === false ? 'shift' : 'none';
+
   return (
     <AuthGate>
       {/* Pro entitlement seam — usePro defaults to free; no RevenueCat/purchases
@@ -85,17 +93,32 @@ export default function TabsLayout() {
                   screenOptions={{
                     headerShown: false,
                     lazy: false,
-                    // Instant page switch — NO cross-fade. A bottom-tabs
-                    // `animation: 'fade'` renders the outgoing AND incoming screens at
-                    // the same time with interpolated opacity, so full-bleed screen
-                    // content visibly overlaps (ghosting) and the two semi-transparent
-                    // opaque screens composite into a muddy dark rectangle mid-switch.
-                    // 'none' (the navigator default) + `lazy: false` +
-                    // `detachInactiveScreens={false}` keeps all screens mounted
-                    // and just toggles which is visible, so pages switch cleanly with
-                    // no flash, ghosting, fallback frame, or first-open dependency.
-                    // The tab-bar pill keeps its own (separate) Reanimated slide.
-                    animation: 'none',
+                    // Keep every screen MOUNTED (lazy:false + detachInactiveScreens
+                    // below) so switches never pay a re-mount, but SUSPEND the React
+                    // rendering of whichever screens are blurred. Without this, a
+                    // blurred screen keeps re-rendering in the background — most
+                    // expensively Tonight, whose 1s session clock re-runs the full
+                    // timeline recompute every second even while you're on another
+                    // tab, stealing JS-thread frames and hitching the next switch.
+                    // freezeOnBlur (react-native-screens freeze) defers that
+                    // background render until the screen is refocused; it does NOT
+                    // unmount, so the switch stays instant. Orthogonal to
+                    // detachInactiveScreens (freeze = React render, detach = native
+                    // view attach) — the two compose.
+                    freezeOnBlur: true,
+                    // Calm built-in page transition — the incoming screen slides in
+                    // ('shift'), NOT 'fade'. A bottom-tabs fade renders the outgoing
+                    // AND incoming screens at once with interpolated opacity, so
+                    // full-bleed opaque screens alpha-blend into a muddy dark rectangle
+                    // mid-switch (ghosting). A slide sidesteps that: opaque pages don't
+                    // blend, they just translate. It stays cheap on top of the perf
+                    // fixes (freezeOnBlur + deferToIdle) — screens are already mounted
+                    // (lazy:false + detachInactiveScreens below), so 'shift' only
+                    // animates position, never a re-mount. Reduce Motion gated
+                    // (tabAnimation above): RM ON / not-yet-known → 'none' (instant, no
+                    // motion); RM OFF → 'shift'. Calm/settled to match the night-app
+                    // spirit — the tab-bar pill keeps its own (separate) Reanimated slide.
+                    animation: tabAnimation,
                     sceneStyle: { backgroundColor: background },
                     // Fully transparent + chrome-free ON PURPOSE: the visible bar is
                     // entirely the custom pill.
