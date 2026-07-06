@@ -21,6 +21,8 @@ import {
   resolveSupportEmail,
   resolveTermsUrl,
 } from '@/lib/appLinks';
+import { SettingsProCard } from '@/components/pro/SettingsProCard';
+import { getProMode } from '@/lib/proConfig';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/state/AuthProvider';
 import { useTheme } from '@/state/ThemeProvider';
@@ -248,42 +250,6 @@ export default function SettingsScreen() {
                       ? `Signed in as ${email}`
                       : 'Signed in'}
                 </Text>
-                <Text
-                  style={{
-                    fontFamily: fonts.body,
-                    fontSize: 12,
-                    lineHeight: 18,
-                    color: palette.inkFaint,
-                    marginTop: 6,
-                  }}>
-                  Account features are signed in here. This Apple-review build keeps logs local-first.
-                </Text>
-
-                <View
-                  accessibilityLabel="Caregiver invites coming later"
-                  style={{
-                    marginTop: 14,
-                    minHeight: 58,
-                    justifyContent: 'center',
-                    borderRadius: radii.medium,
-                    backgroundColor: colors.sleepTint,
-                    paddingHorizontal: 14,
-                  }}>
-                  <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.sleep }}>
-                    Caregiver invites
-                  </Text>
-                  <Text
-                    style={{
-                      fontFamily: fonts.body,
-                      fontSize: 12,
-                      lineHeight: 17,
-                      color: palette.inkSoft,
-                      marginTop: 2,
-                    }}>
-                    Coming later. This build keeps logs on this device.
-                  </Text>
-                </View>
-
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Sign out"
@@ -291,7 +257,7 @@ export default function SettingsScreen() {
                   onPress={handleSignOut}
                   disabled={busy}
                   style={({ pressed }) => ({
-                    marginTop: 10,
+                    marginTop: 16,
                     minHeight: 48,
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -432,6 +398,20 @@ export default function SettingsScreen() {
             )}
           </SettingsCard>
         </View>
+
+        {/* ---- Lullaby Pro ---- */}
+        {/* Pro STATUS on the root /settings screen. /settings sits OUTSIDE the
+            tabs ProProvider, so SettingsProCard reads entitlement via the
+            read-only useProStatusStandalone hook (never usePro — that would throw
+            here) and never purchases/restores/opens a paywall; its "upgrade"
+            affordance routes back into the tabs tree where those live. Signed-in
+            only (guests have no Pro); hidden entirely when Pro is off. */}
+        {getProMode() !== 'off' && signedIn ? (
+          <View style={{ marginTop: 18 }}>
+            <SectionLabel palette={palette}>Lullaby Pro</SectionLabel>
+            <SettingsProCard />
+          </View>
+        ) : null}
 
         {/* ---- Appearance ---- */}
         <View style={{ marginTop: 18 }}>

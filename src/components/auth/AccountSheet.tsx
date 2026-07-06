@@ -1,20 +1,18 @@
 /**
- * AccountSheet — a minimal account surface, reached by tapping the baby header
- * (the blueprint's stated home for settings). It exists mainly so a configured
- * build is testable: see your auth state, then either sign out (signed in) or set
- * up an account (a "continue locally" guest). Deliberately tiny — not a settings
- * dashboard.
+ * AccountSheet — the thin GUEST account router, reached by a guest tapping the
+ * baby header. The baby avatar is the single account entry, branched by auth in
+ * Tonight: a signed-in tap opens the full /settings screen (account, Pro,
+ * appearance, delete), while a guest tap opens this light sheet — a guest has no
+ * settings dashboard to manage, just the "continue locally" state and a way to
+ * create an account or sign in. Deliberately tiny.
  *
- * Reachable in any *configured* build (Tonight passes the header onPress whenever
- * Supabase is configured), for both a signed-in caregiver and a "continue
- * locally" guest, so the surface can show auth state (signed in vs guest). In the
- * unconfigured local demo the header stays inert, so demo behavior is unchanged.
+ * It still renders both auth branches (so it's safe if ever shown to a signed-in
+ * user), but in the live flow it is the guest surface. In the unconfigured local
+ * demo the guest branch shows a calm setup-required note instead of a dead button.
  */
 import { Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { UpgradeCard } from '@/components/UpgradeCard';
-import { getProMode } from '@/lib/proConfig';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/state/AuthProvider';
 import { colors, fonts, radii, shadows } from '@/theme';
@@ -79,42 +77,6 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
                     ? `Signed in as ${email}`
                     : 'Signed in'}
               </Text>
-              <Text
-                style={{
-                  fontFamily: fonts.body,
-                  fontSize: 12,
-                  lineHeight: 18,
-                  color: colors.inkFaint,
-                  marginTop: 8,
-                }}>
-                Account features are signed in here. This Apple-review build keeps logs local-first.
-              </Text>
-
-              <View
-                accessibilityLabel="Caregiver invites coming later"
-                style={{
-                  marginTop: 18,
-                  minHeight: 58,
-                  justifyContent: 'center',
-                  borderRadius: radii.medium,
-                  backgroundColor: colors.sleepTint,
-                  paddingHorizontal: 14,
-                }}>
-                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.sleep }}>
-                  Caregiver invites
-                </Text>
-                <Text
-                  style={{
-                    fontFamily: fonts.body,
-                    fontSize: 12,
-                    lineHeight: 17,
-                    color: colors.inkSoft,
-                    marginTop: 2,
-                  }}>
-                  Coming later. This build keeps logs on this device.
-                </Text>
-              </View>
-
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Sign out"
@@ -122,7 +84,7 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
                 onPress={() => void signOut()}
                 disabled={busy}
                 style={({ pressed }) => ({
-                  marginTop: 10,
+                  marginTop: 18,
                   minHeight: 48,
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -197,10 +159,9 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
             </>
           )}
 
-          {/* Lullaby Pro card — signed-in users only (never guest/local), in either
-              Pro mode: "preview" is the non-paid fake-door; "enabled" opens the
-              Phase 2 paywall. Hidden when Pro is off. */}
-          {getProMode() !== 'off' && signedIn ? <UpgradeCard source="account_sheet" /> : null}
+          {/* Lullaby Pro now lives on the dedicated /settings screen (the single
+              account home a signed-in tap opens). This sheet is the thin GUEST
+              router — a guest has no Pro to manage — so it carries no Pro card. */}
         </View>
       </View>
 

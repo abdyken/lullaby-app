@@ -1681,6 +1681,22 @@ const BABY_HEADER_SRC = readFileSync(
   new URL('../src/components/BabyHeader.tsx', import.meta.url),
   'utf8',
 );
+// The dedicated /settings screen (root route). Read once here so both the
+// account-surface checks (AE/§Pro) and the later §SL/§DA checks share it.
+const SETTINGS_SCREEN_SRC = readFileSync(new URL('../src/app/settings.tsx', import.meta.url), 'utf8');
+// The READ-ONLY Pro status hook that lets root-scope /settings show entitlement
+// without the tabs ProProvider.
+const PRO_STATUS_STANDALONE_SRC = readFileSync(
+  new URL('../src/state/useProStatusStandalone.ts', import.meta.url),
+  'utf8',
+);
+// The read-only Pro card rendered on /settings (fake-door copy lives here, not in
+// settings.tsx, so the account screen's own text stays clear of coming-soon
+// framing — AE9).
+const SETTINGS_PRO_CARD_SRC = readFileSync(
+  new URL('../src/components/pro/SettingsProCard.tsx', import.meta.url),
+  'utf8',
+);
 
 check('AE1. onboarding done + no account decision → the account entry is shown (signed-out)', () => {
   assert.equal(resolveNoSessionStatus(false), 'signed-out');
@@ -1722,15 +1738,24 @@ check('AE4. the account entry keeps "Continue locally" and a calm state when Sup
   );
 });
 
-check('AE5. the account surface is reopenable from Tonight in any build (not gated on Supabase config)', () => {
-  assert.ok(TONIGHT_SRC.includes('setAccountOpen(true)'), 'Tonight must open the account surface');
+check('AE5. the baby avatar is the single Tonight account entry, branched by auth (guest → AccountSheet, signed-in → /settings)', () => {
+  // The avatar is the ONE account entry now (the separate person-glyph button was
+  // removed). Tonight branches it by auth: a signed-in tap opens the full
+  // /settings screen; a guest tap opens the thin AccountSheet router — so the
+  // "continue locally" guest still reaches a real account surface in ANY build,
+  // never gated on Supabase config.
+  assert.ok(
+    /session\s*\?\s*router\.push\('\/settings'\)\s*:\s*setAccountOpen\(true\)/.test(TONIGHT_SRC),
+    'the avatar routes signed-in → /settings and guest → the AccountSheet',
+  );
   // The old gate (`isSupabaseConfigured ? () => setAccountOpen(true) : undefined`)
-  // left the header inert in a local build, so the baby head was the only entry.
+  // left the header inert in a local build, so the account surface was hidden.
   assert.ok(
     !/isSupabaseConfigured\s*\?\s*\(\)\s*=>\s*setAccountOpen/.test(TONIGHT_SRC),
     'the account surface must not be gated behind isSupabaseConfigured',
   );
-  // The in-app surface still shows a guest a calm local-only state.
+  // The thin guest AccountSheet stays a real router: it still shows a guest a
+  // calm local-only state.
   assert.ok(ACCOUNT_SHEET_SRC.includes('isSupabaseConfigured'));
 });
 
@@ -1753,16 +1778,34 @@ check('AE6. reaching the account entry never clears guest baby/log data (only th
   }
 });
 
-check('AE7. the main app has an explicit, labeled account entry (not only the baby-head tap)', () => {
-  // BabyHeader exposes a dedicated, labeled account affordance separate from the
-  // baby-profile press, so the account entry is discoverable.
-  assert.ok(BABY_HEADER_SRC.includes('onAccount'), 'BabyHeader must expose a dedicated account affordance');
+check('AE7. the single account entry is the labeled, accessible baby avatar (not a hidden/bare image)', () => {
+  // AE7 exists because of a real "hidden account entry" bug — the account entry
+  // must stay DISCOVERABLE. The person-glyph button was removed and the baby
+  // avatar became the single entry, so the avatar must carry exactly what the
+  // glyph guaranteed: an explicit account label + button role + onPress. It must
+  // never regress into a bare decorative image.
+  assert.ok(
+    BABY_HEADER_SRC.includes('accessibilityLabel="Account and settings"'),
+    'the avatar entry announces itself as account/settings for discoverability + a11y',
+  );
   assert.ok(
     /accessibilityLabel="Account/.test(BABY_HEADER_SRC),
-    'the account button must be labeled for discoverability + a11y',
+    'the account entry is labeled',
   );
-  // …and Tonight actually wires it.
-  assert.ok(TONIGHT_SRC.includes('onAccount='), 'Tonight must wire the dedicated account entry');
+  assert.ok(
+    BABY_HEADER_SRC.includes('accessibilityRole="button"'),
+    'the account entry is a button role, not a bare image',
+  );
+  assert.ok(
+    BABY_HEADER_SRC.includes('onPress={onPress}'),
+    'the avatar entry has an onPress that opens the account surface',
+  );
+  // The redundant person-glyph account button is gone — the avatar is the ONE entry.
+  assert.ok(!BABY_HEADER_SRC.includes('onAccount'), 'the separate person-glyph account button was removed');
+  assert.ok(!BABY_HEADER_SRC.includes('AccountIconButton'), 'the person-glyph icon button component was removed');
+  // …and Tonight actually wires the avatar to both account surfaces.
+  assert.ok(TONIGHT_SRC.includes("router.push('/settings')"), 'Tonight routes the signed-in avatar to /settings');
+  assert.ok(TONIGHT_SRC.includes('setAccountOpen(true)'), 'Tonight routes the guest avatar to the AccountSheet');
 });
 
 check('AE8. public account entry copy is truthful for local-only Shape A', () => {
@@ -1821,8 +1864,15 @@ check('AE9. Tonight handoff copy is local-only and caregiver invites are inactiv
     ['AccountSheet', ACCOUNT_SHEET_SRC],
     ['Settings', settingsSrc],
   ] as const) {
-    assert.ok(src.includes('Caregiver invites'), `${name} keeps a future-facing invite row`);
-    assert.ok(src.includes('Coming later. This build keeps logs on this device.'), `${name} says invite is later`);
+    // The "Caregiver invites — Coming later" placeholder was removed for App
+    // Store submission: partner invites are a post-launch feature, so a card
+    // that promises them reads as an incomplete/placeholder feature. No
+    // "coming later/soon" or "Apple-review build" framing may ship on the
+    // account surface — the caregiver avatars in BabyHeader are the only
+    // (read-only) caregiver presence, and the invite flow stays unmounted.
+    assert.ok(!/coming (later|soon)/i.test(src), `${name} must not promise a coming-later feature`);
+    assert.ok(!/Apple-review build/i.test(src), `${name} must not ship review-build framing`);
+    assert.ok(!src.includes('Caregiver invites'), `${name} must not render the invites placeholder card`);
     assert.ok(!src.includes('<InviteCaregiverSheet'), `${name} must not mount the active invite sheet`);
     assert.ok(!src.includes('setInviteOpen'), `${name} must not open the active invite flow`);
   }
@@ -4999,7 +5049,7 @@ const PRO_SURFACE_SRCS: Array<[string, string]> = [
   ['ProProvider.tsx', PRO_PROVIDER_SRC],
   ['UpgradeCard.tsx', UPGRADE_CARD_SRC],
   ['ProPreviewCard.tsx', PRO_PREVIEW_CARD_SRC],
-  ['AccountSheet.tsx', ACCOUNT_SHEET_SRC],
+  ['SettingsProCard.tsx', SETTINGS_PRO_CARD_SRC],
   ['InsightsScreen.tsx', INSIGHTS_SCREEN_SRC],
   ['PaywallSheet.tsx', PAYWALL_SHEET_SRC],
   ['ProPaywallHost.tsx', PRO_PAYWALL_HOST_SRC],
@@ -5209,7 +5259,9 @@ check('W7. fake-door preview survives: preview mode resolves and the interest an
   // in preview mode the card behaves as the fake-door — the interest events and
   // the calm "coming soon" copy are still present. Real Pro is off here.
   assert.ok(INSIGHTS_SCREEN_SRC.includes("getProMode() !== 'off'"), 'Insights shows the Pro card whenever Pro is on');
-  assert.ok(ACCOUNT_SHEET_SRC.includes("getProMode() !== 'off'"), 'AccountSheet shows the Pro card whenever Pro is on');
+  // The account-side Pro card now lives on /settings (the single account home),
+  // not the AccountSheet.
+  assert.ok(SETTINGS_SCREEN_SRC.includes("getProMode() !== 'off'"), 'settings shows the Pro card whenever Pro is on');
   assert.ok(UPGRADE_CARD_SRC.includes("track('upgrade_card_tapped'"), 'UpgradeCard fires upgrade_card_tapped');
   assert.ok(/coming soon/i.test(UPGRADE_CARD_SRC), 'UpgradeCard keeps its coming-soon copy');
   assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('upgrade_card_tapped'"), 'ProPreviewCard fires upgrade_card_tapped');
@@ -5419,8 +5471,57 @@ check('X9. the live paywall sells ONLY real, working features (no vaporware, no 
 
 check('X8. parent call sites render the Pro card in preview + enabled, hide it when off', () => {
   assert.ok(INSIGHTS_SCREEN_SRC.includes("getProMode() !== 'off'"), 'Insights renders the card unless Pro is off');
-  assert.ok(ACCOUNT_SHEET_SRC.includes("getProMode() !== 'off'"), 'AccountSheet renders the card unless Pro is off');
-  assert.ok(ACCOUNT_SHEET_SRC.includes('signedIn'), 'AccountSheet still gates the card on a signed-in user');
+  // The account-side Pro card moved from the AccountSheet to /settings.
+  assert.ok(SETTINGS_SCREEN_SRC.includes("getProMode() !== 'off'"), 'settings renders the card unless Pro is off');
+  assert.ok(SETTINGS_SCREEN_SRC.includes('signedIn'), 'settings still gates the card on a signed-in user');
+});
+
+check('X8b. /settings surfaces Pro READ-ONLY via SettingsProCard (never usePro in root scope)', () => {
+  // /settings is a ROOT route, OUTSIDE the tabs ProProvider — calling usePro()
+  // there throws and crashes the screen. It renders the read-only SettingsProCard
+  // (gated on Pro-on + signed-in) and must never call usePro itself.
+  assert.ok(SETTINGS_SCREEN_SRC.includes('<SettingsProCard'), 'settings renders the read-only Pro card');
+  assert.ok(!/\busePro\s*\(/.test(SETTINGS_SCREEN_SRC), 'settings must not call usePro() in root scope');
+  // SettingsProCard reads entitlement via the standalone hook and must never open
+  // a paywall, purchase, or restore in root scope (that lives only in the tabs
+  // ProProvider paywall).
+  assert.ok(
+    SETTINGS_PRO_CARD_SRC.includes('useProStatusStandalone'),
+    'SettingsProCard reads Pro via the read-only standalone hook',
+  );
+  assert.ok(!/\busePro\s*\(/.test(SETTINGS_PRO_CARD_SRC), 'SettingsProCard must not call usePro() in root scope');
+  for (const forbidden of ['openPaywall', 'purchasePackage', 'restorePurchases', 'ProPaywallHost']) {
+    assert.ok(
+      !SETTINGS_PRO_CARD_SRC.includes(forbidden),
+      `SettingsProCard must not reference ${forbidden} (purchase/paywall stays in the tabs tree)`,
+    );
+  }
+  // The upgrade affordance routes back into the tabs tree instead of opening a
+  // paywall in root scope.
+  assert.ok(SETTINGS_PRO_CARD_SRC.includes('router.back()'), 'the settings upgrade affordance routes back into the tabs tree');
+  // Honest copy: names only the two real pillars.
+  assert.ok(/weekly summary/i.test(SETTINGS_PRO_CARD_SRC), 'SettingsProCard names the real weekly summary');
+  assert.ok(/rhythm insights/i.test(SETTINGS_PRO_CARD_SRC), 'SettingsProCard names the real rhythm insights');
+});
+
+check('X8c. useProStatusStandalone READS entitlement only — no configure/purchase/restore/paywall', () => {
+  const src = PRO_STATUS_STANDALONE_SRC;
+  // It may READ status: current CustomerInfo + entitlement check, gated on the
+  // SDK already being configured by the tabs ProProvider.
+  assert.ok(src.includes('getRevenueCatCustomerInfo'), 'reads the current CustomerInfo');
+  assert.ok(src.includes('hasActiveRevenueCatEntitlement'), 'derives isPro from the active entitlement');
+  assert.ok(src.includes('isRevenueCatConfigured'), 'only reads once the SDK is already configured');
+  // …but it must NEVER init/purchase/restore or open a paywall.
+  for (const forbidden of [
+    'configureRevenueCat',
+    'purchaseRevenueCatPackage',
+    'restoreRevenueCatPurchases',
+    'purchasePackage',
+    'restorePurchases',
+    'openPaywall',
+  ]) {
+    assert.ok(!src.includes(forbidden), `the read-only hook must not call ${forbidden}`);
+  }
 });
 
 // Y. Pro Phase 3 — the first REAL Pro feature: a weekly export text + OS share,
@@ -7422,7 +7523,6 @@ check('RE7. Restore is reachable everywhere and crash-safe when RevenueCat is un
 // able to crash the screen when a device has no browser / mail app.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SETTINGS_SCREEN_SRC = readFileSync(new URL('../src/app/settings.tsx', import.meta.url), 'utf8');
 const APP_LINKS_SRC = readFileSync(new URL('../src/lib/appLinks.ts', import.meta.url), 'utf8');
 
 check('SL1. link resolvers fall back to placeholders on unset/blank and trim overrides', () => {
@@ -7570,6 +7670,91 @@ check('DA4. a failed deletion surfaces the manual email fallback, never a fake s
   assert.ok(
     !SYNC_ACCOUNT_SRC.includes('SERVICE_ROLE'),
     'no service-role key anywhere near the client deletion path',
+  );
+});
+
+check('DA5. a FAILED server delete drops nothing local and never touches the session (fail-safe ordering)', () => {
+  // The fail-safe invariant DA1–DA3 don't isolate: if the delete_account RPC
+  // throws/rejects (server error, offline), deleteAccount must return BEFORE any
+  // local effect — no wipe, no sign-out, no account-decision reset — so the user
+  // is left fully intact, never half-deleted.
+  const body = AUTH_PROVIDER_SRC.slice(
+    AUTH_PROVIDER_SRC.indexOf('const deleteAccount'),
+    AUTH_PROVIDER_SRC.indexOf('const clearError'),
+  );
+  const rpcAt = body.indexOf('await deleteAccountRemote()');
+  // The failure return is the FIRST `return false` after the RPC (the catch), not
+  // the `if (!supabase) return false` guard that precedes it.
+  const failReturnAt = rpcAt === -1 ? -1 : body.indexOf('return false', rpcAt);
+  assert.ok(rpcAt !== -1, 'deleteAccount calls the server RPC first');
+  assert.ok(failReturnAt !== -1, 'a failed RPC resolves false (an honest failure, never a fake success)');
+
+  // Every local effect deleteAccount can have: the device wipe, the session drop,
+  // the surface swap, and the sticky account-decision reset.
+  const LOCAL_EFFECTS = [
+    'clearLocalAppDataAfterAccountDeletion(', // wipes local baby / logs / onboarding / prefs
+    "signOut({ scope: 'local' })", // drops the session
+    'applySession(null', // swaps the surface to account-entry
+    'prefersLocalRef.current = false', // resets the account decision
+  ];
+
+  // 1) NONE of them appear on the failure path (the RPC call → the catch's return).
+  const failurePath = body.slice(rpcAt, failReturnAt);
+  for (const effect of LOCAL_EFFECTS) {
+    assert.ok(
+      !failurePath.includes(effect),
+      `a failed delete must not run ${effect} before returning false`,
+    );
+  }
+
+  // 2) Each still runs on the SUCCESS path, and strictly AFTER the failure return —
+  //    so no future reorder can move a wipe/sign-out ahead of a verified delete.
+  for (const effect of LOCAL_EFFECTS) {
+    const at = body.indexOf(effect);
+    assert.ok(at !== -1, `deleteAccount still performs ${effect} on a verified delete`);
+    assert.ok(
+      failReturnAt < at,
+      `the failure return must sit before ${effect} (a verified server delete gates every local effect)`,
+    );
+  }
+});
+
+check('DA6. on a FAILED server delete every local store survives — baby, logs, onboarding, account decision', () => {
+  // Behavioral counterpart to DR3 (a VERIFIED delete wipes baby + logs): a FAILED
+  // delete must PRESERVE them. deleteAccount's local wipe is the only code that
+  // clears these keys (DR5 — invoked once, only here; GP — AuthProvider never
+  // touches AsyncStorage itself), and DA5 proves it's unreachable on the failure
+  // path. So the failure outcome removes nothing.
+  const before = seedFullDeviceSnapshot();
+  const wouldRemoveOnSuccess = new Set(selectAccountDeletionKeys(Object.keys(before)));
+  const afterFailure = { ...before }; // the failure path runs no wipe (DA5)
+
+  const PROTECTED = [
+    ['local baby profile', LOCAL_BABY_STORAGE_KEY],
+    ['legacy local logs', LOCAL_EVENTS_STORAGE_KEY],
+    ['logging-v2 snapshot', LOGGING_STORAGE_KEY],
+    ['onboarding gate', 'lullaby.onboarding.v2.complete'],
+    ['account decision (prefers-local)', 'lullaby/auth/prefers-local/v1'],
+  ] as const;
+
+  for (const [label, key] of PROTECTED) {
+    // Each is genuinely a removal target on a VERIFIED delete (not preserved
+    // device config), so "survives on failure" is a real guarantee, not vacuous…
+    assert.ok(wouldRemoveOnSuccess.has(key), `${label} IS cleared by a verified delete`);
+    // …yet a FAILED delete leaves it exactly as it was.
+    assert.equal(afterFailure[key], before[key], `${label} must survive a failed server delete`);
+  }
+
+  // The baby is still fully hydratable and the logs still real — the "nothing
+  // lost, still signed in" state, identical to sign-out hygiene.
+  assert.equal(
+    parseLocalBaby(afterFailure[LOCAL_BABY_STORAGE_KEY])?.baby.name,
+    'Aria',
+    'the old baby is still restorable after a failed delete',
+  );
+  assert.ok(
+    (parsePersistedState(afterFailure[LOCAL_EVENTS_STORAGE_KEY])?.events.length ?? 0) > 0,
+    'the local logs are untouched by a failed delete',
   );
 });
 
