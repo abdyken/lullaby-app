@@ -3,67 +3,27 @@ import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg'
 
 import { formatBabyAge } from '@/data/currentState';
 import type { Baby, Caregiver } from '@/data/models';
-import { colors, fonts, shadows, surfaces, type SurfaceMode } from '@/theme';
+import { colors, fonts, surfaces, type SurfaceMode } from '@/theme';
 import { ThemeIconButton, type ThemeToggleHandler } from './ThemeIconButton';
 
 type Props = {
   baby: Baby;
   ageWeeks: number;
   caregivers: Caregiver[];
-  onPress?: () => void;
   /**
-   * Opens the account / settings surface (Tonight pushes the dedicated /settings
-   * screen). Rendered as an explicit, labeled icon button in the header so the
-   * entry is obvious — the app must not rely on the user discovering that
-   * tapping the baby header opens the quick account sheet.
+   * Opens the account/settings surface. The baby avatar IS the single, labeled
+   * account entry (there is no separate person-glyph button anymore): Tonight
+   * routes a signed-in tap to the full /settings screen and a guest tap to the
+   * thin AccountSheet. The Pressable carries an explicit account label + button
+   * role so the entry stays discoverable and accessible — it must never read as
+   * a bare decorative image.
    */
-  onAccount?: () => void;
+  onPress?: () => void;
   onThemeToggle?: ThemeToggleHandler;
   themeToggleDisabled?: boolean;
   /** surface palette — 'day' (default) or 'night' for low-glare text */
   surfaceMode?: SurfaceMode;
 };
-
-/** A calm person glyph for the account button (stroke style matches the theme icons). */
-function AccountGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-      <Circle cx={12} cy={8} r={3.6} stroke={color} strokeWidth={2.1} />
-      <Path d="M5.5 19.5a6.5 6.5 0 0 1 13 0" stroke={color} strokeWidth={2.1} strokeLinecap="round" />
-    </Svg>
-  );
-}
-
-/**
- * The explicit account/settings entry in the header. A glass icon button mirroring
- * ThemeIconButton's surface-aware styling, so it reads as a real, tappable
- * affordance (not part of the baby illustration). Labeled for discoverability + a11y.
- */
-function AccountIconButton({ surfaceMode, onPress }: { surfaceMode: SurfaceMode; onPress: () => void }) {
-  const isNight = surfaceMode === 'night';
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Account and settings"
-      onPress={onPress}
-      hitSlop={8}
-      style={({ pressed }) => ({
-        width: 42,
-        height: 42,
-        borderRadius: 21,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: isNight ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.74)',
-        borderWidth: 1,
-        borderColor: isNight ? 'transparent' : 'rgba(255,255,255,0.88)',
-        transform: [{ scale: pressed ? 0.94 : 1 }],
-        ...shadows.card,
-        shadowColor: isNight ? 'rgb(0,0,0)' : shadows.card.shadowColor,
-      })}>
-      <AccountGlyph color={colors.sleep} />
-    </Pressable>
-  );
-}
 
 function BabyAvatar() {
   return (
@@ -94,7 +54,6 @@ export function BabyHeader({
   ageWeeks,
   caregivers,
   onPress,
-  onAccount,
   onThemeToggle,
   themeToggleDisabled = false,
   surfaceMode = 'day',
@@ -120,9 +79,14 @@ export function BabyHeader({
         paddingRight: onThemeToggle ? 54 : 2,
         position: 'relative',
       }}>
+      {/* The baby avatar is the single, labeled account entry — it carries the
+          discoverability + a11y that the removed person-glyph used to guarantee,
+          so it announces itself as "Account and settings" (button role), not a
+          bare image. Tonight decides where it goes (guest → AccountSheet,
+          signed-in → /settings). */}
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${baby.name} profile`}
+        accessibilityLabel="Account and settings"
         onPress={onPress}
         hitSlop={8}
         style={({ pressed }) => ({
@@ -179,16 +143,6 @@ export function BabyHeader({
           </View>
         ))}
       </View>
-
-      {/* Explicit, labeled account entry — sits inline left of the (absolute)
-          theme toggle, inside the reserved right padding. The extra marginLeft
-          keeps a clear, intentional gap from the caregiver avatar cluster so the
-          person glyph doesn't crowd the "+" invite chip. */}
-      {onAccount ? (
-        <View style={{ marginLeft: 8 }}>
-          <AccountIconButton surfaceMode={surfaceMode} onPress={onAccount} />
-        </View>
-      ) : null}
 
       {onThemeToggle ? (
         <View style={{ position: 'absolute', top: 6, right: 2 }}>
