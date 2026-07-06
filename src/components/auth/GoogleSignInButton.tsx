@@ -18,9 +18,10 @@
  * `signInWithGoogle()` in AuthProvider, which owns the browser round-trip, the
  * Supabase exchange, and all error/cancel copy.
  */
-import { Platform, Pressable, Text, View } from 'react-native';
+import { Animated, Platform, Pressable, Text } from 'react-native';
 
 import { isGoogleSignInConfigured } from '@/lib/googleAuth';
+import { usePressScale } from '@/lib/usePressScale';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/state/AuthProvider';
 import { colors, fonts, radii } from '@/theme';
@@ -37,6 +38,9 @@ export function GoogleSignInButton({
 } = {}) {
   const { signInWithGoogle, busy } = useAuth();
   const primary = variant === 'primary';
+  // Settled scale-0.96 press-down; Reduce Motion ON → opacity 0.86 fallback.
+  // Never presses while busy. (Hook stays above the early return below.)
+  const press = usePressScale();
 
   // Hidden unless this build can actually complete a Google sign-in: a configured
   // Supabase client + a Google OAuth client ID, on a native platform. Absent →
@@ -55,15 +59,19 @@ export function GoogleSignInButton({
         // Guard against a double-tap while a sign-in is already in flight.
         if (!busy) void signInWithGoogle();
       }}
+      onPressIn={busy ? undefined : press.onPressIn}
+      onPressOut={busy ? undefined : press.onPressOut}
       disabled={busy}
       style={({ pressed }) => ({
         borderRadius: radii.pill,
-        transform: [{ scale: pressed && !busy ? 0.98 : 1 }],
+        // Reduce Motion fallback: opacity 0.86 press (no scale animation).
+        opacity: !press.animate && pressed && !busy ? 0.86 : 1,
       })}>
       {/* Fill on an inner View so it paints reliably on Android. Flat (no shadow).
           'primary' is the filled indigo pill (the promoted account path); the
-          default 'secondary' is the quiet light-surface pill. */}
-      <View
+          default 'secondary' is the quiet light-surface pill. The scale press-down
+          rides this inner pill (transform only → no reflow). */}
+      <Animated.View
         style={{
           minHeight: primary ? 52 : 50,
           alignItems: 'center',
@@ -74,6 +82,7 @@ export function GoogleSignInButton({
           borderColor: colors.line,
           paddingHorizontal: 24,
           opacity: busy ? 0.55 : 1,
+          ...(busy ? null : press.transformStyle),
         }}>
         {/* While a sign-in is launching/completing, the label reads as progress so
             a repeated tap (already guarded above) is clearly unnecessary. */}
@@ -86,7 +95,7 @@ export function GoogleSignInButton({
           }}>
           {busy ? 'Signing in…' : 'Continue with Google'}
         </Text>
-      </View>
+      </Animated.View>
     </Pressable>
   );
 }
