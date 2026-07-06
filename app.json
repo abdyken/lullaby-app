@@ -9,7 +9,7 @@
     "userInterfaceStyle": "light",
     "ios": {
       "icon": "./assets/images/icon.png",
-      "bundleIdentifier": "com.bizhanash.lullaby",
+      "bundleIdentifier": "kz.lullaby.app",
       "supportsTablet": false,
       "usesAppleSignIn": true,
       "infoPlist": {
