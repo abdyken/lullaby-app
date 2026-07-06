@@ -17,6 +17,7 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
+  InteractionManager,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -111,18 +112,24 @@ export default function ReassureScreen() {
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      track('reassure_opened');
-      track('reassure_recap_viewed');
-      const tick = setTimeout(() => {
+      // Defer the recap analytics + range-read off the tab-switch frame so the
+      // switch commits/paints first (runAfterInteractions, replacing the old
+      // setTimeout 0). The SAME two events fire and the SAME window loads — only
+      // the timing moves, so landing on this tab no longer hitches. Cancelling
+      // the task on blur (plus the `cancelled` guard) prevents
+      // setState-after-blur.
+      const task = InteractionManager.runAfterInteractions(() => {
+        track('reassure_opened');
+        track('reassure_recap_viewed');
         const now = Date.now();
         const window = currentContextWindowFor(now);
         void loadEventsInRange({ fromMs: window.startMs, toMs: window.endMs }).then((events) => {
           if (!cancelled) setRecapSource({ now, events });
         });
-      }, 0);
+      });
       return () => {
         cancelled = true;
-        clearTimeout(tick);
+        task.cancel();
       };
     }, [loadEventsInRange, track]),
   );
