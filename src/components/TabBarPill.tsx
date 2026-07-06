@@ -41,6 +41,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TabIcon, type TabName } from '@/components/TabIcon';
+import { useReduceMotion } from '@/lib/useReduceMotion';
 import { getAccentForState, tabbar, tabbarSurfaces, type SurfaceMode } from '@/theme';
 
 const TABBAR_BORDER_WIDTH = 1;
@@ -54,6 +55,18 @@ const accent = getAccentForState('sleep');
  * stiffness sit in the "premium, settles without overshoot wobble" band.
  */
 const PILL_SPRING = { damping: 26, stiffness: 220, mass: 1 } as const;
+
+/**
+ * Subtle settled grow on the ACTIVE icon — a touch of liveliness on select.
+ * It rides the SAME `activeIndex`/`tabProgress` driver as the pill slide and
+ * colour cross-fade (no new shared value, no new spring), so it costs nothing
+ * extra on the UI thread. Derived from tabProgress it only ever eases up to
+ * 1 + this bonus and settles — PILL_SPRING's ~0.3% index overshoot maps to a
+ * sub-perceptible <0.02% scale ripple, so it reads as settled/no-bounce, in the
+ * spirit of the usePressScale (overshootClamping) standard. Kept small on
+ * purpose — a calm night app, not a toy.
+ */
+const ACTIVE_ICON_SCALE_BONUS = 0.06;
 
 /**
  * The ONE source of tab-bar frame geometry (pill width + bottom offset). Both the
@@ -113,6 +126,7 @@ function AnimatedTabItem({
   label,
   iconName,
   inactiveColor,
+  motionEnabled,
   onPress,
 }: {
   index: number;
@@ -123,6 +137,8 @@ function AnimatedTabItem({
   label: string;
   iconName: TabName;
   inactiveColor: string;
+  /** Reduce Motion gate — false (RM on / unknown) freezes the active-icon grow */
+  motionEnabled: boolean;
   onPress: () => void;
 }) {
   // Cross-fade two stacked icons (muted ↔ accent) — SVG stroke colour can't be
@@ -133,6 +149,14 @@ function AnimatedTabItem({
   const activeIconStyle = useAnimatedStyle(() => {
     return { opacity: tabProgress(activeIndex.value, index) };
   }, [index]);
+  // Settled grow on the active icon — same tabProgress driver as the cross-fade
+  // above (no new shared value/spring). RM off → flat scale 1 (instant active
+  // state, no motion). A transform on the icon's OWN box only, so it grows in
+  // place and never reflows the sibling tabs.
+  const iconScaleStyle = useAnimatedStyle(() => {
+    const grow = motionEnabled ? ACTIVE_ICON_SCALE_BONUS * tabProgress(activeIndex.value, index) : 0;
+    return { transform: [{ scale: 1 + grow }] };
+  }, [index, motionEnabled]);
 
   return (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
@@ -159,20 +183,23 @@ function AnimatedTabItem({
             alignItems: 'center',
             justifyContent: 'center',
           }}>
-          <View
-            style={{
-              width: tabbar.iconSize,
-              height: tabbar.iconSize,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}>
+          <Animated.View
+            style={[
+              {
+                width: tabbar.iconSize,
+                height: tabbar.iconSize,
+                alignItems: 'center',
+                justifyContent: 'center',
+              },
+              iconScaleStyle,
+            ]}>
             <Animated.View style={inactiveIconStyle}>
               <TabIcon name={iconName} color={inactiveColor} size={tabbar.iconSize} />
             </Animated.View>
             <Animated.View style={[{ position: 'absolute' }, activeIconStyle]}>
               <TabIcon name={iconName} color={accent.color} size={tabbar.iconSize} />
             </Animated.View>
-          </View>
+          </Animated.View>
         </View>
       </Pressable>
     </View>
@@ -192,6 +219,13 @@ export function TabBarPill({
 }) {
   const palette = tabbarSurfaces[themeMode];
   const { slotStep, pillItemWidth, pillLeft, pillTop } = pillGeometry(pillWidth);
+
+  // Reduce Motion gate for the active-icon grow, same rule as the tab 'shift'
+  // transition: useReduceMotion() is null until its async read resolves, so
+  // only a CONFIRMED RM-off (=== false) animates — null/unknown and RM-on both
+  // hold a flat, motionless active state.
+  const reduceMotion = useReduceMotion();
+  const motionEnabled = reduceMotion === false;
 
   // Single source of truth for ALL active-state visuals. Initialised to the
   // focused slot so first paint is already at rest in the right place.
@@ -256,6 +290,7 @@ export function TabBarPill({
             label={tab.label}
             iconName={tab.iconName}
             inactiveColor={palette.inactiveColor}
+            motionEnabled={motionEnabled}
             onPress={tab.onPress ?? noop}
           />
         ))}
