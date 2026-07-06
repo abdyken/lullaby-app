@@ -85,6 +85,19 @@ export default function TabsLayout() {
                   screenOptions={{
                     headerShown: false,
                     lazy: false,
+                    // Keep every screen MOUNTED (lazy:false + detachInactiveScreens
+                    // below) so switches never pay a re-mount, but SUSPEND the React
+                    // rendering of whichever screens are blurred. Without this, a
+                    // blurred screen keeps re-rendering in the background — most
+                    // expensively Tonight, whose 1s session clock re-runs the full
+                    // timeline recompute every second even while you're on another
+                    // tab, stealing JS-thread frames and hitching the next switch.
+                    // freezeOnBlur (react-native-screens freeze) defers that
+                    // background render until the screen is refocused; it does NOT
+                    // unmount, so the switch stays instant. Orthogonal to
+                    // detachInactiveScreens (freeze = React render, detach = native
+                    // view attach) — the two compose.
+                    freezeOnBlur: true,
                     // Instant page switch — NO cross-fade. A bottom-tabs
                     // `animation: 'fade'` renders the outgoing AND incoming screens at
                     // the same time with interpolated opacity, so full-bleed screen
