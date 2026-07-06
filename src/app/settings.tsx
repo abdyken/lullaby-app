@@ -21,6 +21,8 @@ import {
   resolveSupportEmail,
   resolveTermsUrl,
 } from '@/lib/appLinks';
+import { SettingsProCard } from '@/components/pro/SettingsProCard';
+import { getProMode } from '@/lib/proConfig';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/state/AuthProvider';
 import { useTheme } from '@/state/ThemeProvider';
@@ -396,6 +398,20 @@ export default function SettingsScreen() {
             )}
           </SettingsCard>
         </View>
+
+        {/* ---- Lullaby Pro ---- */}
+        {/* Pro STATUS on the root /settings screen. /settings sits OUTSIDE the
+            tabs ProProvider, so SettingsProCard reads entitlement via the
+            read-only useProStatusStandalone hook (never usePro — that would throw
+            here) and never purchases/restores/opens a paywall; its "upgrade"
+            affordance routes back into the tabs tree where those live. Signed-in
+            only (guests have no Pro); hidden entirely when Pro is off. */}
+        {getProMode() !== 'off' && signedIn ? (
+          <View style={{ marginTop: 18 }}>
+            <SectionLabel palette={palette}>Lullaby Pro</SectionLabel>
+            <SettingsProCard />
+          </View>
+        ) : null}
 
         {/* ---- Appearance ---- */}
         <View style={{ marginTop: 18 }}>

@@ -1681,6 +1681,22 @@ const BABY_HEADER_SRC = readFileSync(
   new URL('../src/components/BabyHeader.tsx', import.meta.url),
   'utf8',
 );
+// The dedicated /settings screen (root route). Read once here so both the
+// account-surface checks (AE/§Pro) and the later §SL/§DA checks share it.
+const SETTINGS_SCREEN_SRC = readFileSync(new URL('../src/app/settings.tsx', import.meta.url), 'utf8');
+// The READ-ONLY Pro status hook that lets root-scope /settings show entitlement
+// without the tabs ProProvider.
+const PRO_STATUS_STANDALONE_SRC = readFileSync(
+  new URL('../src/state/useProStatusStandalone.ts', import.meta.url),
+  'utf8',
+);
+// The read-only Pro card rendered on /settings (fake-door copy lives here, not in
+// settings.tsx, so the account screen's own text stays clear of coming-soon
+// framing — AE9).
+const SETTINGS_PRO_CARD_SRC = readFileSync(
+  new URL('../src/components/pro/SettingsProCard.tsx', import.meta.url),
+  'utf8',
+);
 
 check('AE1. onboarding done + no account decision → the account entry is shown (signed-out)', () => {
   assert.equal(resolveNoSessionStatus(false), 'signed-out');
@@ -5034,6 +5050,7 @@ const PRO_SURFACE_SRCS: Array<[string, string]> = [
   ['UpgradeCard.tsx', UPGRADE_CARD_SRC],
   ['ProPreviewCard.tsx', PRO_PREVIEW_CARD_SRC],
   ['AccountSheet.tsx', ACCOUNT_SHEET_SRC],
+  ['SettingsProCard.tsx', SETTINGS_PRO_CARD_SRC],
   ['InsightsScreen.tsx', INSIGHTS_SCREEN_SRC],
   ['PaywallSheet.tsx', PAYWALL_SHEET_SRC],
   ['ProPaywallHost.tsx', PRO_PAYWALL_HOST_SRC],
@@ -5243,7 +5260,9 @@ check('W7. fake-door preview survives: preview mode resolves and the interest an
   // in preview mode the card behaves as the fake-door — the interest events and
   // the calm "coming soon" copy are still present. Real Pro is off here.
   assert.ok(INSIGHTS_SCREEN_SRC.includes("getProMode() !== 'off'"), 'Insights shows the Pro card whenever Pro is on');
-  assert.ok(ACCOUNT_SHEET_SRC.includes("getProMode() !== 'off'"), 'AccountSheet shows the Pro card whenever Pro is on');
+  // The account-side Pro card now lives on /settings (the single account home),
+  // not the AccountSheet.
+  assert.ok(SETTINGS_SCREEN_SRC.includes("getProMode() !== 'off'"), 'settings shows the Pro card whenever Pro is on');
   assert.ok(UPGRADE_CARD_SRC.includes("track('upgrade_card_tapped'"), 'UpgradeCard fires upgrade_card_tapped');
   assert.ok(/coming soon/i.test(UPGRADE_CARD_SRC), 'UpgradeCard keeps its coming-soon copy');
   assert.ok(PRO_PREVIEW_CARD_SRC.includes("track('upgrade_card_tapped'"), 'ProPreviewCard fires upgrade_card_tapped');
@@ -5453,8 +5472,57 @@ check('X9. the live paywall sells ONLY real, working features (no vaporware, no 
 
 check('X8. parent call sites render the Pro card in preview + enabled, hide it when off', () => {
   assert.ok(INSIGHTS_SCREEN_SRC.includes("getProMode() !== 'off'"), 'Insights renders the card unless Pro is off');
-  assert.ok(ACCOUNT_SHEET_SRC.includes("getProMode() !== 'off'"), 'AccountSheet renders the card unless Pro is off');
-  assert.ok(ACCOUNT_SHEET_SRC.includes('signedIn'), 'AccountSheet still gates the card on a signed-in user');
+  // The account-side Pro card moved from the AccountSheet to /settings.
+  assert.ok(SETTINGS_SCREEN_SRC.includes("getProMode() !== 'off'"), 'settings renders the card unless Pro is off');
+  assert.ok(SETTINGS_SCREEN_SRC.includes('signedIn'), 'settings still gates the card on a signed-in user');
+});
+
+check('X8b. /settings surfaces Pro READ-ONLY via SettingsProCard (never usePro in root scope)', () => {
+  // /settings is a ROOT route, OUTSIDE the tabs ProProvider — calling usePro()
+  // there throws and crashes the screen. It renders the read-only SettingsProCard
+  // (gated on Pro-on + signed-in) and must never call usePro itself.
+  assert.ok(SETTINGS_SCREEN_SRC.includes('<SettingsProCard'), 'settings renders the read-only Pro card');
+  assert.ok(!/\busePro\s*\(/.test(SETTINGS_SCREEN_SRC), 'settings must not call usePro() in root scope');
+  // SettingsProCard reads entitlement via the standalone hook and must never open
+  // a paywall, purchase, or restore in root scope (that lives only in the tabs
+  // ProProvider paywall).
+  assert.ok(
+    SETTINGS_PRO_CARD_SRC.includes('useProStatusStandalone'),
+    'SettingsProCard reads Pro via the read-only standalone hook',
+  );
+  assert.ok(!/\busePro\s*\(/.test(SETTINGS_PRO_CARD_SRC), 'SettingsProCard must not call usePro() in root scope');
+  for (const forbidden of ['openPaywall', 'purchasePackage', 'restorePurchases', 'ProPaywallHost']) {
+    assert.ok(
+      !SETTINGS_PRO_CARD_SRC.includes(forbidden),
+      `SettingsProCard must not reference ${forbidden} (purchase/paywall stays in the tabs tree)`,
+    );
+  }
+  // The upgrade affordance routes back into the tabs tree instead of opening a
+  // paywall in root scope.
+  assert.ok(SETTINGS_PRO_CARD_SRC.includes('router.back()'), 'the settings upgrade affordance routes back into the tabs tree');
+  // Honest copy: names only the two real pillars.
+  assert.ok(/weekly summary/i.test(SETTINGS_PRO_CARD_SRC), 'SettingsProCard names the real weekly summary');
+  assert.ok(/rhythm insights/i.test(SETTINGS_PRO_CARD_SRC), 'SettingsProCard names the real rhythm insights');
+});
+
+check('X8c. useProStatusStandalone READS entitlement only — no configure/purchase/restore/paywall', () => {
+  const src = PRO_STATUS_STANDALONE_SRC;
+  // It may READ status: current CustomerInfo + entitlement check, gated on the
+  // SDK already being configured by the tabs ProProvider.
+  assert.ok(src.includes('getRevenueCatCustomerInfo'), 'reads the current CustomerInfo');
+  assert.ok(src.includes('hasActiveRevenueCatEntitlement'), 'derives isPro from the active entitlement');
+  assert.ok(src.includes('isRevenueCatConfigured'), 'only reads once the SDK is already configured');
+  // …but it must NEVER init/purchase/restore or open a paywall.
+  for (const forbidden of [
+    'configureRevenueCat',
+    'purchaseRevenueCatPackage',
+    'restoreRevenueCatPurchases',
+    'purchasePackage',
+    'restorePurchases',
+    'openPaywall',
+  ]) {
+    assert.ok(!src.includes(forbidden), `the read-only hook must not call ${forbidden}`);
+  }
 });
 
 // Y. Pro Phase 3 — the first REAL Pro feature: a weekly export text + OS share,
@@ -7456,7 +7524,6 @@ check('RE7. Restore is reachable everywhere and crash-safe when RevenueCat is un
 // able to crash the screen when a device has no browser / mail app.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SETTINGS_SCREEN_SRC = readFileSync(new URL('../src/app/settings.tsx', import.meta.url), 'utf8');
 const APP_LINKS_SRC = readFileSync(new URL('../src/lib/appLinks.ts', import.meta.url), 'utf8');
 
 check('SL1. link resolvers fall back to placeholders on unset/blank and trim overrides', () => {
