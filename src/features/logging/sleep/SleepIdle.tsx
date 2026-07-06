@@ -12,9 +12,10 @@
  * the two visible menu cards.
  */
 import { useState, type ReactNode } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Animated, Pressable, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
+import { usePressScale } from '@/lib/usePressScale';
 import { colors, fonts } from '@/theme';
 import { formatCompactDuration } from '../timer/sessionMath';
 import { useElapsedTime } from '../timer/useElapsedTime';
@@ -197,18 +198,23 @@ function FilledButton({
   disabled?: boolean;
   onPress: () => void;
 }) {
+  // Settled scale-0.96 press-down; Reduce Motion ON → opacity 0.86 fallback.
+  // Never presses while disabled.
+  const press = usePressScale();
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       disabled={disabled}
       onPress={disabled ? undefined : onPress}
+      onPressIn={disabled ? undefined : press.onPressIn}
+      onPressOut={disabled ? undefined : press.onPressOut}
       style={({ pressed }) => ({
         width: '100%',
         borderRadius: 20,
-        opacity: disabled ? 0.5 : pressed ? 0.86 : 1,
+        opacity: disabled ? 0.5 : !press.animate && pressed ? 0.86 : 1,
       })}>
-      <View
+      <Animated.View
         style={{
           width: '100%',
           minHeight: 52,
@@ -223,9 +229,10 @@ function FilledButton({
           shadowRadius: 13,
           shadowOffset: { width: 0, height: 9 },
           elevation: 8,
+          ...(disabled ? null : press.transformStyle),
         }}>
         <Text style={{ fontFamily: fonts.bodyBold, fontSize: 15.5, color: colors.white }}>{label}</Text>
-      </View>
+      </Animated.View>
     </Pressable>
   );
 }
