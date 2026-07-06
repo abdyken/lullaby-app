@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, Text, View } from 'react-native';
+import { Animated, Pressable, Text, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
+import { PRESS_SPRING } from '@/lib/usePressScale';
+import { useReduceMotion } from '@/lib/useReduceMotion';
 import { colors, fonts, radii } from '@/theme';
 
 type Props = {
@@ -16,8 +18,6 @@ type Props = {
 const BUTTON_MIN_WIDTH = 190;
 const BUTTON_HEIGHT = 50;
 const ICON_SLOT_SIZE = 18;
-const PRESS_IN_MS = 105;
-const PRESS_OUT_MS = 165;
 
 function hasActionIcon(label: string): boolean {
   return label === 'Start sleep' || label === 'Wake baby' || label === 'Baby woke up';
@@ -71,14 +71,17 @@ export function PrimaryActionButton({
   onPress,
   animateColor = true,
   pressOpacity = 0.95,
-  pressScale,
+  pressScale = 0.96,
 }: Props) {
+  const reduceMotion = useReduceMotion();
   const [colorProgress] = useState(() => new Animated.Value(1));
   const [pressProgress] = useState(() => new Animated.Value(0));
   const previousAccent = useRef(accentColor);
   const [colorPair, setColorPair] = useState({ from: accentColor, to: accentColor });
-  const usesAnimatedPress = pressScale !== undefined;
-  const tactilePressScale = pressScale ?? 1;
+  // Scale-on-press is the default for these primary actions; Reduce Motion ON
+  // disables the animation and falls back to an opacity 0.86 press below.
+  const usesAnimatedPress = reduceMotion !== true;
+  const tactilePressScale = pressScale;
   const showIcon = hasActionIcon(label);
 
   useEffect(() => {
@@ -116,13 +119,9 @@ export function PrimaryActionButton({
     outputRange: [1, pressOpacity],
   });
 
-  const animatePress = (toValue: number, duration: number, easing: (value: number) => number) => {
-    Animated.timing(pressProgress, {
-      toValue,
-      duration,
-      easing,
-      useNativeDriver: true,
-    }).start();
+  // Gentle, settled press spring (no overshoot — see PRESS_SPRING).
+  const animatePress = (toValue: number) => {
+    Animated.spring(pressProgress, { toValue, ...PRESS_SPRING }).start();
   };
 
   return (
@@ -130,13 +129,14 @@ export function PrimaryActionButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
-      onPressIn={usesAnimatedPress ? () => animatePress(1, PRESS_IN_MS, Easing.out(Easing.quad)) : undefined}
-      onPressOut={usesAnimatedPress ? () => animatePress(0, PRESS_OUT_MS, Easing.out(Easing.cubic)) : undefined}
+      onPressIn={usesAnimatedPress ? () => animatePress(1) : undefined}
+      onPressOut={usesAnimatedPress ? () => animatePress(0) : undefined}
       hitSlop={8}
       style={({ pressed }) => ({
         alignSelf: 'center',
         borderRadius: radii.pill,
-        opacity: !usesAnimatedPress && pressed ? pressOpacity : 1,
+        // Reduce Motion fallback: opacity 0.86 press (no scale animation).
+        opacity: !usesAnimatedPress && pressed ? 0.86 : 1,
       })}>
       <Animated.View
         style={[
