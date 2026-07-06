@@ -10,7 +10,7 @@
  */
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { InteractionManager, Pressable, Text, View } from 'react-native';
 
 import { Screen } from '@/components/Screen';
 import { TimelineItem } from '@/components/TimelineItem';
@@ -193,11 +193,20 @@ export default function LogScreen() {
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      void loadAllEvents().then((events) => {
-        if (!cancelled) setHistoryEvents(events);
+      // Defer the full-history AsyncStorage read off the tab-switch frame: let
+      // the switch commit/paint first, THEN load a beat later
+      // (runAfterInteractions). Same read, same result — only the timing moves,
+      // so the first focus on this tab no longer hitches. Cancel the pending
+      // task on blur (plus the `cancelled` guard) so there's no
+      // setState-after-blur.
+      const task = InteractionManager.runAfterInteractions(() => {
+        void loadAllEvents().then((events) => {
+          if (!cancelled) setHistoryEvents(events);
+        });
       });
       return () => {
         cancelled = true;
+        task.cancel();
       };
     }, [loadAllEvents]),
   );

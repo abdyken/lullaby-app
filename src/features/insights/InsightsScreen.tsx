@@ -1,6 +1,6 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, InteractionManager, Pressable, Text, useWindowDimensions, View } from 'react-native';
 
 import { Screen } from '@/components/Screen';
 import { ExtendedInsightsCard } from '@/features/insights/components/ExtendedInsightsCard';
@@ -191,9 +191,17 @@ export function InsightsScreen() {
   // token on blur invalidates any in-flight load so a late resolution can't win.
   useFocusEffect(
     useCallback(() => {
-      track('insights_opened');
-      load();
+      // Defer the analytics + 7-day history load off the tab-switch frame so the
+      // switch commits/paints first (runAfterInteractions). Same event, same
+      // load — only the timing moves, so landing on Insights no longer hitches.
+      // Cancelling the task on blur, plus the requestId bump below (which
+      // invalidates any in-flight `load`), guards against setState-after-blur.
+      const task = InteractionManager.runAfterInteractions(() => {
+        track('insights_opened');
+        load();
+      });
       return () => {
+        task.cancel();
         requestIdRef.current += 1;
       };
     }, [load, track]),
