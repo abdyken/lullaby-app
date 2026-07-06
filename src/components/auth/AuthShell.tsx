@@ -11,6 +11,7 @@ import type { ReactNode, Ref } from 'react';
 import { useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -21,6 +22,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { usePressScale } from '@/lib/usePressScale';
 import { colors, fonts, radii, shadows } from '@/theme';
 
 /**
@@ -229,19 +231,26 @@ export function AuthButton({
   // A disabled CTA reads as a calm, intentionally-quiet pill (soft lavender fill,
   // faint label, no lift) — never a washed-out version of the live button.
   const isDisabled = disabled && !busy;
+  // Settled scale-0.96 press-down (spring, no overshoot); Reduce Motion ON → no
+  // scale, opacity 0.86 press instead. Never presses while busy/disabled.
+  const press = usePressScale();
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: inactive, busy }}
       onPress={onPress}
+      onPressIn={inactive ? undefined : press.onPressIn}
+      onPressOut={inactive ? undefined : press.onPressOut}
       disabled={inactive}
       style={({ pressed }) => ({
         borderRadius: radii.pill,
-        transform: [{ scale: pressed && !inactive ? 0.98 : 1 }],
+        // Reduce Motion fallback: opacity 0.86 press (no scale animation).
+        opacity: !press.animate && pressed && !inactive ? 0.86 : 1,
       })}>
-      {/* Solid fill lives on an inner View — paints reliably on Android. */}
-      <View
+      {/* Solid fill lives on an inner View — paints reliably on Android. The
+          scale press-down rides this inner pill (transform only → no reflow). */}
+      <Animated.View
         style={{
           minHeight: 52,
           alignItems: 'center',
@@ -251,6 +260,7 @@ export function AuthButton({
           paddingHorizontal: 24,
           // Lift only when the button is live, so a disabled CTA sits flat (calm).
           ...(isDisabled ? null : shadows.card),
+          ...(inactive ? null : press.transformStyle),
         }}>
         {busy ? (
           <ActivityIndicator color={colors.white} />
@@ -265,7 +275,7 @@ export function AuthButton({
             {label}
           </Text>
         )}
-      </View>
+      </Animated.View>
     </Pressable>
   );
 }
