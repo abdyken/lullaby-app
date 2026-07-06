@@ -471,7 +471,7 @@ export type HandoffSummaryResult = {
   sleepRunning: boolean;
 };
 
-function caregiverDisplayName(caregivers: Caregiver[], id: string): string | null {
+export function caregiverDisplayName(caregivers: Caregiver[], id: string): string | null {
   const match = caregivers.find((c) => c.id === id);
   return match ? match.displayName : null;
 }
