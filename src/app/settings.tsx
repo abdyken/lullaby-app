@@ -290,6 +290,9 @@ export default function SettingsScreen() {
                         Cancel
                       </Text>
                     </Pressable>
+                    {/* Real, obvious gap below Cancel (mirrors the Delete confirm's
+                        Keep→delete spacing, minus the divider — Sign out is
+                        reversible) so the action can't be an accidental neighbour. */}
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel="Sign out"
@@ -297,7 +300,7 @@ export default function SettingsScreen() {
                       onPress={handleSignOut}
                       disabled={busy}
                       style={({ pressed }) => ({
-                        marginTop: 14,
+                        marginTop: 22,
                         minHeight: 48,
                         alignItems: 'center',
                         justifyContent: 'center',
