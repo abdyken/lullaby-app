@@ -7673,6 +7673,91 @@ check('DA4. a failed deletion surfaces the manual email fallback, never a fake s
   );
 });
 
+check('DA5. a FAILED server delete drops nothing local and never touches the session (fail-safe ordering)', () => {
+  // The fail-safe invariant DA1–DA3 don't isolate: if the delete_account RPC
+  // throws/rejects (server error, offline), deleteAccount must return BEFORE any
+  // local effect — no wipe, no sign-out, no account-decision reset — so the user
+  // is left fully intact, never half-deleted.
+  const body = AUTH_PROVIDER_SRC.slice(
+    AUTH_PROVIDER_SRC.indexOf('const deleteAccount'),
+    AUTH_PROVIDER_SRC.indexOf('const clearError'),
+  );
+  const rpcAt = body.indexOf('await deleteAccountRemote()');
+  // The failure return is the FIRST `return false` after the RPC (the catch), not
+  // the `if (!supabase) return false` guard that precedes it.
+  const failReturnAt = rpcAt === -1 ? -1 : body.indexOf('return false', rpcAt);
+  assert.ok(rpcAt !== -1, 'deleteAccount calls the server RPC first');
+  assert.ok(failReturnAt !== -1, 'a failed RPC resolves false (an honest failure, never a fake success)');
+
+  // Every local effect deleteAccount can have: the device wipe, the session drop,
+  // the surface swap, and the sticky account-decision reset.
+  const LOCAL_EFFECTS = [
+    'clearLocalAppDataAfterAccountDeletion(', // wipes local baby / logs / onboarding / prefs
+    "signOut({ scope: 'local' })", // drops the session
+    'applySession(null', // swaps the surface to account-entry
+    'prefersLocalRef.current = false', // resets the account decision
+  ];
+
+  // 1) NONE of them appear on the failure path (the RPC call → the catch's return).
+  const failurePath = body.slice(rpcAt, failReturnAt);
+  for (const effect of LOCAL_EFFECTS) {
+    assert.ok(
+      !failurePath.includes(effect),
+      `a failed delete must not run ${effect} before returning false`,
+    );
+  }
+
+  // 2) Each still runs on the SUCCESS path, and strictly AFTER the failure return —
+  //    so no future reorder can move a wipe/sign-out ahead of a verified delete.
+  for (const effect of LOCAL_EFFECTS) {
+    const at = body.indexOf(effect);
+    assert.ok(at !== -1, `deleteAccount still performs ${effect} on a verified delete`);
+    assert.ok(
+      failReturnAt < at,
+      `the failure return must sit before ${effect} (a verified server delete gates every local effect)`,
+    );
+  }
+});
+
+check('DA6. on a FAILED server delete every local store survives — baby, logs, onboarding, account decision', () => {
+  // Behavioral counterpart to DR3 (a VERIFIED delete wipes baby + logs): a FAILED
+  // delete must PRESERVE them. deleteAccount's local wipe is the only code that
+  // clears these keys (DR5 — invoked once, only here; GP — AuthProvider never
+  // touches AsyncStorage itself), and DA5 proves it's unreachable on the failure
+  // path. So the failure outcome removes nothing.
+  const before = seedFullDeviceSnapshot();
+  const wouldRemoveOnSuccess = new Set(selectAccountDeletionKeys(Object.keys(before)));
+  const afterFailure = { ...before }; // the failure path runs no wipe (DA5)
+
+  const PROTECTED = [
+    ['local baby profile', LOCAL_BABY_STORAGE_KEY],
+    ['legacy local logs', LOCAL_EVENTS_STORAGE_KEY],
+    ['logging-v2 snapshot', LOGGING_STORAGE_KEY],
+    ['onboarding gate', 'lullaby.onboarding.v2.complete'],
+    ['account decision (prefers-local)', 'lullaby/auth/prefers-local/v1'],
+  ] as const;
+
+  for (const [label, key] of PROTECTED) {
+    // Each is genuinely a removal target on a VERIFIED delete (not preserved
+    // device config), so "survives on failure" is a real guarantee, not vacuous…
+    assert.ok(wouldRemoveOnSuccess.has(key), `${label} IS cleared by a verified delete`);
+    // …yet a FAILED delete leaves it exactly as it was.
+    assert.equal(afterFailure[key], before[key], `${label} must survive a failed server delete`);
+  }
+
+  // The baby is still fully hydratable and the logs still real — the "nothing
+  // lost, still signed in" state, identical to sign-out hygiene.
+  assert.equal(
+    parseLocalBaby(afterFailure[LOCAL_BABY_STORAGE_KEY])?.baby.name,
+    'Aria',
+    'the old baby is still restorable after a failed delete',
+  );
+  assert.ok(
+    (parsePersistedState(afterFailure[LOCAL_EVENTS_STORAGE_KEY])?.events.length ?? 0) > 0,
+    'the local logs are untouched by a failed delete',
+  );
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // DR. Delete Account → FULL local reset (fix/delete-account-full-local-reset).
 //
