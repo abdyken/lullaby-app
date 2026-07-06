@@ -86,7 +86,7 @@ function BabyAvatar() {
 }
 
 function initialFor(caregiver: Caregiver) {
-  return caregiver.displayName.trim().charAt(0).toUpperCase() || '+';
+  return caregiver.displayName.trim().charAt(0).toUpperCase();
 }
 
 export function BabyHeader({
@@ -99,8 +99,13 @@ export function BabyHeader({
   themeToggleDisabled = false,
   surfaceMode = 'day',
 }: Props) {
-  const stackItems = [...caregivers.slice(0, 2), undefined];
   const palette = surfaces[surfaceMode];
+  // Up to two caregiver avatars, shown as read-only "who's in this family" info.
+  const shownCaregivers = caregivers.slice(0, 2);
+  const caregiverLabel =
+    shownCaregivers.length > 0
+      ? `Caregivers: ${shownCaregivers.map((c) => c.displayName).join(', ')}`
+      : 'Caregivers';
 
   return (
     <View
@@ -138,23 +143,24 @@ export function BabyHeader({
         </View>
       </Pressable>
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Caregivers and partner handoff"
-        onPress={onPress}
-        hitSlop={8}
-        style={({ pressed }) => ({
+      {/* Caregiver avatars — informational only (who's already in this family).
+          No tap target and no "+" invite affordance: partner invites are a
+          post-launch feature, so the header must not promise them. The baby
+          avatar is the single, clear entry to the account panel. */}
+      <View
+        accessibilityRole="image"
+        accessibilityLabel={caregiverLabel}
+        style={{
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'flex-start',
           width: 69,
           height: 33,
           padding: 2,
-          transform: [{ scale: pressed ? 0.95 : 1 }],
-        })}>
-        {stackItems.map((caregiver, index) => (
+        }}>
+        {shownCaregivers.map((caregiver, index) => (
           <View
-            key={caregiver?.id ?? 'invite'}
+            key={caregiver.id}
             style={{
               position: index === 0 ? 'relative' : 'absolute',
               left: index === 0 ? 0 : index * 20,
@@ -165,14 +171,14 @@ export function BabyHeader({
               borderColor: palette.bg,
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: caregiver?.colorHex ?? colors.diaper,
+              backgroundColor: caregiver.colorHex,
             }}>
             <Text style={{ fontFamily: fonts.bodyBold, fontSize: 10.5, color: colors.white }}>
-              {caregiver ? initialFor(caregiver) : '+'}
+              {initialFor(caregiver)}
             </Text>
           </View>
         ))}
-      </Pressable>
+      </View>
 
       {/* Explicit, labeled account entry — sits inline left of the (absolute)
           theme toggle, inside the reserved right padding. The extra marginLeft
