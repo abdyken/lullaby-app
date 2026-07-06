@@ -379,12 +379,14 @@ export default function SettingsScreen() {
         </View>
 
         {/* ---- Lullaby Pro ---- */}
-        {/* Pro STATUS on the root /settings screen. /settings sits OUTSIDE the
+        {/* Pro card on the root /settings screen. /settings sits OUTSIDE the
             tabs ProProvider, so SettingsProCard reads entitlement via the
             read-only useProStatusStandalone hook (never usePro — that would throw
-            here) and never purchases/restores/opens a paywall; its "upgrade"
-            affordance routes back into the tabs tree where those live. Signed-in
-            only (guests have no Pro); hidden entirely when Pro is off. */}
+            here) and never purchases/restores/renders a paywall itself; its
+            "upgrade" affordance records a paywall intent and routes back into the
+            tabs tree, where ProPaywallHost opens the shared paywall. Signed-in
+            only (guests have no Pro); hidden entirely when Pro is off — so a
+            signed-in free user always has this data-independent paywall route. */}
         {getProMode() !== 'off' && signedIn ? (
           <View style={{ marginTop: 18 }}>
             <SectionLabel palette={palette}>Lullaby Pro</SectionLabel>

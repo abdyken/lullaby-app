@@ -3,11 +3,13 @@
  * screen.
  *
  * /settings sits OUTSIDE the tabs ProProvider, so this card reads entitlement via
- * useProStatusStandalone (never usePro, which would throw in root scope). It shows
- * STATUS only and never purchases, restores, or opens a paywall:
+ * useProStatusStandalone (never usePro, which would throw in root scope). It never
+ * purchases, restores, or renders a paywall itself:
  *   isPro          → a calm "Pro is active" status, no CTA.
- *   enabled + free → an affordance that routes BACK into the tabs tree, where the
- *                    real paywall + purchase/restore live (never a paywall here).
+ *   enabled + free → records a paywall intent (paywallIntent.requestPaywall) and
+ *                    routes BACK into the tabs tree, where the shared paywall host
+ *                    consumes it and opens the one shared PaywallSheet — the real
+ *                    paywall + purchase/restore live only there, never here.
  *   preview (fake) → the fake-door: records the interest signal + a calm
  *                    "coming soon" line.
  *
@@ -21,6 +23,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
+import { requestPaywall } from '@/components/pro/paywallIntent';
 import { useAnalytics } from '@/lib/useAnalytics';
 import { useTheme } from '@/state/ThemeProvider';
 import { useProStatusStandalone } from '@/state/useProStatusStandalone';
@@ -34,15 +37,18 @@ export function SettingsProCard() {
   const palette = surfaces[mode];
 
   const onPress = () => {
-    // Interest signal from the settings surface. In a live (enabled) build we
-    // route BACK into the tabs tree — the real paywall + purchase/restore live
-    // there, never on this root screen. The preview fake-door shows a calm
-    // coming-soon note. Either way, this mutates no entitlement.
-    track('upgrade_card_tapped', { source: 'settings' });
+    // In a live (enabled) build: record the paywall intent, then route BACK into
+    // the tabs tree — the shared paywall host consumes it there and opens the one
+    // shared PaywallSheet (purchase/restore never live on this root screen). The
+    // preview fake-door keeps the interest signal + a calm coming-soon note.
+    // Either way, this mutates no entitlement.
     if (proMode === 'enabled') {
+      track('paywall_opened', { source: 'settings', surface: 'settings_pro_card' });
+      requestPaywall();
       router.back();
       return;
     }
+    track('upgrade_card_tapped', { source: 'settings' });
     setTapped(true);
   };
 
