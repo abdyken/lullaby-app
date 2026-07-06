@@ -266,48 +266,50 @@ export default function SettingsScreen() {
                       }}>
                       Sign out? Your logs stay safe on this phone.
                     </Text>
-                    <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Cancel sign out"
-                        onPress={() => setSignOutConfirming(false)}
-                        disabled={busy}
-                        style={({ pressed }) => ({
-                          flex: 1,
-                          minHeight: 48,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          borderRadius: radii.medium,
-                          borderWidth: 1,
-                          borderColor: palette.line,
-                          opacity: pressed ? 0.6 : 1,
-                        })}>
-                        <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: palette.inkSoft }}>
-                          Cancel
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Sign out"
-                        accessibilityState={{ busy }}
-                        onPress={handleSignOut}
-                        disabled={busy}
-                        style={({ pressed }) => ({
-                          flex: 1,
-                          minHeight: 48,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          borderRadius: radii.medium,
-                          backgroundColor: isNight ? 'rgba(255,255,255,0.06)' : colors.surfaceSoft,
-                          borderWidth: 1,
-                          borderColor: palette.line,
-                          opacity: pressed || busy ? 0.6 : 1,
-                        })}>
-                        <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.feed }}>
-                          Sign out
-                        </Text>
-                      </Pressable>
-                    </View>
+                    {/* Stacked, not a tight row: the safe Cancel sits on top and
+                        Sign out is a full button-height below it, so a thumb aiming
+                        for Cancel can't clip Sign out. Reversible, so a clear gap is
+                        enough — no heavier treatment needed. */}
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Cancel sign out"
+                      onPress={() => setSignOutConfirming(false)}
+                      disabled={busy}
+                      style={({ pressed }) => ({
+                        marginTop: 14,
+                        minHeight: 50,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: radii.medium,
+                        backgroundColor: isNight ? 'rgba(255,255,255,0.06)' : colors.surfaceSoft,
+                        borderWidth: 1,
+                        borderColor: palette.line,
+                        opacity: pressed ? 0.6 : 1,
+                      })}>
+                      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: palette.ink }}>
+                        Cancel
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Sign out"
+                      accessibilityState={{ busy }}
+                      onPress={handleSignOut}
+                      disabled={busy}
+                      style={({ pressed }) => ({
+                        marginTop: 14,
+                        minHeight: 48,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: radii.medium,
+                        borderWidth: 1,
+                        borderColor: palette.line,
+                        opacity: pressed || busy ? 0.6 : 1,
+                      })}>
+                      <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.feed }}>
+                        Sign out
+                      </Text>
+                    </Pressable>
                   </View>
                 ) : (
                   <Pressable
@@ -510,6 +512,32 @@ export default function SettingsScreen() {
                     profile, it and its shared history are removed for all caregivers too. This
                     can{'’'}t be undone.
                   </Text>
+                  {/* Safety-by-placement: the safe "Keep" is the prominent, first,
+                      easy-to-hit control right under the warning. The irreversible
+                      delete is deliberately restrained (a plain text button, no
+                      fill) and set APART below a divider + generous gap, so it is
+                      never an accidental neighbour of Keep and needs deliberate aim. */}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Keep my account"
+                    onPress={() => setDeleteConfirming(false)}
+                    disabled={busy}
+                    style={({ pressed }) => ({
+                      marginTop: 16,
+                      minHeight: 52,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: radii.medium,
+                      backgroundColor: isNight ? 'rgba(255,255,255,0.06)' : colors.surfaceSoft,
+                      borderWidth: 1,
+                      borderColor: palette.line,
+                      opacity: pressed ? 0.6 : 1,
+                    })}>
+                    <Text style={{ fontFamily: fonts.bodyBold, fontSize: 15, color: palette.ink }}>
+                      Keep my account
+                    </Text>
+                  </Pressable>
+                  <View style={{ height: 1, backgroundColor: palette.line, marginTop: 22 }} />
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Permanently delete account"
@@ -517,32 +545,15 @@ export default function SettingsScreen() {
                     onPress={() => void handleDeleteAccount()}
                     disabled={busy}
                     style={({ pressed }) => ({
-                      marginTop: 14,
+                      marginTop: 22,
                       minHeight: 48,
                       alignItems: 'center',
                       justifyContent: 'center',
                       borderRadius: radii.medium,
-                      backgroundColor: colors.alertTint,
                       opacity: pressed || busy ? 0.6 : 1,
                     })}>
-                    <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.alert }}>
+                    <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.alert }}>
                       {busy ? 'Deleting…' : 'Permanently delete account'}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Keep my account"
-                    onPress={() => setDeleteConfirming(false)}
-                    disabled={busy}
-                    style={({ pressed }) => ({
-                      marginTop: 8,
-                      minHeight: 44,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      opacity: pressed ? 0.6 : 1,
-                    })}>
-                    <Text style={{ fontFamily: fonts.bodyBold, fontSize: 13, color: palette.inkSoft }}>
-                      Keep my account
                     </Text>
                   </Pressable>
                 </View>
