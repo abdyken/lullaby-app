@@ -1821,8 +1821,15 @@ check('AE9. Tonight handoff copy is local-only and caregiver invites are inactiv
     ['AccountSheet', ACCOUNT_SHEET_SRC],
     ['Settings', settingsSrc],
   ] as const) {
-    assert.ok(src.includes('Caregiver invites'), `${name} keeps a future-facing invite row`);
-    assert.ok(src.includes('Coming later. This build keeps logs on this device.'), `${name} says invite is later`);
+    // The "Caregiver invites — Coming later" placeholder was removed for App
+    // Store submission: partner invites are a post-launch feature, so a card
+    // that promises them reads as an incomplete/placeholder feature. No
+    // "coming later/soon" or "Apple-review build" framing may ship on the
+    // account surface — the caregiver avatars in BabyHeader are the only
+    // (read-only) caregiver presence, and the invite flow stays unmounted.
+    assert.ok(!/coming (later|soon)/i.test(src), `${name} must not promise a coming-later feature`);
+    assert.ok(!/Apple-review build/i.test(src), `${name} must not ship review-build framing`);
+    assert.ok(!src.includes('Caregiver invites'), `${name} must not render the invites placeholder card`);
     assert.ok(!src.includes('<InviteCaregiverSheet'), `${name} must not mount the active invite sheet`);
     assert.ok(!src.includes('setInviteOpen'), `${name} must not open the active invite flow`);
   }

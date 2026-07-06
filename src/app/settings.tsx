@@ -248,42 +248,6 @@ export default function SettingsScreen() {
                       ? `Signed in as ${email}`
                       : 'Signed in'}
                 </Text>
-                <Text
-                  style={{
-                    fontFamily: fonts.body,
-                    fontSize: 12,
-                    lineHeight: 18,
-                    color: palette.inkFaint,
-                    marginTop: 6,
-                  }}>
-                  Account features are signed in here. This Apple-review build keeps logs local-first.
-                </Text>
-
-                <View
-                  accessibilityLabel="Caregiver invites coming later"
-                  style={{
-                    marginTop: 14,
-                    minHeight: 58,
-                    justifyContent: 'center',
-                    borderRadius: radii.medium,
-                    backgroundColor: colors.sleepTint,
-                    paddingHorizontal: 14,
-                  }}>
-                  <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.sleep }}>
-                    Caregiver invites
-                  </Text>
-                  <Text
-                    style={{
-                      fontFamily: fonts.body,
-                      fontSize: 12,
-                      lineHeight: 17,
-                      color: palette.inkSoft,
-                      marginTop: 2,
-                    }}>
-                    Coming later. This build keeps logs on this device.
-                  </Text>
-                </View>
-
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Sign out"
@@ -291,7 +255,7 @@ export default function SettingsScreen() {
                   onPress={handleSignOut}
                   disabled={busy}
                   style={({ pressed }) => ({
-                    marginTop: 10,
+                    marginTop: 16,
                     minHeight: 48,
                     alignItems: 'center',
                     justifyContent: 'center',

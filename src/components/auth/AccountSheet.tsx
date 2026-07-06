@@ -79,42 +79,6 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
                     ? `Signed in as ${email}`
                     : 'Signed in'}
               </Text>
-              <Text
-                style={{
-                  fontFamily: fonts.body,
-                  fontSize: 12,
-                  lineHeight: 18,
-                  color: colors.inkFaint,
-                  marginTop: 8,
-                }}>
-                Account features are signed in here. This Apple-review build keeps logs local-first.
-              </Text>
-
-              <View
-                accessibilityLabel="Caregiver invites coming later"
-                style={{
-                  marginTop: 18,
-                  minHeight: 58,
-                  justifyContent: 'center',
-                  borderRadius: radii.medium,
-                  backgroundColor: colors.sleepTint,
-                  paddingHorizontal: 14,
-                }}>
-                <Text style={{ fontFamily: fonts.bodyBold, fontSize: 14, color: colors.sleep }}>
-                  Caregiver invites
-                </Text>
-                <Text
-                  style={{
-                    fontFamily: fonts.body,
-                    fontSize: 12,
-                    lineHeight: 17,
-                    color: colors.inkSoft,
-                    marginTop: 2,
-                  }}>
-                  Coming later. This build keeps logs on this device.
-                </Text>
-              </View>
-
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Sign out"
@@ -122,7 +86,7 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
                 onPress={() => void signOut()}
                 disabled={busy}
                 style={({ pressed }) => ({
-                  marginTop: 10,
+                  marginTop: 18,
                   minHeight: 48,
                   alignItems: 'center',
                   justifyContent: 'center',
