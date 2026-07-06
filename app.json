@@ -15,7 +15,8 @@
       "infoPlist": {
         "NSSpeechRecognitionUsageDescription": "Lullaby uses speech recognition to hear your question and route it to a safe answer.",
         "NSMicrophoneUsageDescription": "Lullaby uses the microphone so you can ask a question hands-free.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Lullaby may display images from your photo library if you choose to select one. Your photos are never accessed or uploaded without your action."
       },
       "privacyManifests": {
         "NSPrivacyTracking": false,
@@ -24,7 +25,9 @@
         "NSPrivacyAccessedAPITypes": [
           {
             "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
-            "NSPrivacyAccessedAPITypeReasons": ["CA92.1"]
+            "NSPrivacyAccessedAPITypeReasons": [
+              "CA92.1"
+            ]
           }
         ]
       }
