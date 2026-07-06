@@ -5049,7 +5049,6 @@ const PRO_SURFACE_SRCS: Array<[string, string]> = [
   ['ProProvider.tsx', PRO_PROVIDER_SRC],
   ['UpgradeCard.tsx', UPGRADE_CARD_SRC],
   ['ProPreviewCard.tsx', PRO_PREVIEW_CARD_SRC],
-  ['AccountSheet.tsx', ACCOUNT_SHEET_SRC],
   ['SettingsProCard.tsx', SETTINGS_PRO_CARD_SRC],
   ['InsightsScreen.tsx', INSIGHTS_SCREEN_SRC],
   ['PaywallSheet.tsx', PAYWALL_SHEET_SRC],
