@@ -48,6 +48,7 @@ import { currentContextWindowFor } from '@/features/reassure/domain/nightWindow'
 import { buildReassureRecap, recapHeading } from '@/features/reassure/domain/recap';
 import { route } from '@/features/reassure/domain/router';
 import type { AskSource, ReassureTopicKey, RouteResult } from '@/features/reassure/domain/types';
+import { deferToIdle } from '@/lib/deferToIdle';
 import { useAnalytics } from '@/lib/useAnalytics';
 import { useReduceMotion } from '@/lib/useReduceMotion';
 import { useTheme } from '@/state/ThemeProvider';
@@ -111,18 +112,24 @@ export default function ReassureScreen() {
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      track('reassure_opened');
-      track('reassure_recap_viewed');
-      const tick = setTimeout(() => {
+      // Defer the recap analytics + range-read off the tab-switch frame so the
+      // switch commits/paints first (deferToIdle → requestIdleCallback,
+      // replacing the old setTimeout 0). The SAME two events fire and the SAME
+      // window loads — only the timing moves, so landing on this tab no longer
+      // hitches. Cancelling the idle callback on blur (plus the `cancelled`
+      // guard) prevents setState-after-blur.
+      const cancelDeferred = deferToIdle(() => {
+        track('reassure_opened');
+        track('reassure_recap_viewed');
         const now = Date.now();
         const window = currentContextWindowFor(now);
         void loadEventsInRange({ fromMs: window.startMs, toMs: window.endMs }).then((events) => {
           if (!cancelled) setRecapSource({ now, events });
         });
-      }, 0);
+      });
       return () => {
         cancelled = true;
-        clearTimeout(tick);
+        cancelDeferred();
       };
     }, [loadEventsInRange, track]),
   );

@@ -17,6 +17,7 @@ import {
 } from '@/features/insights/insightSelectors';
 import type { InsightStatViewModel, InsightsViewModel } from '@/features/insights/types';
 import { useLogging } from '@/features/logging/state/LoggingProvider';
+import { deferToIdle } from '@/lib/deferToIdle';
 import { useAnalytics } from '@/lib/useAnalytics';
 import { fireMilestoneOnce, reached4DataDaysMilestoneKey } from '@/lib/analyticsMilestones';
 import { getProMode } from '@/lib/proConfig';
@@ -191,9 +192,18 @@ export function InsightsScreen() {
   // token on blur invalidates any in-flight load so a late resolution can't win.
   useFocusEffect(
     useCallback(() => {
-      track('insights_opened');
-      load();
+      // Defer the analytics + 7-day history load off the tab-switch frame so the
+      // switch commits/paints first (deferToIdle → requestIdleCallback). Same
+      // event, same load — only the timing moves, so landing on Insights no
+      // longer hitches. Cancelling the idle callback on blur, plus the requestId
+      // bump below (which invalidates any in-flight `load`), guards against
+      // setState-after-blur.
+      const cancelDeferred = deferToIdle(() => {
+        track('insights_opened');
+        load();
+      });
       return () => {
+        cancelDeferred();
         requestIdRef.current += 1;
       };
     }, [load, track]),
