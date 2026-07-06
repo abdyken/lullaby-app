@@ -110,6 +110,11 @@ Deno.serve(async (req) => {
   });
 
   // 3. Cache: the (baby_id, night_key) PK is also the once-per-night rate limit.
+  //    This server PK — NOT the client's AsyncStorage cache — is the
+  //    authoritative re-spend guard: a hit returns the stored read for ANY
+  //    caregiver or device without constructing the Anthropic client or spending
+  //    a token. The row is written once (step 9); every later request for the
+  //    same night lands here and short-circuits before the model.
   const { data: cached } = await serviceClient
     .from('reassure_night_reads')
     .select('read, tallies')
@@ -165,6 +170,10 @@ Deno.serve(async (req) => {
   }
 
   // 6. The bounded Claude call.
+  //    Reached ONLY when every earlier gate let the request through: no cache
+  //    hit (step 3), tallies clean of red flags (step 5), and — just below — the
+  //    kill-switch on with an API key present. The actual anthropic.messages
+  //    .create below is the single place in this whole flow that spends a token.
   let read: string | null = null;
   let outcome: ReassureAuditOutcome = 'api_error';
   let stopReason: string | null = null;
@@ -257,7 +266,10 @@ Deno.serve(async (req) => {
     return json(200, { read: null, source: 'fallback', nightKey, tallies });
   }
 
-  // 9. Cache for every caregiver of this baby, then return.
+  // 9. Cache for every caregiver of this baby, then return. Writing this PK row
+  //    is what arms the step-3 short-circuit: from now on every request for this
+  //    (baby, night) — from any caregiver or device — returns this read with no
+  //    further model call, which is where the once-per-night guarantee lives.
   await serviceClient
     .from('reassure_night_reads')
     .upsert({ baby_id: babyId, night_key: nightKey, read, model, tallies });
