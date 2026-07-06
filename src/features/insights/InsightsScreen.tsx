@@ -1,6 +1,6 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, InteractionManager, Pressable, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, useWindowDimensions, View } from 'react-native';
 
 import { Screen } from '@/components/Screen';
 import { ExtendedInsightsCard } from '@/features/insights/components/ExtendedInsightsCard';
@@ -17,6 +17,7 @@ import {
 } from '@/features/insights/insightSelectors';
 import type { InsightStatViewModel, InsightsViewModel } from '@/features/insights/types';
 import { useLogging } from '@/features/logging/state/LoggingProvider';
+import { deferToIdle } from '@/lib/deferToIdle';
 import { useAnalytics } from '@/lib/useAnalytics';
 import { fireMilestoneOnce, reached4DataDaysMilestoneKey } from '@/lib/analyticsMilestones';
 import { getProMode } from '@/lib/proConfig';
@@ -192,16 +193,17 @@ export function InsightsScreen() {
   useFocusEffect(
     useCallback(() => {
       // Defer the analytics + 7-day history load off the tab-switch frame so the
-      // switch commits/paints first (runAfterInteractions). Same event, same
-      // load — only the timing moves, so landing on Insights no longer hitches.
-      // Cancelling the task on blur, plus the requestId bump below (which
-      // invalidates any in-flight `load`), guards against setState-after-blur.
-      const task = InteractionManager.runAfterInteractions(() => {
+      // switch commits/paints first (deferToIdle → requestIdleCallback). Same
+      // event, same load — only the timing moves, so landing on Insights no
+      // longer hitches. Cancelling the idle callback on blur, plus the requestId
+      // bump below (which invalidates any in-flight `load`), guards against
+      // setState-after-blur.
+      const cancelDeferred = deferToIdle(() => {
         track('insights_opened');
         load();
       });
       return () => {
-        task.cancel();
+        cancelDeferred();
         requestIdRef.current += 1;
       };
     }, [load, track]),
