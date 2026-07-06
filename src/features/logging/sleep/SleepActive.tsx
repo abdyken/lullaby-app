@@ -11,8 +11,9 @@
  * timeline). Mirrors `BreastFeedActive`.
  */
 import { useEffect, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Animated, Pressable, Text, View } from 'react-native';
 
+import { usePressScale } from '@/lib/usePressScale';
 import { colors, fonts, radii } from '@/theme';
 
 import type { SleepEvent } from '../domain/types';
@@ -48,17 +49,21 @@ function FilledButton({
   accentColor: string;
   onPress: () => void;
 }) {
+  // Settled scale-0.96 press-down; Reduce Motion ON → opacity 0.86 fallback.
+  const press = usePressScale();
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
+      onPressIn={press.onPressIn}
+      onPressOut={press.onPressOut}
       style={({ pressed }) => ({
         width: '100%',
         borderRadius: 20,
-        opacity: pressed ? 0.86 : 1,
+        opacity: !press.animate && pressed ? 0.86 : 1,
       })}>
-      <View
+      <Animated.View
         style={{
           width: '100%',
           minHeight: 52,
@@ -73,9 +78,10 @@ function FilledButton({
           shadowRadius: 10,
           shadowOffset: { width: 0, height: 6 },
           elevation: 5,
+          ...press.transformStyle,
         }}>
         <Text style={{ fontFamily: fonts.bodyBold, fontSize: 15.5, color: colors.white }}>{label}</Text>
-      </View>
+      </Animated.View>
     </Pressable>
   );
 }
