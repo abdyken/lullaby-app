@@ -9,19 +9,26 @@
       "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "ios": {
+        "simulator": false
+      }
     },
     "production": {
-      "autoIncrement": true
+      "distribution": "store",
+      "autoIncrement": true,
+      "ios": {
+        "simulator": false
+      }
     }
   },
   "submit": {
     "production": {
       "ios": {
         "ascApiKeyPath": "./credentials/asc-api-key.p8",
-        "ascApiKeyId": "REPLACE_WITH_KEY_ID",
-        "ascApiKeyIssuerId": "REPLACE_WITH_ISSUER_ID",
-        "ascAppId": "REPLACE_WITH_APP_ID"
+        "ascApiKeyId": "PX79QTA66D",
+        "ascApiKeyIssuerId": "98471076-df21-47cf-889e-a795244bfdc0",
+        "ascAppId": "6788094068"
       }
     }
   }
