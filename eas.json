@@ -17,6 +17,19 @@
     "production": {
       "distribution": "store",
       "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_PRO_ENABLED": "1",
+        "EXPO_PUBLIC_PRO_PREVIEW_ENABLED": "0",
+        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_FHkWtEofIXKCBbMnZiAakATrPiN",
+        "EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID": "pro",
+        "EXPO_PUBLIC_REVENUECAT_OFFERING_ID": "default",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://xhyziuvgglsrdaakpmui.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhoeXppdXZnZ2xzcmRhYWtwbXVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3OTQxODksImV4cCI6MjA5ODM3MDE4OX0.4t-cxD31JfRfyAztmAojSMSp3KzqCJzxjM54qRVBFJ8",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "803491486542-q3mmu58qm4r493lds0nnuf9naufnmj5p.apps.googleusercontent.com",
+        "EXPO_PUBLIC_PRIVACY_POLICY_URL": "https://lullaby-landing.vercel.app/privacy",
+        "EXPO_PUBLIC_TERMS_URL": "https://lullaby-landing.vercel.app/terms",
+        "EXPO_PUBLIC_SUPPORT_EMAIL": "240103091@sdu.edu.kz"
+      },
       "ios": {
         "simulator": false
       }
