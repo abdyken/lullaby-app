@@ -1,83 +1,32 @@
 /**
  * BabySetupScreen — the one-time step for a signed-in caregiver with no baby yet.
- * Two calm paths, chosen with a small segmented toggle:
  *
  *   Create → set up a NEW baby (name + age in weeks) and become its first
  *            caregiver.
- *   Join   → enter an invite CODE from a caregiver who already set up the baby,
- *            and join their shared night log.
  *
- * Both collect the caregiver's display name + role (role picks the brand color).
+ * Collects the caregiver's display name + role (role picks the brand color).
  * Copy stays honest and private — this is about your night log and your
  * caregiver, never a social/family-management surface.
+ *
+ * NOTE: the "Join with code" caregiver-invite path is intentionally hidden for
+ * this release. The invite CREATION UI (InviteCaregiverSheet) is not mounted
+ * anywhere yet, so a user can never obtain a code — leaving "Join with code" a
+ * dead end (App Store 2.1 risk). The join wiring (AuthProvider.joinWithInvite,
+ * acceptInvite, the invite RPCs/migrations) is left fully intact for a future
+ * release; only this UI entry point is removed so the path isn't reachable.
  */
 import { useEffect, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
 
 import { loadOnboardingDraft } from '@/components/onboarding/onboardingStorage';
 import type { CaregiverRole } from '@/data/models';
 import { birthDateFromWeeks, parseWeeks, weeksFromBirthDate } from '@/data/localBaby';
 import { useAuth } from '@/state/AuthProvider';
-import { colors, fonts, radii } from '@/theme';
 
 import { AuthButton, AuthField, AuthLink, AuthNote, AuthShell } from './AuthShell';
 import { RolePicker, colorForRole } from './RolePicker';
 
-type Mode = 'create' | 'join';
-
-/** Two-option segmented control (Create / Join). */
-function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
-  const options: { key: Mode; label: string }[] = [
-    { key: 'create', label: 'New baby' },
-    { key: 'join', label: 'Join with code' },
-  ];
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        backgroundColor: colors.surfaceSoft,
-        borderRadius: radii.medium,
-        borderWidth: 1,
-        borderColor: colors.line,
-        padding: 4,
-        gap: 4,
-      }}>
-      {options.map((opt) => {
-        const active = opt.key === mode;
-        return (
-          <Pressable
-            key={opt.key}
-            accessibilityRole="button"
-            accessibilityState={{ selected: active }}
-            accessibilityLabel={opt.label}
-            onPress={() => onChange(opt.key)}
-            style={{
-              flex: 1,
-              minHeight: 40,
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: radii.small,
-              backgroundColor: active ? colors.surface : 'transparent',
-            }}>
-            <Text
-              style={{
-                fontFamily: fonts.bodyBold,
-                fontSize: 13,
-                color: active ? colors.ink : colors.inkSoft,
-              }}>
-              {opt.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
 export function BabySetupScreen() {
-  const { completeSetup, joinWithInvite, signOut, busy, errorMessage, clearError, appleDisplayName, caregiver } =
-    useAuth();
-  const [mode, setMode] = useState<Mode>('create');
+  const { completeSetup, signOut, busy, errorMessage, appleDisplayName, caregiver } = useAuth();
   // Prefill "Your name" for a signed-in Apple caregiver: on their first Sign in with
   // Apple we captured the real name (appleDisplayName), and a returning Apple/account
   // user already has it on their profile (caregiver.displayName). Prefilled but fully
@@ -87,11 +36,8 @@ export function BabySetupScreen() {
   // sources are already resolved by the time this one-time screen mounts.
   const [displayName, setDisplayName] = useState(() => appleDisplayName ?? caregiver?.displayName ?? '');
   const [role, setRole] = useState<CaregiverRole>('mom');
-  // create-only
   const [babyName, setBabyName] = useState('');
   const [weeks, setWeeks] = useState('');
-  // join-only
-  const [code, setCode] = useState('');
 
   // Prefill the baby fields from the onboarding draft so a caregiver who just
   // signed in never re-enters what onboarding already collected (name + age). Only
@@ -121,7 +67,6 @@ export function BabySetupScreen() {
   const weeksValue = parseWeeks(weeks);
   const nameOk = displayName.trim().length > 0;
   const canCreate = nameOk && babyName.trim().length > 0 && weeksValue != null && !busy;
-  const canJoin = nameOk && code.trim().length >= 4 && !busy;
 
   const submitCreate = () => {
     if (!canCreate || weeksValue == null) return;
@@ -134,28 +79,12 @@ export function BabySetupScreen() {
     });
   };
 
-  const submitJoin = () => {
-    if (!canJoin) return;
-    void joinWithInvite({ displayName, role, colorHex: colorForRole(role), code });
-  };
-
-  const switchMode = (next: Mode) => {
-    clearError();
-    setMode(next);
-  };
-
   return (
     <AuthShell
       eyebrow="Almost there"
-      title={mode === 'create' ? 'Set up tonight' : 'Join a night log'}
-      subtitle={
-        mode === 'create'
-          ? 'Just a few details to start your night log. You can change these later.'
-          : 'Enter the code your caregiver shared to join the same baby.'
-      }
+      title="Set up tonight"
+      subtitle="Just a few details to start your night log. You can change these later."
       footer={<AuthLink label="Not you? Sign out" onPress={() => void signOut()} />}>
-      <ModeToggle mode={mode} onChange={switchMode} />
-
       <AuthField
         label="Your name"
         value={displayName}
@@ -169,43 +98,26 @@ export function BabySetupScreen() {
 
       <RolePicker role={role} onChange={setRole} />
 
-      {mode === 'create' ? (
-        <>
-          <AuthField
-            label="Baby's name"
-            value={babyName}
-            onChangeText={setBabyName}
-            placeholder="e.g. Mia"
-            autoCapitalize="words"
-            maxLength={40}
-          />
-          <AuthField
-            label="Age in weeks"
-            value={weeks}
-            onChangeText={setWeeks}
-            placeholder="e.g. 7"
-            keyboardType="number-pad"
-            maxLength={3}
-          />
-        </>
-      ) : (
-        <AuthField
-          label="Invite code"
-          value={code}
-          onChangeText={setCode}
-          placeholder="e.g. ABCD-EFGH"
-          autoCapitalize="none"
-          maxLength={20}
-        />
-      )}
+      <AuthField
+        label="Baby's name"
+        value={babyName}
+        onChangeText={setBabyName}
+        placeholder="e.g. Mia"
+        autoCapitalize="words"
+        maxLength={40}
+      />
+      <AuthField
+        label="Age in weeks"
+        value={weeks}
+        onChangeText={setWeeks}
+        placeholder="e.g. 7"
+        keyboardType="number-pad"
+        maxLength={3}
+      />
 
       {errorMessage != null && <AuthNote message={errorMessage} tone="error" />}
 
-      {mode === 'create' ? (
-        <AuthButton label="Start tonight" onPress={submitCreate} busy={busy} disabled={!canCreate} />
-      ) : (
-        <AuthButton label="Join baby" onPress={submitJoin} busy={busy} disabled={!canJoin} />
-      )}
+      <AuthButton label="Start tonight" onPress={submitCreate} busy={busy} disabled={!canCreate} />
     </AuthShell>
   );
 }

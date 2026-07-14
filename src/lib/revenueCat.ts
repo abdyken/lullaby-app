@@ -20,6 +20,7 @@
  */
 import { Platform } from 'react-native';
 import Purchases, {
+  STOREKIT_VERSION,
   type CustomerInfo,
   type PurchasesOffering,
   type PurchasesPackage,
@@ -51,10 +52,7 @@ export type NormalizedRcError = { code: string; message: string; cancelled: bool
 /** Discriminated result for purchase / restore. */
 export type RcPurchaseOutcome =
   | { ok: true; customerInfo: CustomerInfo }
-  // TEMP: `debug` carries the serialized raw error (code/userInfo/
-  // underlyingErrorMessage) so the on-screen debug Alert can read it without a
-  // Mac console. Remove before final production submit.
-  | { ok: false; error: NormalizedRcError; debug?: string };
+  | { ok: false; error: NormalizedRcError };
 
 /** The platform we can configure RevenueCat for, or null (web / unsupported). */
 function currentPlatform(): RevenueCatPlatform | null {
@@ -91,7 +89,16 @@ export async function configureRevenueCat(params: { userId: string | null }): Pr
   try {
     if (configuredApiKey === null) {
       // First configure this session. A null appUserID is the anonymous path.
-      Purchases.configure({ apiKey, appUserID: params.userId });
+      // Force StoreKit 1: purchases-ios 5.x defaults to StoreKit 2, whose
+      // server-side finalization hangs in sandbox — Apple reports success but the
+      // transaction never syncs, so purchasePackage never resolves and RevenueCat
+      // records 0 transactions. StoreKit 1 finalizes on-device and sidesteps that
+      // hang. iOS-only setting; a no-op on Android.
+      Purchases.configure({
+        apiKey,
+        appUserID: params.userId,
+        storeKitVersion: STOREKIT_VERSION.STOREKIT_1,
+      });
       configuredApiKey = apiKey;
       currentAppUserId = params.userId;
     } else if (params.userId !== null) {
@@ -134,6 +141,30 @@ export async function getRevenueCatCustomerInfo(): Promise<CustomerInfo | null> 
   } catch {
     return null;
   }
+}
+
+/**
+ * Subscribe to CustomerInfo updates (keeps the SDK import isolated to this
+ * module — ProProvider never imports RevenueCat directly). RevenueCat may deliver
+ * an updated CustomerInfo AFTER purchasePackage has resolved (a late/slow
+ * finalization), so a listener is how Pro flips on for those. Returns an
+ * unsubscribe function; never throws.
+ */
+export function addRevenueCatCustomerInfoListener(
+  listener: (customerInfo: CustomerInfo) => void,
+): () => void {
+  try {
+    Purchases.addCustomerInfoUpdateListener(listener);
+  } catch {
+    return () => {};
+  }
+  return () => {
+    try {
+      Purchases.removeCustomerInfoUpdateListener(listener);
+    } catch {
+      // Calm: removing a listener should never surface an error.
+    }
+  };
 }
 
 /**
@@ -180,54 +211,11 @@ export function hasActiveRevenueCatEntitlement(
 
 /** Purchase a package. A user cancel is a calm outcome, not a scary error. */
 export async function purchaseRevenueCatPackage(pkg: PurchasesPackage): Promise<RcPurchaseOutcome> {
-  // TEMP: cap the native purchase call so a hung StoreKit sheet resolves to a
-  // definitive timeout error instead of an infinite "processing" state. Remove
-  // before final production submit.
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   try {
-    const result = await Promise.race([
-      Purchases.purchasePackage(pkg),
-      new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(
-          () => reject({ code: 'timeout', message: 'purchase did not resolve in 30s' }),
-          30_000,
-        );
-      }),
-    ]);
-    const { customerInfo } = result;
-    // TEMP diagnostics (unconditional so it shows in TestFlight device console —
-    // remove before final production submit). Raw purchase result + whether the
-    // 'pro' entitlement came back active.
-    console.log('[RC] purchasePackage raw result:', JSON.stringify(result));
-    console.log('[RC] purchasePackage entitlements:', JSON.stringify(customerInfo.entitlements));
+    const { customerInfo } = await Purchases.purchasePackage(pkg);
     return { ok: true, customerInfo };
   } catch (error) {
-    // TEMP diagnostics (unconditional — remove before final production submit).
-    // Log the full error object plus the serialized form so we can see
-    // userInfo / code / underlyingErrorMessage on a hanging/failed sandbox buy.
-    const e = error as {
-      code?: unknown;
-      message?: unknown;
-      userInfo?: unknown;
-      underlyingErrorMessage?: unknown;
-    } | null;
-    console.log('[RC] purchasePackage error (raw):', error);
-    console.log('[RC] purchasePackage error (json):', JSON.stringify(error));
-    console.log('[RC] purchasePackage error fields:', {
-      code: e?.code,
-      userInfo: e?.userInfo,
-      underlyingErrorMessage: e?.underlyingErrorMessage,
-    });
-    // TEMP: serialize the raw fields so the on-screen debug Alert can show them.
-    const debug = JSON.stringify({
-      code: e?.code,
-      message: e?.message,
-      userInfo: e?.userInfo,
-      underlyingErrorMessage: e?.underlyingErrorMessage,
-    });
-    return { ok: false, error: normalizeRevenueCatError(error), debug };
-  } finally {
-    if (timeoutHandle) clearTimeout(timeoutHandle);
+    return { ok: false, error: normalizeRevenueCatError(error) };
   }
 }
 
