@@ -35,10 +35,11 @@ import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/the
  * non-medical guides render regardless — escalation is never hidden. */
 const showClinical = clinicalContentVisible(__DEV__);
 
-/* Draft-gate copy — local UX copy (not medical), shown in place of the
- * clinical KB blocks in public builds until clinician sign-off. */
+/* Pediatrician-redirect copy — local UX copy (not medical), shown in place of
+ * the clinical KB blocks in public builds. Reads as an intentional redirect to
+ * a professional, not as unfinished or withheld content. */
 const REVIEW_PENDING_LINE =
-  'Our guidance on this topic is still being reviewed, so it isn’t shown in the app yet.';
+  'For questions like this, your pediatrician or nurse line is the best next step.';
 const REVIEW_PENDING_BODY =
   'Your pediatrician or nurse line is the best place for questions like this. If anything feels urgent, call your doctor right away.';
 
