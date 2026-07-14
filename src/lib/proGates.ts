@@ -49,6 +49,18 @@ export function canUseLlmNightRead(isPro: boolean): boolean {
 }
 
 /**
+ * The AI emotional-support companion (reassure-support). Pro-only — this gates
+ * only the CONVERSATIONAL model reply, never safety. The three deterministic
+ * safety routes (infant red-flag → triage, parent-crisis → crisis, infant-
+ * medical → pediatrician) are decided in code in route()/the edge function
+ * BEFORE this gate is ever consulted, so a crisis or emergency can never be
+ * paywalled. A non-Pro parent still gets the local, non-AI support line.
+ */
+export function canUseAiSupport(isPro: boolean): boolean {
+  return isPro;
+}
+
+/**
  * Add EXTRA caregivers (the 3rd+, e.g. a read-only grandparent) — a FUTURE gate.
  *
  * Open for now (returns true regardless of `isPro`) so Phase 1 changes nothing
