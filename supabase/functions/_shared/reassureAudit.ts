@@ -13,6 +13,10 @@ export type ReassureAuditOutcome =
   | 'llm'
   // code-side short-circuits — the model was NEVER called
   | 'triage'
+  // parent-crisis / infant-medical safety short-circuits (support path). Stored
+  // as free text in the unconstrained `outcome` column, so no migration needed.
+  | 'crisis'
+  | 'medical_gated'
   | 'oos'
   | 'redflag_input'
   | 'no_api_key'
@@ -30,7 +34,7 @@ export type ReassureAuditOutcome =
 export type ReassureAuditRow = {
   user_id: string;
   baby_id: string | null;
-  kind: 'night-read' | 'topic-polish';
+  kind: 'night-read' | 'topic-polish' | 'support';
   outcome: ReassureAuditOutcome;
   request: Record<string, unknown>;
   response: unknown;

@@ -58,6 +58,174 @@ export function matchesRedFlag(normalizedText: string): boolean {
   return REDFLAGS.some((flag) => normalizedText.includes(flag));
 }
 
+// ⚠️ MIRROR of src/features/reassure/domain/parentCrisis.ts (PARENT_CRISIS,
+// matchesParentCrisis). Smoke deep-equals the two copies — keep byte-identical.
+export const PARENT_CRISIS = [
+  'kill myself',
+  'killing myself',
+  'end my life',
+  'ending my life',
+  'take my own life',
+  'hurt myself',
+  'harm myself',
+  'suicidal',
+  'suicide',
+  'want to die',
+  'wish i was dead',
+  'wish i were dead',
+  "don't want to be here",
+  'dont want to be here',
+  'do not want to be here',
+  "can't go on",
+  'cant go on',
+  'no reason to live',
+  'better off without me',
+  'everyone would be better off without me',
+  'hurt the baby',
+  'hurt my baby',
+  'harm the baby',
+  'harm my baby',
+  'kill the baby',
+  'shake the baby',
+  'shake my baby',
+  'might hurt the baby',
+  'might hurt her',
+  'might hurt him',
+  'afraid i might hurt',
+  'scared i might hurt',
+  'afraid i will hurt',
+  "can't keep her safe",
+  "can't keep him safe",
+  "can't keep the baby safe",
+  "can't keep my baby safe",
+  'cant keep her safe',
+  'cant keep him safe',
+  'cant keep the baby safe',
+  'cant keep my baby safe',
+  'unable to keep the baby safe',
+] as const;
+
+// ⚠️ MIRROR of src/features/reassure/domain/parentCrisis.ts (PARENT_CRISIS_PATTERNS).
+// Smoke parity-checks source + flags of every pattern — keep byte-identical.
+export const PARENT_CRISIS_PATTERNS: readonly RegExp[] = [
+  // — Passive / indirect suicidal ideation —
+  /what'?s the point$/,
+  /what'?s the point (anymore|of (it all|living|this|any of this|going on|even trying|carrying on|life|getting up|waking up|being here))/,
+  /(don'?t|do not|dont) want to (wake up|be alive|live|exist|go on|keep going|be here anymore)/,
+  /(wish|wishing) i (was|were|wasn'?t|wasnt) (dead|gone|never born|not here|asleep forever)/,
+  /(want|wanting) (it|this|everything|it all) to (end|stop|be over)/,
+  /(want|wanting) to (go to sleep|sleep) and (not|never) wake up/,
+  /no reason to (live|go on|keep going|be here|get up|wake up)/,
+  /tired of (being alive|living|being here|waking up|existing)/,
+  /better off (without me|if i (was|were|am|wasn'?t) ?(gone|not here|dead|not around|never born)?)/,
+  /can'?t do this anymore/,
+  // — Fear of harming the baby / intrusive thoughts —
+  // "I'll hurt him", "scared I'll hurt her", "want to hurt the baby" (excludes "hurt her feelings").
+  /\b(hurt|hurting|harm|harming)\b[^.?!]{0,12}\b(the baby|my baby|the babies|baby|him|her|them)\b(?!\s*feelings)/,
+  // drop/shake/smother/throw the baby — baby-specific object so accidental "dropped her bottle" is excluded.
+  /\b(drop|dropping|shake|shaking|smother|smothering|throw|throwing|hit|hitting)\b[^.?!]{0,12}\b(the baby|my baby|the babies)\b/,
+  // explicit intent to harm "on purpose" (any object)
+  /\b(drop|shake|hurt|harm|throw|smother|hit)\b[^.?!]{0,20}on purpose/,
+  // intrusive-thoughts framing
+  /thoughts (i|that i)? ?(don'?t|do not|dont) want to (have|think|be having)/,
+  /(intrusive|scary|dark|violent|bad|awful|terrible|disturbing|horrible|weird) thoughts/,
+  /thoughts (about|of) (hurting|harming|dropping|shaking|the baby)/,
+  // — Inability to keep the baby safe / can't be trusted —
+  /(scared|afraid|frightened|terrified|worried|nervous|anxious) to be (alone|left alone|by myself) with (the baby|my baby|him|her|them|the babies)/,
+  /(can'?t|cannot|shouldn'?t|should not) be (trusted|left)[^.?!]{0,15}(with|around|near|alone with)[^.?!]{0,12}(the baby|my baby|him|her|them|the babies)/,
+  /(don'?t|do not|dont|can'?t|cannot) trust myself/,
+  /(can'?t|cannot) keep (her|him|them|the baby|my baby|the babies|myself|us) safe/,
+  // — Wanting to escape / abandon —
+  /what if i (just )?(walk|walked|leave|left|disappear|ran|run|running|walk out|get away)/,
+  /(want|wanting|going) to (run away|disappear|vanish|escape)/,
+  /(want|wanting) to (just )?(leave|walk out|get away|drive away)( and never (come back|return))?/,
+  /(walk|walked|walking|run|ran|drive|drove) away from (it all|them|the baby|everything|my life|being a|my kids|my family|this)/,
+  /(leave|leaving|abandon|abandoning) (the baby|them|my baby|my kids|my family|everything) (behind|forever|for good)/,
+];
+
+export function matchesParentCrisis(normalizedText: string): boolean {
+  if (PARENT_CRISIS.some((phrase) => normalizedText.includes(phrase))) return true;
+  return PARENT_CRISIS_PATTERNS.some((pattern) => pattern.test(normalizedText));
+}
+
+// ⚠️ MIRROR of src/features/reassure/domain/medicalGate.ts (INFANT_MEDICAL_TERMS,
+// isInfantMedical). Smoke deep-equals the two copies — keep byte-identical.
+export const INFANT_MEDICAL_TERMS = [
+  'rash',
+  'hives',
+  'eczema',
+  'cradle cap',
+  'jaundice',
+  'jaundiced',
+  'yellow skin',
+  'yellowish',
+  'looks yellow',
+  'blotchy',
+  'birthmark',
+  'peeling skin',
+  'dry skin',
+  'diaper rash',
+  'nappy rash',
+  'eye discharge',
+  'goopy eye',
+  'pink eye',
+  'pinkeye',
+  'ear infection',
+  'her ear',
+  'his ear',
+  'earache',
+  'stuffy nose',
+  'runny nose',
+  'congested',
+  'congestion',
+  'mucus',
+  'phlegm',
+  'snot',
+  'teething',
+  'her gums',
+  'his gums',
+  'a tooth',
+  'vomit',
+  'throwing up',
+  'throw up',
+  'diarrhea',
+  'diarrhoea',
+  'constipated',
+  'constipation',
+  'reflux',
+  'colic',
+  'stool',
+  'poop color',
+  'poop colour',
+  'green poop',
+  'bloody stool',
+  'spit up blood',
+  'gaining weight',
+  'not gaining',
+  'losing weight',
+  'her weight',
+  'his weight',
+  'baby weight',
+  'how many ounces',
+  'how much formula',
+  'how much milk should',
+  'umbilical',
+  'belly button',
+  'cord stump',
+  'circumcision',
+  'swollen',
+  'a lump',
+  'a fever',
+  'temperature reading',
+  'is she sick',
+  'is he sick',
+  'is the baby sick',
+] as const;
+
+export function isInfantMedical(normalizedText: string): boolean {
+  return INFANT_MEDICAL_TERMS.some((term) => normalizedText.includes(term));
+}
+
 export type ReassureTopicKey = 'hiccups' | 'spitup' | 'gas' | 'crying' | 'sleep' | 'feeding' | 'diaper';
 
 export type ReassureTopic = {
@@ -200,4 +368,60 @@ export const TOPIC_POLISH_SYSTEM_PROMPT = [
   '4. If the parent\'s words describe anything urgent or outside the entry,',
   '   respond with the entry\'s original line unchanged.',
   'Respond with JSON matching the provided schema.',
+].join('\n');
+
+/**
+ * PLACEHOLDER — pending review (safety-owned; docs/plans/reassure-content-review.md).
+ * The support-companion system prompt. It is a BACKSTOP, not the safety gate:
+ * the three deterministic code gates (red-flag → parent-crisis → isInfantMedical)
+ * run in the edge function BEFORE this prompt is ever reached, so the model only
+ * sees non-medical parent-experience text. The prompt still refuses infant
+ * medical questions and routes crises, in case the gates ever let one through.
+ */
+export const SUPPORT_SYSTEM_PROMPT = [
+  'You are Reassure, a warm, calm companion inside Lullaby, a newborn-tracking app.',
+  'Your job is emotional support and general, non-medical reassurance for tired,',
+  'often anxious new parents — especially in the small hours. You are kind and human,',
+  'never clinical or robotic.',
+  '',
+  'You help with:',
+  '- Feelings and overwhelm ("I can\'t do this", "is it normal to feel this tired").',
+  '- Partner and relationship strain, and sharing the load ("how do I ask my husband',
+  '  to help more").',
+  '- Routine, coping with sleep loss, and small acts of self-care for the parent.',
+  '- Encouragement and perspective.',
+  '',
+  'Follow these rules in priority order — safety always comes before comfort:',
+  '',
+  '1. PARENT IN CRISIS. If the parent expresses thoughts of harming themselves or the',
+  '   baby, feeling unable to keep the baby safe, or not wanting to be here, treat it',
+  '   as urgent. Warmly and without judgment, tell them they matter and deserve',
+  '   immediate support right now — reach out to a local crisis or mental-health',
+  '   helpline, their doctor, or their local emergency number (for example, in the US',
+  '   you can call or text 988). Never minimize what they said, and never move on to',
+  '   other topics.',
+  '',
+  '2. INFANT EMERGENCY. If the message describes the baby being hard to wake, not',
+  '   breathing well, a high fever, a seizure, turning blue, or anything that sounds',
+  '   like an emergency, do not chat. Tell them clearly to contact their doctor or',
+  '   their local emergency number immediately.',
+  '',
+  '3. NO INFANT MEDICAL ADVICE. For any question about the baby\'s health, symptoms, or',
+  '   body — fever, rashes, stool color, feeding amounts, breathing, lethargy, weight,',
+  '   development, or whether something is normal — do not answer or interpret it.',
+  '   Respond warmly but redirect: "That\'s a question for your pediatrician or nurse',
+  '   line — they can look at the full picture. If anything feels urgent, call your',
+  '   doctor or emergency services right away." Never reassure a parent that a physical',
+  '   symptom is probably fine.',
+  '',
+  '4. NEVER DIAGNOSE. You are not a doctor, and you say so whenever health comes up.',
+  '   Never diagnose, and never give medical, medication, or dosage advice for the',
+  '   parent or the baby. Support the parent\'s feelings; do not certify that anyone is',
+  '   healthy or that everything is fine.',
+  '',
+  'Style: Validate the parent\'s feelings first. Then be specific, warm, and human —',
+  'not generic. Two to five short sentences. Plain, kind language. No emoji.',
+  '',
+  'Respond with JSON matching the provided schema: a single "reply" string containing',
+  'your message to the parent.',
 ].join('\n');

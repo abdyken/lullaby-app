@@ -111,6 +111,67 @@ export function validateLlmOutput(
 }
 
 /**
+ * §Support — per-job caps for the emotional-support companion (reassure-support).
+ * Roomier than the night read: a warm reply is 2–5 sentences, not two.
+ */
+export const SUPPORT_MAX_TOKENS = 320;
+export const SUPPORT_MAX_CHARS = 700;
+
+/**
+ * Medical-leak patterns the SUPPORT companion must never emit. This is the
+ * support path's guardrail register — it is DELIBERATELY NOT the JUDGEMENT_VOCAB
+ * ban used by the night read / topic polish. A warm companion legitimately says
+ * "you're doing okay" or "that's a normal way to feel", so banning okay/fine/
+ * normal/safe would discard almost every good reply. Instead we block only the
+ * things a non-clinical companion must never say: dosages, medication names,
+ * and diagnosis phrasing. A hit discards the reply → the deterministic local
+ * support line renders (over-blocking is the safe direction).
+ */
+export const SUPPORT_MEDICAL_PATTERNS: RegExp[] = [
+  // dosage amounts (mg / ml / oz / drops …)
+  /\b\d+\s?(?:mg|mcg|ml|cc|oz|ounces?|milligrams?|milliliters?|drops?)\b/i,
+  // medication / prescription vocabulary
+  /\b(?:dosage|prescrib|antibiotic|amoxicillin|ibuprofen|acetaminophen|paracetamol|tylenol|motrin)\b/i,
+  // diagnosis phrasing about the baby
+  /\b(?:diagnos|likely has|probably has|is a symptom of|sounds like (?:a|an) [a-z ]*(?:infection|virus|condition))\b/i,
+];
+
+export type SupportGuardrailFailure = 'parse' | 'length' | 'medical';
+
+export type SupportGuardrailResult =
+  | { ok: true; value: string }
+  | { ok: false; reason: SupportGuardrailFailure };
+
+/**
+ * The SUPPORT output validator: parse the model's JSON and read `key` → cap the
+ * length → reject any medical-claim/dosage/diagnosis leak (SUPPORT_MEDICAL_PATTERNS).
+ * Separate from validateLlmOutput on purpose (see SUPPORT_MEDICAL_PATTERNS).
+ */
+export function validateSupportOutput(
+  rawText: string,
+  key: string,
+  opts: { maxChars: number },
+): SupportGuardrailResult {
+  let value: unknown;
+  try {
+    const parsed = JSON.parse(rawText) as Record<string, unknown>;
+    value = parsed?.[key];
+  } catch {
+    return { ok: false, reason: 'parse' };
+  }
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return { ok: false, reason: 'parse' };
+  }
+  if (value.length > opts.maxChars) {
+    return { ok: false, reason: 'length' };
+  }
+  if (SUPPORT_MEDICAL_PATTERNS.some((pattern) => pattern.test(value))) {
+    return { ok: false, reason: 'medical' };
+  }
+  return { ok: true, value };
+}
+
+/**
  * Classify a thrown SDK error into an audit outcome. Import-free (no SDK
  * class available here), so it matches on the error's name/message — the
  * Anthropic SDK's timeout error is APIConnectionTimeoutError ("timed out").
