@@ -286,6 +286,8 @@ import type { InsightsViewModel } from '../src/features/insights/types';
 // recap leaves. All are react-native-free by design (source-scanned in §X).
 import { clinicalContentVisible } from '../src/features/reassure/domain/contentGate';
 import { REDFLAGS, matchesRedFlag } from '../src/features/reassure/domain/redflags';
+import { PARENT_CRISIS, PARENT_CRISIS_PATTERNS, matchesParentCrisis } from '../src/features/reassure/domain/parentCrisis';
+import { INFANT_MEDICAL_TERMS, isInfantMedical } from '../src/features/reassure/domain/medicalGate';
 import { normalizeAsk, route } from '../src/features/reassure/domain/router';
 import { classifyScope } from '../src/features/reassure/domain/scope';
 // Pediatrician triage-call contact — pure, RN-free helpers (device I/O + hook
@@ -330,7 +332,7 @@ import {
   resolveVoiceTranscript,
   selectVoiceTranscriptCandidate,
 } from '../src/features/reassure/domain/voiceTranscript';
-import { EXAMPLE_CHIPS, GUIDES, KB, REASSURE_CONTENT, TOPIC_ORDER } from '../src/features/reassure/content/kb';
+import { CRISIS_COPY, EXAMPLE_CHIPS, GUIDES, KB, REASSURE_CONTENT, SUPPORT_COPY, TOPIC_ORDER } from '../src/features/reassure/content/kb';
 
 // Fixed reference time so results are deterministic regardless of the real clock.
 const NOW = Date.parse('2026-06-17T00:00:00.000Z');
@@ -5916,8 +5918,8 @@ check('X4b. crying / fussy / settling asks route to the bounded crying topic', (
   assert.deepEqual(route('crying and trouble breathing'), { kind: 'triage' });
   assert.deepEqual(route('crying and feels hot'), { kind: 'triage' });
   assert.deepEqual(route('crying and blue lips'), { kind: 'triage' });
-  // Truly unrelated asks still get the bounded decline.
-  assert.deepEqual(route('which stroller should I buy'), { kind: 'oos' });
+  // Non-medical asks now reach the support companion (broad, not limited to logging).
+  assert.deepEqual(route('which stroller should I buy'), { kind: 'support' });
 });
 
 check('X4c. burping / belching / wind-after-feeds asks route to the bounded gas topic', () => {
@@ -5936,8 +5938,8 @@ check('X4c. burping / belching / wind-after-feeds asks route to the bounded gas 
   assert.deepEqual(route('burping and trouble breathing'), { kind: 'triage' });
   assert.deepEqual(route('burping and blue lips'), { kind: 'triage' });
   assert.deepEqual(route('burping and hard to wake'), { kind: 'triage' });
-  // Truly unrelated asks still get the bounded decline.
-  assert.deepEqual(route('which stroller should I buy'), { kind: 'oos' });
+  // Non-medical asks now reach the support companion (broad, not limited to logging).
+  assert.deepEqual(route('which stroller should I buy'), { kind: 'support' });
 });
 
 check('X4d. classifyScope buckets non-red-flag parent asks deterministically (v1.5)', () => {
@@ -5966,10 +5968,13 @@ check('X4e. broader parent-experience asks route to bounded local outcomes (no l
   assert.deepEqual(route('how many wet diapers is normal'), { kind: 'topic', key: 'diaper' });
   assert.deepEqual(route('poop is green'), { kind: 'topic', key: 'diaper' });
   assert.deepEqual(route('what should i log this as'), { kind: 'guide', key: 'app_logging_help' });
-  assert.deepEqual(route("i'm exhausted"), { kind: 'guide', key: 'parent_support' });
-  // logs_summary is grounded: guide only when there is saved data to point at.
+  // Parent-experience emotional support now routes to the AI companion.
+  assert.deepEqual(route("i'm exhausted"), { kind: 'support' });
+  // logs_summary stays grounded: the "your logs" guide shows ONLY when there is
+  // saved data to point at (never a hollow guide). With no data the readback is
+  // no longer a cold decline — it falls through to the support companion.
   assert.deepEqual(route('how many feeds tonight', { hasLogs: true }), { kind: 'guide', key: 'logs_summary' });
-  assert.deepEqual(route('how many feeds tonight', { hasLogs: false }), { kind: 'oos' });
+  assert.deepEqual(route('how many feeds tonight', { hasLogs: false }), { kind: 'support' });
   // None of the common parent asks are oos anymore (with data present).
   for (const ask of [
     'is she eating enough',
@@ -5981,11 +5986,13 @@ check('X4e. broader parent-experience asks route to bounded local outcomes (no l
   ]) {
     assert.notEqual(route(ask, { hasLogs: true }).kind, 'oos', `"${ask}" is no longer oos`);
   }
-  // A general baby worry with no curated topic stays a bounded decline (future: AI).
+  // A general baby worry with no curated topic is infant-medical → stays a bounded
+  // decline to the pediatrician (NEVER the AI companion).
   assert.deepEqual(route('is this normal'), { kind: 'oos' });
-  // Genuinely unrelated asks are still declined.
+  // The broad non-medical remainder (relationship, routine, general asks) now
+  // reaches the support companion rather than a bounded decline.
   for (const ask of ['which stroller should i buy', 'what is the weather', 'book a flight']) {
-    assert.deepEqual(route(ask, { hasLogs: true }), { kind: 'oos' }, `"${ask}" stays oos`);
+    assert.deepEqual(route(ask, { hasLogs: true }), { kind: 'support' }, `"${ask}" → support`);
   }
 });
 
@@ -6021,10 +6028,11 @@ check('X5. every KB topic is routable by its own title and listed in TOPIC_ORDER
   assert.equal(TOPIC_ORDER.length, Object.keys(KB).length, 'TOPIC_ORDER covers every KB topic');
 });
 
-check('X6. out-of-scope asks get the bounded decline (incl. empty input)', () => {
-  assert.deepEqual(route('what stroller should I buy'), { kind: 'oos' });
+check('X6. empty / whitespace-only input is a bounded decline — never the model', () => {
   assert.deepEqual(route(''), { kind: 'oos' });
   assert.deepEqual(route('   '), { kind: 'oos' });
+  // A non-empty non-medical ask is NOT a decline anymore — it reaches the companion.
+  assert.deepEqual(route('what stroller should I buy'), { kind: 'support' });
 });
 
 check('X7. matchesRedFlag expects normalized input and REDFLAGS is lowercase-only', () => {
@@ -6218,7 +6226,7 @@ check('X11c. local ask workflow outcomes cover typed topic, triage chip, and unk
   for (const chip of triageChips) {
     assert.deepEqual(route(chip.ask), { kind: 'triage' }, `${chip.label} routes to triage`);
   }
-  assert.deepEqual(route('what stroller should I buy'), { kind: 'oos' });
+  assert.deepEqual(route('what stroller should I buy'), { kind: 'support' });
 });
 
 check('X11d. recap wording uses current context unless a finished night is requested', () => {
@@ -6343,6 +6351,8 @@ const RX_DOMAIN_SRCS: Record<string, string> = Object.fromEntries(
   [
     'domain/types.ts',
     'domain/redflags.ts',
+    'domain/parentCrisis.ts',
+    'domain/medicalGate.ts',
     'domain/router.ts',
     'domain/scope.ts',
     'domain/voiceTranscript.ts',
@@ -6378,7 +6388,7 @@ check('X14. reassure domain/content are pure leaves (no RN, no Pro, no speech, n
       }
     }
   }
-  for (const rel of ['domain/redflags.ts'] as const) {
+  for (const rel of ['domain/redflags.ts', 'domain/parentCrisis.ts', 'domain/medicalGate.ts'] as const) {
     assert.ok(!/from '@\//.test(RX_DOMAIN_SRCS[rel]), `${rel} has zero app imports (Deno-mirrorable)`);
   }
 });
@@ -6423,6 +6433,11 @@ check('X17. the edge-function content mirror has not drifted from the app module
     REDFLAGS: readonly string[];
     KB: unknown;
     normalizeAsk: (text: string) => string;
+    PARENT_CRISIS: readonly string[];
+    PARENT_CRISIS_PATTERNS: readonly RegExp[];
+    INFANT_MEDICAL_TERMS: readonly string[];
+    matchesParentCrisis: (t: string) => boolean;
+    isInfantMedical: (t: string) => boolean;
   };
   assert.deepEqual([...mirror.REDFLAGS], [...REDFLAGS], 'REDFLAGS identical on both sides');
   assert.deepEqual(mirror.KB, KB, 'KB identical on both sides');
@@ -6431,6 +6446,179 @@ check('X17. the edge-function content mirror has not drifted from the app module
     normalizeAsk("She WON’T wake"),
     'normalization identical on both sides',
   );
+  // The two NEW safety gates are mirrored the same way — same drift tripwire.
+  assert.deepEqual([...mirror.PARENT_CRISIS], [...PARENT_CRISIS], 'PARENT_CRISIS identical on both sides');
+  assert.deepEqual(
+    [...mirror.INFANT_MEDICAL_TERMS],
+    [...INFANT_MEDICAL_TERMS],
+    'INFANT_MEDICAL_TERMS identical on both sides',
+  );
+  // Crisis regex patterns are mirrored too — compare source + flags (RegExp
+  // objects differ by identity, so match on the literal they were built from).
+  assert.deepEqual(
+    mirror.PARENT_CRISIS_PATTERNS.map((r) => r.source),
+    PARENT_CRISIS_PATTERNS.map((r) => r.source),
+    'PARENT_CRISIS_PATTERNS sources identical on both sides',
+  );
+  assert.deepEqual(
+    mirror.PARENT_CRISIS_PATTERNS.map((r) => r.flags),
+    PARENT_CRISIS_PATTERNS.map((r) => r.flags),
+    'PARENT_CRISIS_PATTERNS flags identical (non-global on both sides)',
+  );
+  // Behavioral parity across explicit + paraphrased crisis language.
+  for (const probe of [
+    'i want to hurt myself',
+    "i'm scared i'll hurt him",
+    'what if i just walked away',
+    "what's the point",
+    'i want to disappear',
+  ]) {
+    assert.equal(mirror.matchesParentCrisis(probe), matchesParentCrisis(probe), `crisis parity: "${probe}"`);
+  }
+  assert.equal(mirror.isInfantMedical('she has a rash'), isInfantMedical('she has a rash'));
+});
+
+check('XS1. parent-crisis routes to the free crisis card — after red-flag, before scope', () => {
+  // Crisis is decided in code, never the model, never a paywall.
+  assert.deepEqual(route('i want to hurt myself'), { kind: 'crisis' });
+  assert.deepEqual(route("i can't keep the baby safe"), { kind: 'crisis' });
+  assert.deepEqual(route('i might hurt the baby'), { kind: 'crisis' });
+  assert.deepEqual(route("i don't want to be here anymore"), { kind: 'crisis' });
+  // Infant red-flag STILL wins over crisis (gate 1 before gate 2) — both escalate.
+  assert.deepEqual(route('she has a fever and i want to die'), { kind: 'triage' });
+  // Crisis wins over a parent-support scope match.
+  assert.deepEqual(route('so exhausted and i want to die'), { kind: 'crisis' });
+  // matchesParentCrisis expects normalized input.
+  assert.equal(matchesParentCrisis('i want to hurt myself'), true);
+  assert.equal(matchesParentCrisis('i am tired tonight'), false);
+});
+
+check('XS1b. INDIRECT / paraphrased crisis language routes to crisis — NOT to Anthropic', () => {
+  // Every one of these must resolve to the free crisis card. Because only a
+  // { kind:'support' } result ever calls the reassure-support edge function,
+  // asserting kind==='crisis' also proves the ask NEVER reaches Anthropic.
+  const indirectCrisis = [
+    // passive / indirect suicidal ideation
+    "i don't want to be here",
+    'everyone would be better off without me',
+    "i can't go on",
+    "what's the point",
+    "i don't want to wake up",
+    // inability to keep the baby safe
+    "i can't keep her safe",
+    "i'm scared to be alone with him",
+    "i can't be trusted with the baby",
+    // fear of harming the baby
+    "i'm scared i'll hurt him",
+    'what if i drop her on purpose',
+    "i have thoughts i don't want to have",
+    // wanting to escape / abandon
+    'what if i just walked away',
+    'i want to disappear',
+  ];
+  for (const ask of indirectCrisis) {
+    const r = route(ask);
+    assert.deepEqual(r, { kind: 'crisis' }, `"${ask}" → crisis`);
+    assert.notEqual(r.kind, 'support', `"${ask}" must NEVER route to the AI companion`);
+    assert.equal(matchesParentCrisis(ask), true, `matchesParentCrisis catches "${ask}"`);
+  }
+  // Patterns must be NON-GLOBAL so .test() is stateless (no lastIndex drift).
+  for (const re of PARENT_CRISIS_PATTERNS) {
+    assert.ok(!re.flags.includes('g'), `pattern /${re.source}/ is non-global`);
+  }
+  // Recall bias didn't nuke normal support routing — ordinary venting still → support.
+  assert.deepEqual(route("i'm exhausted"), { kind: 'support' });
+  assert.deepEqual(route('how do i ask my husband to help more'), { kind: 'support' });
+  assert.equal(matchesParentCrisis('i am tired tonight'), false);
+});
+
+check('XS2. broad non-medical asks reach support; infant-medical stays gated (never AI)', () => {
+  // Emotional / relationship / routine / self-doubt → the AI companion.
+  assert.deepEqual(route("i'm exhausted"), { kind: 'support' });
+  assert.deepEqual(route('how do i ask my husband to help more'), { kind: 'support' });
+  assert.deepEqual(route('am i doing ok'), { kind: 'support' });
+  assert.deepEqual(route('i feel like a bad mom'), { kind: 'support' });
+  // Infant-medical asks are gated to the pediatrician decline, NEVER support:
+  assert.deepEqual(route('is this normal'), { kind: 'oos' }); // baby_comfort
+  assert.deepEqual(route('is she gaining weight'), { kind: 'oos' }); // gate-5 isInfantMedical
+  assert.deepEqual(route('she has a rash'), { kind: 'oos' });
+  assert.deepEqual(route('poop is green'), { kind: 'topic', key: 'diaper' });
+  // isInfantMedical expects normalized input and never fires on parent-feeling text.
+  assert.equal(isInfantMedical('is she gaining weight'), true);
+  assert.equal(isInfantMedical("i'm exhausted"), false);
+});
+
+check('XS3. reassure-support edge fn: three safety gates precede the model + kill-switch', () => {
+  const src = readFileSync(
+    new URL('../supabase/functions/reassure-support/index.ts', import.meta.url),
+    'utf8',
+  );
+  const redflagIx = src.indexOf('matchesRedFlag(normalized)');
+  const crisisIx = src.indexOf('matchesParentCrisis(normalized)');
+  const medicalIx = src.indexOf('isInfantMedical(normalized)');
+  const killIx = src.indexOf("REASSURE_SUPPORT_ENABLED");
+  const modelIx = src.indexOf('anthropic.messages.create');
+  assert.ok(redflagIx > -1 && crisisIx > -1 && medicalIx > -1, 'all three gates present');
+  assert.ok(modelIx > -1, 'the model is called');
+  // Order per the requirement: red-flag → crisis → infant-medical → (kill-switch) → model.
+  assert.ok(redflagIx < crisisIx, 'gate 1 (red-flag) precedes gate 2 (crisis)');
+  assert.ok(crisisIx < medicalIx, 'gate 2 (crisis) precedes gate 3 (infant-medical)');
+  assert.ok(medicalIx < modelIx, 'ALL THREE safety gates precede the model call');
+  assert.ok(killIx > -1 && killIx < modelIx, 'kill-switch is read before the model call');
+  // No entitlement gating on the server at all — safety can never be gated by it.
+  // (Checks real gating identifiers, not prose, so a comment can mention the topic.)
+  assert.ok(
+    !/proGates|usePro\b|canUseAiSupport|isPro\b|openPaywall|purchasePackage/.test(src),
+    'server consults no Pro/entitlement gate',
+  );
+  // Privacy: the raw text is minimized before it enters the audit log.
+  assert.ok(src.includes('minimizeParentTextForAudit(rawText)'), 'audit minimizes the raw parent text');
+  // The support guardrail is used — NOT the night-read judgement-vocab validator.
+  assert.ok(src.includes('validateSupportOutput'), 'uses the support-specific guardrail');
+  assert.ok(!src.includes('validateLlmOutput'), 'does not reuse the judgement-vocab guardrail');
+});
+
+check('XS4. support consent card plainly says the parent’s words are sent to Anthropic', () => {
+  const src = readFileSync(
+    new URL('../src/features/reassure/components/SupportConsentCard.tsx', import.meta.url),
+    'utf8',
+  );
+  assert.ok(src.includes('Anthropic'), 'names the AI provider');
+  assert.ok(/words you type|things you type|sent to Anthropic/i.test(src), 'says the typed words are sent');
+  assert.ok(src.includes('onGrant') && src.includes('onDecline'), 'consent is an explicit opt-in');
+});
+
+check('XS5. support guardrail keeps warm words but blocks dosage/medication/diagnosis leaks', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const llm = require('../supabase/functions/_shared/reassureLlm') as {
+    validateSupportOutput: (
+      raw: string,
+      key: string,
+      opts: { maxChars: number },
+    ) => { ok: boolean; reason?: string };
+    SUPPORT_MAX_CHARS: number;
+  };
+  const warm = llm.validateSupportOutput(
+    JSON.stringify({ reply: "You're doing okay — that sounds really hard, and it's normal to feel this tired." }),
+    'reply',
+    { maxChars: llm.SUPPORT_MAX_CHARS },
+  );
+  assert.equal(warm.ok, true, 'warm words (okay/normal/hard) are allowed — unlike the night-read ban');
+  const dosage = llm.validateSupportOutput(
+    JSON.stringify({ reply: 'Give her 5 ml of ibuprofen every four hours.' }),
+    'reply',
+    { maxChars: llm.SUPPORT_MAX_CHARS },
+  );
+  assert.equal(dosage.ok, false, 'a dosage/medication leak is blocked → local fallback');
+  assert.equal(dosage.reason, 'medical');
+});
+
+check('XS6. crisis + support copy stay under the review-pending manifest', () => {
+  assert.equal(REASSURE_CONTENT.status, 'draft', 'content is still draft, pending review');
+  assert.ok(CRISIS_COPY.body.length > 0 && CRISIS_COPY.title.length > 0, 'crisis card has copy');
+  // Region-agnostic crisis guidance: local emergency number, 988 only as an example.
+  assert.ok(/local emergency number/i.test(CRISIS_COPY.body), 'crisis copy is region-agnostic');
+  assert.ok(SUPPORT_COPY.fallback.length > 0, 'support has a local, non-AI fallback line');
 });
 
 check('X17b. Reassure RN workflow wires every local entry point into the answer path', () => {
