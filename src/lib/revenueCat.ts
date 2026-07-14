@@ -51,7 +51,10 @@ export type NormalizedRcError = { code: string; message: string; cancelled: bool
 /** Discriminated result for purchase / restore. */
 export type RcPurchaseOutcome =
   | { ok: true; customerInfo: CustomerInfo }
-  | { ok: false; error: NormalizedRcError };
+  // TEMP: `debug` carries the serialized raw error (code/userInfo/
+  // underlyingErrorMessage) so the on-screen debug Alert can read it without a
+  // Mac console. Remove before final production submit.
+  | { ok: false; error: NormalizedRcError; debug?: string };
 
 /** The platform we can configure RevenueCat for, or null (web / unsupported). */
 function currentPlatform(): RevenueCatPlatform | null {
@@ -177,11 +180,54 @@ export function hasActiveRevenueCatEntitlement(
 
 /** Purchase a package. A user cancel is a calm outcome, not a scary error. */
 export async function purchaseRevenueCatPackage(pkg: PurchasesPackage): Promise<RcPurchaseOutcome> {
+  // TEMP: cap the native purchase call so a hung StoreKit sheet resolves to a
+  // definitive timeout error instead of an infinite "processing" state. Remove
+  // before final production submit.
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   try {
-    const { customerInfo } = await Purchases.purchasePackage(pkg);
+    const result = await Promise.race([
+      Purchases.purchasePackage(pkg),
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(
+          () => reject({ code: 'timeout', message: 'purchase did not resolve in 30s' }),
+          30_000,
+        );
+      }),
+    ]);
+    const { customerInfo } = result;
+    // TEMP diagnostics (unconditional so it shows in TestFlight device console —
+    // remove before final production submit). Raw purchase result + whether the
+    // 'pro' entitlement came back active.
+    console.log('[RC] purchasePackage raw result:', JSON.stringify(result));
+    console.log('[RC] purchasePackage entitlements:', JSON.stringify(customerInfo.entitlements));
     return { ok: true, customerInfo };
   } catch (error) {
-    return { ok: false, error: normalizeRevenueCatError(error) };
+    // TEMP diagnostics (unconditional — remove before final production submit).
+    // Log the full error object plus the serialized form so we can see
+    // userInfo / code / underlyingErrorMessage on a hanging/failed sandbox buy.
+    const e = error as {
+      code?: unknown;
+      message?: unknown;
+      userInfo?: unknown;
+      underlyingErrorMessage?: unknown;
+    } | null;
+    console.log('[RC] purchasePackage error (raw):', error);
+    console.log('[RC] purchasePackage error (json):', JSON.stringify(error));
+    console.log('[RC] purchasePackage error fields:', {
+      code: e?.code,
+      userInfo: e?.userInfo,
+      underlyingErrorMessage: e?.underlyingErrorMessage,
+    });
+    // TEMP: serialize the raw fields so the on-screen debug Alert can show them.
+    const debug = JSON.stringify({
+      code: e?.code,
+      message: e?.message,
+      userInfo: e?.userInfo,
+      underlyingErrorMessage: e?.underlyingErrorMessage,
+    });
+    return { ok: false, error: normalizeRevenueCatError(error), debug };
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
   }
 }
 

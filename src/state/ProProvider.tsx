@@ -32,7 +32,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 
 import {
   getProMode,
@@ -202,8 +202,27 @@ export function ProProvider({ children }: { children: ReactNode }) {
       setPurchaseError(null);
       track('purchase_started', { surface: 'paywall', packageType: pkg.packageType });
       const outcome = await purchaseRevenueCatPackage(raw);
+      // TEMP on-screen diagnostics (no Mac console needed) — surface the raw
+      // purchase outcome so we can read it from the device. Remove before final
+      // production submit.
       if (outcome.ok) {
         const entitled = hasActiveRevenueCatEntitlement(outcome.customerInfo, entitlementId);
+        Alert.alert(
+          '[DEBUG purchase]',
+          [
+            'ok: true',
+            'hasActiveEntitlement: ' + String(entitled),
+            'entitlementId: ' + getRevenueCatEntitlementId(),
+          ].join('\n'),
+        );
+        // TEMP diagnostics (unconditional so it shows in TestFlight device console —
+        // remove before final production submit). Resolved isPro decision + whether
+        // the configured entitlement id came back active.
+        console.log('[RC] ProProvider purchase result:', {
+          entitlementId: getRevenueCatEntitlementId(),
+          hasActiveEntitlement: entitled,
+          isPro: entitled,
+        });
         if (entitled) {
           setIsPro(true);
           track('purchase_completed', {
@@ -216,6 +235,18 @@ export function ProProvider({ children }: { children: ReactNode }) {
           track('purchase_failed', { surface: 'paywall', errorCode: 'no_entitlement', cancelled: false });
         }
       } else {
+        // TEMP on-screen diagnostics — surface the error/timeout outcome (code,
+        // message, and raw userInfo/underlyingErrorMessage) so it is readable
+        // from the device. Remove before final production submit.
+        Alert.alert(
+          '[DEBUG purchase]',
+          [
+            'ok: false',
+            'code: ' + outcome.error.code,
+            'message: ' + outcome.error.message,
+            'debug: ' + (outcome.debug ?? 'n/a'),
+          ].join('\n'),
+        );
         // A user cancel is calm — no scary error line, just the coarse event.
         if (!outcome.error.cancelled) setPurchaseError(outcome.error.message);
         track('purchase_failed', {
