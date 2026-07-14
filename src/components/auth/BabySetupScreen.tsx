@@ -75,9 +75,17 @@ function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => voi
 }
 
 export function BabySetupScreen() {
-  const { completeSetup, joinWithInvite, signOut, busy, errorMessage, clearError } = useAuth();
+  const { completeSetup, joinWithInvite, signOut, busy, errorMessage, clearError, appleDisplayName, caregiver } =
+    useAuth();
   const [mode, setMode] = useState<Mode>('create');
-  const [displayName, setDisplayName] = useState('');
+  // Prefill "Your name" for a signed-in Apple caregiver: on their first Sign in with
+  // Apple we captured the real name (appleDisplayName), and a returning Apple/account
+  // user already has it on their profile (caregiver.displayName). Prefilled but fully
+  // editable — never a blocker. A fresh email sign-up has neither, so it stays empty
+  // and the email/local path is unchanged. Lazy initializer (not an effect) so it
+  // never clobbers typing and stays clear of the no-setState-in-effect rule; both
+  // sources are already resolved by the time this one-time screen mounts.
+  const [displayName, setDisplayName] = useState(() => appleDisplayName ?? caregiver?.displayName ?? '');
   const [role, setRole] = useState<CaregiverRole>('mom');
   // create-only
   const [babyName, setBabyName] = useState('');
