@@ -7999,6 +7999,7 @@ function seedFullDeviceSnapshot(): Record<string, string> {
     'lullaby/auth/prefers-local/v1': 'true',
     'lullaby.coach.firstLog.v1.dismissed': 'true',
     'lullaby.reassure.aiNightReadConsent.v1': 'granted',
+    'lullaby.reassure.aiSupportConsent.v1': 'granted',
     'lullaby.reassure.pediatricianPhone.v1': '+1 555 123 4567',
     'lullaby/reassure/night-read/v1:local-baby:2026-06-16': 'a soft note about Aria’s night',
     'lullaby/handoff-cursor/local': '1718500000000',
@@ -8043,6 +8044,7 @@ check('DR2. the selector clears every user key from a full snapshot and keeps on
   // The private Reassure prefs (the parent's own data) are cleared.
   assert.ok(removed.has('lullaby.reassure.pediatricianPhone.v1'), "the parent's own phone number is cleared");
   assert.ok(removed.has('lullaby.reassure.aiNightReadConsent.v1'), 'AI consent resets for the fresh account');
+  assert.ok(removed.has('lullaby.reassure.aiSupportConsent.v1'), 'support-companion consent resets for the fresh account (symmetric with night-read; no stale grant leaks into a new account)');
   assert.ok(removed.has('lullaby.coach.firstLog.v1.dismissed'), 'the first-log coach re-arms for the fresh baby');
   // Exactly one key survives: the device theme.
   const after = simulateAccountDeletionWipe(before);
