@@ -43,16 +43,43 @@ export type ScopeContext = { hasLogs: boolean };
 
 /**
  * The single result type every input path (voice, chip, text) resolves to.
- *  - 'triage'  — a red flag matched; escalate to a doctor. Always wins.
+ *  - 'triage'  — an infant red flag matched; escalate to a doctor. Always wins.
+ *  - 'crisis'  — a PARENT-crisis phrase matched (self-harm / harming the baby /
+ *                unable to keep baby safe / not wanting to be here). A free,
+ *                always-on safety route to crisis resources — never the model,
+ *                never a paywall. Decided in code before any topic/scope/Pro check.
  *  - 'topic'   — a curated MEDICAL KB topic answers it, then the interaction ENDS.
- *  - 'guide'   — a bounded NON-medical guide (app help, parent support, logs).
- *  - 'oos'     — out of scope; politely decline and point to the pediatrician.
+ *  - 'guide'   — a bounded NON-medical guide (app help, logs) answered locally.
+ *  - 'support' — a non-medical emotional-support ask for the AI companion
+ *                (feelings, relationship, routine, self-doubt). The ONLY kind
+ *                that may reach Anthropic, and only after the Pro + consent gates
+ *                that the screen applies AFTER this classification.
+ *  - 'oos'     — out of scope / infant-medical-with-no-topic; politely decline
+ *                and point to the pediatrician. Never the model.
  */
 export type RouteResult =
   | { kind: 'triage' }
+  | { kind: 'crisis' }
   | { kind: 'topic'; key: ReassureTopicKey }
   | { kind: 'guide'; key: ReassureGuideKey }
+  | { kind: 'support' }
   | { kind: 'oos' };
+
+/**
+ * The reassure-support edge function's response. The server re-runs the same
+ * three deterministic safety gates on the raw text BEFORE any model call, so it
+ * can return a safety redirect instead of a reply — the client renders that
+ * redirect verbatim rather than an AI answer.
+ *  - triage / crisis / medical / oos — a code-decided redirect; NO model was called.
+ *  - support — the model answered (source:'llm') or every fallback fired
+ *              (source:'fallback', reply null → the local support line).
+ */
+export type SupportResponse =
+  | { kind: 'triage' }
+  | { kind: 'crisis' }
+  | { kind: 'medical' }
+  | { kind: 'oos' }
+  | { kind: 'support'; reply: string | null; source: 'llm' | 'fallback' };
 
 /** Where an ask came from — analytics-safe enum (never the raw text). */
 export type AskSource = 'voice' | 'chip' | 'text';
