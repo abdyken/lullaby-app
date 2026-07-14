@@ -32,7 +32,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { Alert, Platform } from 'react-native';
+import { Platform } from 'react-native';
 
 import {
   getProMode,
@@ -45,6 +45,7 @@ import {
 } from '@/lib/proConfig';
 import { useAnalytics } from '@/lib/useAnalytics';
 import {
+  addRevenueCatCustomerInfoListener,
   configureRevenueCat,
   findRawPackage,
   getRevenueCatCustomerInfo,
@@ -186,6 +187,19 @@ export function ProProvider({ children }: { children: ReactNode }) {
     };
   }, [computeProSnapshot, applySnapshot]);
 
+  // Late-finalization safety net. RevenueCat may deliver an updated CustomerInfo
+  // AFTER purchasePackage has already resolved (a slow store sync). When it fires,
+  // flip Pro on if the entitlement is now active so the user is never left behind
+  // a completed purchase. Registered once; removed on unmount.
+  useEffect(() => {
+    const unsubscribe = addRevenueCatCustomerInfoListener((customerInfo) => {
+      if (hasActiveRevenueCatEntitlement(customerInfo, entitlementId)) {
+        setIsPro(true);
+      }
+    });
+    return unsubscribe;
+  }, [entitlementId]);
+
   const refreshProStatus = useCallback(async () => {
     const snap = await computeProSnapshot();
     applySnapshot(snap);
@@ -202,27 +216,13 @@ export function ProProvider({ children }: { children: ReactNode }) {
       setPurchaseError(null);
       track('purchase_started', { surface: 'paywall', packageType: pkg.packageType });
       const outcome = await purchaseRevenueCatPackage(raw);
-      // TEMP on-screen diagnostics (no Mac console needed) — surface the raw
-      // purchase outcome so we can read it from the device. Remove before final
-      // production submit.
       if (outcome.ok) {
-        const entitled = hasActiveRevenueCatEntitlement(outcome.customerInfo, entitlementId);
-        Alert.alert(
-          '[DEBUG purchase]',
-          [
-            'ok: true',
-            'hasActiveEntitlement: ' + String(entitled),
-            'entitlementId: ' + getRevenueCatEntitlementId(),
-          ].join('\n'),
-        );
-        // TEMP diagnostics (unconditional so it shows in TestFlight device console —
-        // remove before final production submit). Resolved isPro decision + whether
-        // the configured entitlement id came back active.
-        console.log('[RC] ProProvider purchase result:', {
-          entitlementId: getRevenueCatEntitlementId(),
-          hasActiveEntitlement: entitled,
-          isPro: entitled,
-        });
+        // Re-fetch CustomerInfo after the purchase resolves so Pro turns on
+        // promptly even if the purchase result's snapshot lagged the store sync;
+        // fall back to the purchase result's own CustomerInfo if the re-fetch is
+        // unavailable. The customerInfo update listener is the further safety net.
+        const latest = (await getRevenueCatCustomerInfo()) ?? outcome.customerInfo;
+        const entitled = hasActiveRevenueCatEntitlement(latest, entitlementId);
         if (entitled) {
           setIsPro(true);
           track('purchase_completed', {
@@ -235,18 +235,6 @@ export function ProProvider({ children }: { children: ReactNode }) {
           track('purchase_failed', { surface: 'paywall', errorCode: 'no_entitlement', cancelled: false });
         }
       } else {
-        // TEMP on-screen diagnostics — surface the error/timeout outcome (code,
-        // message, and raw userInfo/underlyingErrorMessage) so it is readable
-        // from the device. Remove before final production submit.
-        Alert.alert(
-          '[DEBUG purchase]',
-          [
-            'ok: false',
-            'code: ' + outcome.error.code,
-            'message: ' + outcome.error.message,
-            'debug: ' + (outcome.debug ?? 'n/a'),
-          ].join('\n'),
-        );
         // A user cancel is calm — no scary error line, just the coarse event.
         if (!outcome.error.cancelled) setPurchaseError(outcome.error.message);
         track('purchase_failed', {
