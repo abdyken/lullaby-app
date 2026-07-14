@@ -27,6 +27,8 @@
  * PURE LEAF: no react/react-native imports; only sibling domain imports.
  */
 
+import { isInfantMedical } from './medicalGate';
+import { matchesParentCrisis } from './parentCrisis';
 import { matchesRedFlag } from './redflags';
 import { classifyScope } from './scope';
 import type { RouteResult, ScopeContext } from './types';
@@ -48,9 +50,15 @@ export function normalizeAsk(text: string): string {
  */
 export function route(text: string, ctx: ScopeContext = { hasLogs: false }): RouteResult {
   const t = normalizeAsk(text);
-  // 1) Triage guardrail — FIRST, always. Never move anything above this.
+  // 0) Empty / whitespace-only input is a bounded decline — never the model.
+  if (t.length === 0) return { kind: 'oos' };
+  // 1) Infant red-flag guardrail — FIRST, always. Never move anything above this.
   if (matchesRedFlag(t)) return { kind: 'triage' };
-  // 2) Curated MEDICAL comfort topics (demo order and demo regexes, verbatim).
+  // 2) Parent-crisis guardrail — SECOND. Self-harm / harming the baby / unable to
+  //    keep baby safe / not wanting to be here → the free crisis route. Decided in
+  //    code, before any topic/scope classification, the model, or a Pro check.
+  if (matchesParentCrisis(t)) return { kind: 'crisis' };
+  // 3) Curated MEDICAL comfort topics (demo order and demo regexes, verbatim).
   if (/hiccup/.test(t)) return { kind: 'topic', key: 'hiccups' };
   if (/spit|posset|throw up|throwing up|vomit/.test(t)) return { kind: 'topic', key: 'spitup' };
   // Gas & burping — burp/belch/wind-after-feeds are a common newborn gas/comfort
@@ -64,12 +72,19 @@ export function route(text: string, ctx: ScopeContext = { hasLogs: false }): Rou
   if (/sleep|nap|won'?t sleep|wont sleep|restless|awake/.test(t)) {
     return { kind: 'topic', key: 'sleep' };
   }
-  // 3) Broader parent-experience scope — deterministic keyword classifier, never
-  //    a model, always after the triage scan above.
-  return mapScope(classifyScope(t, ctx));
+  // 4) Broader parent-experience scope — deterministic keyword classifier, never
+  //    a model, always after the red-flag + crisis scans above.
+  const outcome = mapScope(classifyScope(t, ctx));
+  // 5) Final infant-medical gate: anything headed for the AI companion is checked
+  //    one more time against the infant-medical block-list. A baby-body/health ask
+  //    that slipped through the topic regexes is redirected to the pediatrician
+  //    (oos), NEVER sent to the model. Parent-experience asks (no infant-medical
+  //    term) fall through to 'support'. This mirrors the server's gate-3.
+  if (outcome.kind === 'support' && isInfantMedical(t)) return { kind: 'oos' };
+  return outcome;
 }
 
-/** Map a classified scope onto exactly one bounded local outcome. */
+/** Map a classified scope onto exactly one bounded outcome. */
 function mapScope(scope: ReturnType<typeof classifyScope>): RouteResult {
   switch (scope) {
     case 'feeding_tracking':
@@ -81,15 +96,19 @@ function mapScope(scope: ReturnType<typeof classifyScope>): RouteResult {
     case 'app_logging_help':
       return { kind: 'guide', key: 'app_logging_help' };
     case 'parent_support':
-      return { kind: 'guide', key: 'parent_support' };
+      // Emotional support — the AI companion path (Pro + consent gated on screen).
+      return { kind: 'support' };
     case 'logs_summary':
       // classifyScope only returns this when ctx.hasLogs, so there is data to point at.
       return { kind: 'guide', key: 'logs_summary' };
     case 'baby_comfort':
-      // A general baby worry with no curated topic. LOCAL: bounded decline.
-      // FUTURE: the safe AI answer path (reassure-parent-answer) slots in here.
+      // A general baby worry with no curated topic — infant-medical, so it is
+      // gated to the pediatrician decline. NEVER the AI companion.
       return { kind: 'oos' };
     case 'out_of_scope':
-      return { kind: 'oos' };
+      // The broad non-medical remainder (relationship, routine, "am I doing ok",
+      // and anything else that is not infant-medical) → the AI companion. The
+      // gate-5 isInfantMedical re-check above keeps baby-health asks out.
+      return { kind: 'support' };
   }
 }

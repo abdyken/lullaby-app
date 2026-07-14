@@ -36,11 +36,14 @@ import { AnswerCard, type TriageAction } from '@/features/reassure/components/An
 import { AskCard } from '@/features/reassure/components/AskCard';
 import { ReassureHero } from '@/features/reassure/components/ReassureHero';
 import { RecapCard } from '@/features/reassure/components/RecapCard';
+import { SupportCard } from '@/features/reassure/components/SupportCard';
+import { SupportConsentCard } from '@/features/reassure/components/SupportConsentCard';
 import { TopicAccordion } from '@/features/reassure/components/TopicAccordion';
 import { VoiceOrb } from '@/features/reassure/components/VoiceOrb';
 import type { CareEvent } from '@/features/logging/domain/types';
 import { useLogging } from '@/features/logging/state/LoggingProvider';
 import { useNightRead } from '@/features/reassure/application/nightRead';
+import { useReassureSupport } from '@/features/reassure/application/reassureSupport';
 import { useVoiceInput } from '@/features/reassure/application/useVoiceInput';
 import { KB } from '@/features/reassure/content/kb';
 import { clinicalContentVisible } from '@/features/reassure/domain/contentGate';
@@ -145,7 +148,21 @@ export default function ReassureScreen() {
     grantConsent,
     declineConsent,
   } = useNightRead(recap);
+  // The emotional-support companion (only reached for a { kind:'support' } route).
+  const {
+    state: supportState,
+    request: requestSupport,
+    grantConsent: grantSupportConsent,
+    declineConsent: declineSupportConsent,
+    reset: resetSupport,
+  } = useReassureSupport();
   const currentRecapHeading = recapHeading(recap);
+
+  // Dismissing any answer also clears the support interaction behind it.
+  const dismissAnswer = useCallback(() => {
+    setAnswer(null);
+    resetSupport();
+  }, [resetSupport]);
 
   // ONE smooth scroll to the answer. Driven by the answer block's own onLayout
   // (which carries the freshly-measured y), so it never chases a stale
@@ -169,6 +186,13 @@ export default function ReassureScreen() {
       const result = route(trimmed, { hasLogs: !recap.isEmpty });
       if (source === 'text' || source === 'voice') Keyboard.dismiss();
       setVoiceFallback(null);
+      // The support companion path is async + gated (Pro + consent). Everything
+      // else (triage, crisis, topic, guide, oos) is a synchronous local answer.
+      if (result.kind === 'support') {
+        requestSupport(trimmed);
+      } else {
+        resetSupport();
+      }
       setAnswer(result);
       // PRIVACY: coarse enums only — the raw ask text is never sent to analytics.
       track('reassure_asked', {
@@ -177,13 +201,14 @@ export default function ReassureScreen() {
         topic: result.kind === 'topic' ? result.key : null,
       });
       if (result.kind === 'triage') track('reassure_triage_shown');
+      if (result.kind === 'crisis') track('reassure_crisis_shown');
       // Mark the freshly-set answer for a single scroll-into-view. The scroll
       // itself fires from the answer block's onLayout (correct measured y) —
       // never here, where answerYRef could still hold the previous answer's
       // position, which is what caused the stale jump-then-correct.
       pendingAnswerScrollRef.current = true;
     },
-    [recap.isEmpty, track],
+    [recap.isEmpty, track, requestSupport, resetSupport],
   );
 
   const showVoiceFallback = useCallback((message: string, kind: VoiceFallback['kind']) => {
@@ -428,13 +453,44 @@ export default function ReassureScreen() {
               scrollToAnswer();
             }
           }}>
-          <AnswerCard
-            result={answer}
-            surfaceMode={mode}
-            reduceMotion={reduceMotion}
-            onDismiss={() => setAnswer(null)}
-            onTriageAction={onTriageAction}
-          />
+          {answer.kind === 'support' ? (
+            // The companion path: one-time consent → a server safety redirect →
+            // otherwise the AI (or local) support reply. Safety redirects render
+            // through AnswerCard so triage/crisis look identical to the local path.
+            supportState.phase === 'consent' ? (
+              <SupportConsentCard
+                surfaceMode={mode}
+                onGrant={grantSupportConsent}
+                onDecline={declineSupportConsent}
+              />
+            ) : supportState.phase === 'redirect' && supportState.redirect !== null ? (
+              <AnswerCard
+                result={supportState.redirect}
+                surfaceMode={mode}
+                reduceMotion={reduceMotion}
+                onDismiss={dismissAnswer}
+                onTriageAction={onTriageAction}
+              />
+            ) : supportState.phase === 'loading' ||
+              supportState.phase === 'reply' ||
+              supportState.phase === 'fallback' ? (
+              <SupportCard
+                phase={supportState.phase}
+                reply={supportState.reply}
+                surfaceMode={mode}
+                reduceMotion={reduceMotion}
+                onDismiss={dismissAnswer}
+              />
+            ) : null
+          ) : (
+            <AnswerCard
+              result={answer}
+              surfaceMode={mode}
+              reduceMotion={reduceMotion}
+              onDismiss={dismissAnswer}
+              onTriageAction={onTriageAction}
+            />
+          )}
         </View>
       ) : null}
 
