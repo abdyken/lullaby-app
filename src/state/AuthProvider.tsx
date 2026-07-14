@@ -43,7 +43,7 @@ import type { Baby, Caregiver, CaregiverRole } from '@/data/models';
 import { trackEvent } from '@/lib/analytics';
 import { calmAuthErrorMessage } from '@/lib/authErrors';
 import { getAuthRedirectUrl, startGoogleOAuth } from '@/lib/authLinking';
-import { authWarn } from '@/lib/authLogger';
+import { authDebug, authWarn } from '@/lib/authLogger';
 import { isGoogleSignInConfigured } from '@/lib/googleAuth';
 import { hapticSuccess } from '@/lib/haptics';
 import { logStartupStep } from '@/lib/startupDiagnostics';
@@ -127,6 +127,12 @@ type AuthContextValue = {
   session: Session | null;
   /** the signed-in caregiver's profile, once it exists */
   caregiver: Caregiver | null;
+  /**
+   * The caregiver's name as captured from their FIRST Sign in with Apple, if any.
+   * Non-null only right after a first-time Apple sign-in and before setup; lets
+   * BabySetupScreen prefill "Your name" so an Apple user isn't asked to retype it.
+   */
+  appleDisplayName: string | null;
   /** the linked baby (Supabase mode, status 'ready'); null otherwise */
   baby: Baby | null;
   /** every caregiver linked to the baby (includes self); [] until 'ready' */
@@ -265,6 +271,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // The caregiver's real name as Apple handed it to us on their FIRST Sign in with
+  // Apple (null on every later sign-in). Held in memory only, so the one-time baby
+  // setup can prefill "Your name" instead of re-asking (App Store Guideline 4). The
+  // durable write lives in completeSetup, which also has the role + color a profile
+  // row needs. Cleared on sign-out.
+  const [appleDisplayName, setAppleDisplayName] = useState<string | null>(null);
 
   const mounted = useRef(true);
   useEffect(() => {
@@ -313,6 +325,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setCaregiver(null);
         setBaby(null);
         setCaregivers([]);
+        setAppleDisplayName(null);
         setAuthStatus('signed-out', reason === 'initial-no-session' ? 'initial-no-session' : 'no-session');
       }
       return;
@@ -630,6 +643,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
       });
+      // Apple returns the caregiver's real name + email ONLY on the very first
+      // sign-in for this Apple ID; both are null on every subsequent sign-in. Read
+      // them BEFORE the token exchange and keep them if present — this is the one
+      // and only chance to learn the name, so a returning Apple user is never asked
+      // to retype it (App Store Guideline 4).
+      const capturedName =
+        [credential.fullName?.givenName, credential.fullName?.familyName]
+          .filter((part): part is string => part != null && part.trim().length > 0)
+          .join(' ')
+          .trim() || null;
+      const capturedEmail = credential.email ?? null;
+      authDebug('signInWithApple: apple credential captured', {
+        hasName: capturedName != null,
+        hasEmail: capturedEmail != null,
+      });
+
       const idToken = credential.identityToken;
       if (!idToken) {
         // Apple authenticated but returned no token — rare; treat as a soft retry.
@@ -639,7 +668,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         return;
       }
-      const { error } = await supabase.auth.signInWithIdToken({
+      const { data, error } = await supabase.auth.signInWithIdToken({
         provider: 'apple',
         token: idToken,
       });
@@ -648,6 +677,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           calmAuthErrorMessage(error, 'Could not sign in with Apple just now. Please try again.'),
         );
         setAuthStatus('signed-out', 'apple-failed');
+        return;
+      }
+      // Sign-in succeeded. Remember the first-time name so BabySetupScreen can
+      // prefill it; on a returning sign-in capturedName is null and this is a no-op.
+      if (capturedName && mounted.current) setAppleDisplayName(capturedName);
+      // Backfill the name onto an EXISTING profile row that has none — but never
+      // overwrite a name the caregiver already chose. The common first-time case has
+      // no row yet (a full profile with role + color is written by completeSetup),
+      // so this typically does nothing; the prefill above carries the name forward.
+      // Non-fatal: sign-in already landed, so any failure here stays silent.
+      const userId = data.session?.user?.id;
+      if (capturedName && userId) {
+        try {
+          const { data: existingProfile } = await supabase
+            .from('profiles')
+            .select('id, display_name')
+            .eq('id', userId)
+            .maybeSingle();
+          const hasName =
+            existingProfile?.display_name != null &&
+            existingProfile.display_name.trim().length > 0;
+          if (existingProfile && !hasName) {
+            await supabase.from('profiles').update({ display_name: capturedName }).eq('id', userId);
+          }
+        } catch {
+          // Ignore — the name still reaches setup via the prefill above.
+        }
       }
     } catch (e) {
       // The parent dismissed the system sheet — not a failure, stay quiet.
@@ -977,6 +1033,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       status,
       session,
       caregiver,
+      appleDisplayName,
       baby,
       caregivers,
       pendingMessage,
@@ -1000,6 +1057,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       status,
       session,
       caregiver,
+      appleDisplayName,
       baby,
       caregivers,
       pendingMessage,
