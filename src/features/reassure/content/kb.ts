@@ -192,6 +192,37 @@ export const OOS_COPY = {
   dismiss: 'Got it',
 } as const;
 
+/*
+ * PARENT-CRISIS card copy — PLACEHOLDER, pending review (safety-owned; listed in
+ * docs/plans/reassure-content-review.md). Shown for a { kind: 'crisis' } route:
+ * a warm, non-judgmental, ALWAYS-FREE redirect to real help. Region-agnostic —
+ * a local crisis/mental-health line, their doctor, or their local emergency
+ * number, with US 988 only as an example (valid for a parent outside the US).
+ */
+export const CRISIS_COPY = {
+  title: "You matter — please reach out now",
+  tag: 'Please reach out',
+  line: "What you just described deserves real, immediate support — you don't have to carry it alone tonight.",
+  body: 'Please contact a local crisis or mental-health helpline, your doctor, or your local emergency number right now (in the US, you can call or text 988). If you might act on these feelings, or you feel you can’t keep yourself or the baby safe, treat it as an emergency and call your local emergency number.',
+  dismiss: 'Close',
+} as const;
+
+/*
+ * SUPPORT companion local fallback — PLACEHOLDER product copy (non-medical,
+ * pending review). Shown for a { kind: 'support' } ask whenever the AI reply is
+ * unavailable: the parent has not consented, is not on Pro, or the edge function
+ * did not return a reply. Warm, generic, and never medical.
+ */
+export const SUPPORT_COPY = {
+  tag: 'Support',
+  /** the calm one-liner shown while the AI reply is being written */
+  loadingLine: 'Thinking with you…',
+  /** the local, non-AI reply shown when the companion can't answer */
+  fallback:
+    "I'm here with you. Nights like this are genuinely hard, and feeling stretched thin doesn't mean you're doing anything wrong. Be as gentle with yourself as you'd be with a friend — fed and safe is enough for tonight.",
+  dismiss: 'Close',
+} as const;
+
 /* PLACEHOLDER — pending clinician review. */
 export const TOPIC_FOOT = "Still worried after this? Trust your gut — it's always okay to call your doctor.";
 export const TOPIC_DISMISS = 'Got it, thanks';

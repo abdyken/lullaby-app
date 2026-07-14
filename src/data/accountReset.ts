@@ -18,6 +18,7 @@
 import { FIRST_LOG_COACH_DISMISSED_KEY } from '../components/firstLogCoach';
 import { ONBOARDING_COMPLETE_KEY, ONBOARDING_DRAFT_KEY } from '../components/onboarding/onboardingStorage';
 import { AI_NIGHT_READ_CONSENT_KEY } from '../features/reassure/domain/aiConsent';
+import { AI_SUPPORT_CONSENT_KEY } from '../features/reassure/domain/supportConsent';
 import { PEDIATRICIAN_PHONE_KEY } from '../features/reassure/domain/pediatricianContact';
 import { NIGHT_READ_CACHE_PREFIX } from '../features/reassure/application/nightReadKeys';
 import { PREFERS_LOCAL_STORAGE_KEY } from '../state/authStorageKeys';
@@ -45,6 +46,7 @@ export const ACCOUNT_LOCAL_DATA_KEYS = [
   PREFERS_LOCAL_STORAGE_KEY,
   FIRST_LOG_COACH_DISMISSED_KEY,
   AI_NIGHT_READ_CONSENT_KEY,
+  AI_SUPPORT_CONSENT_KEY,
   PEDIATRICIAN_PHONE_KEY,
 ] as const;
 

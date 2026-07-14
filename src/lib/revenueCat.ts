@@ -20,6 +20,7 @@
  */
 import { Platform } from 'react-native';
 import Purchases, {
+  STOREKIT_VERSION,
   type CustomerInfo,
   type PurchasesOffering,
   type PurchasesPackage,
@@ -88,7 +89,16 @@ export async function configureRevenueCat(params: { userId: string | null }): Pr
   try {
     if (configuredApiKey === null) {
       // First configure this session. A null appUserID is the anonymous path.
-      Purchases.configure({ apiKey, appUserID: params.userId });
+      // Force StoreKit 1: purchases-ios 5.x defaults to StoreKit 2, whose
+      // server-side finalization hangs in sandbox — Apple reports success but the
+      // transaction never syncs, so purchasePackage never resolves and RevenueCat
+      // records 0 transactions. StoreKit 1 finalizes on-device and sidesteps that
+      // hang. iOS-only setting; a no-op on Android.
+      Purchases.configure({
+        apiKey,
+        appUserID: params.userId,
+        storeKitVersion: STOREKIT_VERSION.STOREKIT_1,
+      });
       configuredApiKey = apiKey;
       currentAppUserId = params.userId;
     } else if (params.userId !== null) {
@@ -131,6 +141,30 @@ export async function getRevenueCatCustomerInfo(): Promise<CustomerInfo | null> 
   } catch {
     return null;
   }
+}
+
+/**
+ * Subscribe to CustomerInfo updates (keeps the SDK import isolated to this
+ * module — ProProvider never imports RevenueCat directly). RevenueCat may deliver
+ * an updated CustomerInfo AFTER purchasePackage has resolved (a late/slow
+ * finalization), so a listener is how Pro flips on for those. Returns an
+ * unsubscribe function; never throws.
+ */
+export function addRevenueCatCustomerInfoListener(
+  listener: (customerInfo: CustomerInfo) => void,
+): () => void {
+  try {
+    Purchases.addCustomerInfoUpdateListener(listener);
+  } catch {
+    return () => {};
+  }
+  return () => {
+    try {
+      Purchases.removeCustomerInfoUpdateListener(listener);
+    } catch {
+      // Calm: removing a listener should never surface an error.
+    }
+  };
 }
 
 /**

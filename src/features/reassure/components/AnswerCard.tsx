@@ -19,6 +19,7 @@ import { usePediatricianPhone } from '@/features/reassure/application/usePediatr
 import { clinicalContentVisible } from '@/features/reassure/domain/contentGate';
 import { telUrlFor } from '@/features/reassure/domain/pediatricianContact';
 import {
+  CRISIS_COPY,
   GUIDES,
   KB,
   OOS_COPY,
@@ -34,10 +35,11 @@ import { colors, fonts, radii, shadows, surfaces, type SurfaceMode } from '@/the
  * non-medical guides render regardless — escalation is never hidden. */
 const showClinical = clinicalContentVisible(__DEV__);
 
-/* Draft-gate copy — local UX copy (not medical), shown in place of the
- * clinical KB blocks in public builds until clinician sign-off. */
+/* Pediatrician-redirect copy — local UX copy (not medical), shown in place of
+ * the clinical KB blocks in public builds. Reads as an intentional redirect to
+ * a professional, not as unfinished or withheld content. */
 const REVIEW_PENDING_LINE =
-  'Our guidance on this topic is still being reviewed, so it isn’t shown in the app yet.';
+  'For questions like this, your pediatrician or nurse line is the best next step.';
 const REVIEW_PENDING_BODY =
   'Your pediatrician or nurse line is the best place for questions like this. If anything feels urgent, call your doctor right away.';
 
@@ -106,8 +108,9 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
     }).start();
   }, [progress, reduceMotion, result]);
 
-  const isTriage = result.kind === 'triage';
-  const headerColors: readonly [string, string] = isTriage
+  // Crisis shares triage's urgent red treatment (header, accents, dismiss color).
+  const isAlert = result.kind === 'triage' || result.kind === 'crisis';
+  const headerColors: readonly [string, string] = isAlert
     ? [colors.alert2, colors.alert]
     : [colors.sleep2, colors.sleep];
 
@@ -118,7 +121,9 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
         ? GUIDES[result.key].title
         : result.kind === 'triage'
           ? TRIAGE_COPY.title
-          : OOS_COPY.title;
+          : result.kind === 'crisis'
+            ? CRISIS_COPY.title
+            : OOS_COPY.title;
   const tag =
     result.kind === 'topic'
       ? KB[result.key].tag
@@ -126,7 +131,9 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
         ? GUIDES[result.key].tag
         : result.kind === 'triage'
           ? TRIAGE_COPY.tag
-          : OOS_COPY.tag;
+          : result.kind === 'crisis'
+            ? CRISIS_COPY.tag
+            : OOS_COPY.tag;
   const line =
     result.kind === 'topic'
       ? showClinical
@@ -136,13 +143,17 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
         ? GUIDES[result.key].line
         : result.kind === 'triage'
           ? TRIAGE_COPY.line
-          : OOS_COPY.line;
+          : result.kind === 'crisis'
+            ? CRISIS_COPY.line
+            : OOS_COPY.line;
   const dismissLabel =
     result.kind === 'topic'
       ? TOPIC_DISMISS
       : result.kind === 'triage'
         ? TRIAGE_COPY.dismiss
-        : OOS_COPY.dismiss;
+        : result.kind === 'crisis'
+          ? CRISIS_COPY.dismiss
+          : OOS_COPY.dismiss;
 
   return (
     <Animated.View
@@ -207,7 +218,7 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
             AnswerBlocks below). Content, copy, and gating are unchanged. */}
         <View style={{ flexDirection: 'row', gap: 11, paddingTop: 14, paddingBottom: 10 }}>
           <View
-            style={{ width: 3, borderRadius: 2, backgroundColor: isTriage ? colors.alert : colors.sleep }}
+            style={{ width: 3, borderRadius: 2, backgroundColor: isAlert ? colors.alert : colors.sleep }}
           />
           <Text
             style={{
@@ -279,6 +290,27 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
                 color: palette.inkSoft,
               }}>
               {OOS_COPY.foot}
+            </Text>
+          </View>
+        ) : null}
+
+        {/* crisis — a free, always-on safety route. Warm, urgent, non-judgmental
+            guidance to real help. No model, no paywall; decided in code. */}
+        {result.kind === 'crisis' ? (
+          <View
+            style={{
+              backgroundColor: surfaceMode === 'night' ? 'rgba(224,87,75,0.16)' : colors.alertTint,
+              borderRadius: radii.small,
+              padding: 13,
+            }}>
+            <Text
+              style={{
+                fontFamily: fonts.bodyBold,
+                fontSize: 13,
+                lineHeight: 20,
+                color: palette.ink,
+              }}>
+              {CRISIS_COPY.body}
             </Text>
           </View>
         ) : null}
@@ -549,7 +581,7 @@ export function AnswerCard({ result, surfaceMode, reduceMotion, onDismiss, onTri
             style={{
               fontFamily: fonts.bodyBold,
               fontSize: 13.5,
-              color: isTriage ? colors.alert : colors.sleep,
+              color: isAlert ? colors.alert : colors.sleep,
             }}>
             {dismissLabel}
           </Text>

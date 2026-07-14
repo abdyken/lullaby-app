@@ -45,6 +45,7 @@ import {
 } from '@/lib/proConfig';
 import { useAnalytics } from '@/lib/useAnalytics';
 import {
+  addRevenueCatCustomerInfoListener,
   configureRevenueCat,
   findRawPackage,
   getRevenueCatCustomerInfo,
@@ -186,6 +187,19 @@ export function ProProvider({ children }: { children: ReactNode }) {
     };
   }, [computeProSnapshot, applySnapshot]);
 
+  // Late-finalization safety net. RevenueCat may deliver an updated CustomerInfo
+  // AFTER purchasePackage has already resolved (a slow store sync). When it fires,
+  // flip Pro on if the entitlement is now active so the user is never left behind
+  // a completed purchase. Registered once; removed on unmount.
+  useEffect(() => {
+    const unsubscribe = addRevenueCatCustomerInfoListener((customerInfo) => {
+      if (hasActiveRevenueCatEntitlement(customerInfo, entitlementId)) {
+        setIsPro(true);
+      }
+    });
+    return unsubscribe;
+  }, [entitlementId]);
+
   const refreshProStatus = useCallback(async () => {
     const snap = await computeProSnapshot();
     applySnapshot(snap);
@@ -203,7 +217,12 @@ export function ProProvider({ children }: { children: ReactNode }) {
       track('purchase_started', { surface: 'paywall', packageType: pkg.packageType });
       const outcome = await purchaseRevenueCatPackage(raw);
       if (outcome.ok) {
-        const entitled = hasActiveRevenueCatEntitlement(outcome.customerInfo, entitlementId);
+        // Re-fetch CustomerInfo after the purchase resolves so Pro turns on
+        // promptly even if the purchase result's snapshot lagged the store sync;
+        // fall back to the purchase result's own CustomerInfo if the re-fetch is
+        // unavailable. The customerInfo update listener is the further safety net.
+        const latest = (await getRevenueCatCustomerInfo()) ?? outcome.customerInfo;
+        const entitled = hasActiveRevenueCatEntitlement(latest, entitlementId);
         if (entitled) {
           setIsPro(true);
           track('purchase_completed', {
