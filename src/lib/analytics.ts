@@ -65,7 +65,12 @@ export type AnalyticsEvent =
   | 'reassure_voice_permission_denied'
   | 'reassure_topic_opened'
   | 'reassure_recap_viewed'
-  | 'reassure_night_read_shown';
+  | 'reassure_night_read_shown'
+  // Support companion — coarse enums only; the raw parent text is NEVER sent to
+  // analytics (it goes only to the edge function, minimized in reassure_audit).
+  | 'reassure_crisis_shown'
+  | 'reassure_support_requested'
+  | 'reassure_support_shown';
 
 /** Small, serializable property bag stored in the row's `props` jsonb column. */
 export type AnalyticsProps = Record<string, string | number | boolean | null>;
