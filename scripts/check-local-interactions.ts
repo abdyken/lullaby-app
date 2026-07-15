@@ -5851,6 +5851,61 @@ check('EIG2. extended insights gate: Pro sees the real 30-day view, free routes 
   );
 });
 
+check('EIG3. the extended card is the GUEST paywall entry: its render gate has no data and no auth term', () => {
+  // Apple 5.1.1(v). A "Continue locally" parent — no account, zero logs on a
+  // fresh install — must reach the non-account-based subscription. Every other
+  // route fails them: a guest tap on the baby header opens the AccountSheet, not
+  // /settings (AE5), and /settings hides its Pro card behind `signedIn` (X8).
+  // That leaves this card as the ONLY entry needing neither an account nor data,
+  // so its render condition must stay free of both terms.
+  //
+  // X8b pins the same promise for a SIGNED-IN zero-data user ("can always buy
+  // from /settings"); its scope silently excluded guests, which is how the
+  // unreachable-paywall rejection shipped. This check closes that gap.
+  const cardIdx = INSIGHTS_SCREEN_SRC.indexOf('<ExtendedInsightsCard');
+  assert.ok(cardIdx > 0, 'InsightsScreen renders the ExtendedInsightsCard');
+  const gateStart = INSIGHTS_SCREEN_SRC.lastIndexOf('{getProMode()', cardIdx);
+  assert.ok(gateStart > 0, 'the extended card sits behind a getProMode() render gate');
+  // Only the JSX condition itself — the comment above it is deliberately excluded,
+  // so it stays free to EXPLAIN the absent gates without tripping this check.
+  const gate = INSIGHTS_SCREEN_SRC.slice(gateStart, cardIdx);
+  assert.ok(
+    !/dataDays/.test(gate),
+    'the extended card must not gate on dataDays — a fresh guest has 0 and would never see the paywall entry',
+  );
+  assert.ok(
+    !/\bsession\b|\bsignedIn\b|\buserId\b/.test(gate),
+    'the extended card must not gate on auth — a guest with no account must reach the paywall',
+  );
+  // It must remain real-Pro-only: the fake-door preview build never shows a live
+  // paywall entry, and Pro-off shows nothing at all.
+  assert.ok(
+    /getProMode\(\) === 'enabled'/.test(gate),
+    'the extended card stays real-Pro-only (never the preview fake-door)',
+  );
+  // The teaser it renders at zero data must stay data-INDEPENDENT: the free branch
+  // returns before `viewModel` is ever read, so it can never fabricate a month.
+  const freeBranch = EXTENDED_INSIGHTS_CARD_SRC.slice(
+    EXTENDED_INSIGHTS_CARD_SRC.indexOf('if (!canViewExtendedInsights(isPro))'),
+    EXTENDED_INSIGHTS_CARD_SRC.indexOf('if (!viewModel)'),
+  );
+  assert.ok(freeBranch.length > 0, 'the free teaser branch precedes any viewModel read');
+  assert.ok(
+    !/viewModel/.test(freeBranch),
+    'the free teaser must not read viewModel (it must render no data, real or fabricated)',
+  );
+  // ...and an ENTITLED zero-data parent lands on the honest sparse copy, never an
+  // empty or invented 30-day view.
+  assert.ok(
+    EXTENDED_INSIGHTS_CARD_SRC.includes('hasEnoughData'),
+    'the entitled path branches on hasEnoughData',
+  );
+  assert.ok(
+    /fills in as you keep logging/i.test(EXTENDED_INSIGHTS_CARD_SRC),
+    'a sparse entitled view states honestly that the month fills in with more logs',
+  );
+});
+
 // ---------------------------------------------------------------------------
 // §X. Reassure v2 — triage-first router, night window, recap, content guards.
 // The safety property under test: TRIAGE ALWAYS WINS and cannot silently

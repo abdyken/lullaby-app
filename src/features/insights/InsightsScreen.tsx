@@ -401,8 +401,25 @@ export function InsightsScreen() {
 
         {/* Extended 30-day insights — real Pro only. Free sees a teaser that
             opens the paywall; Pro sees the genuine 30-day view with computed
-            trends. Additive depth; the free 7-day view above never changes. */}
-        {getProMode() === 'enabled' && viewModel.dataDays >= 4 ? (
+            trends. Additive depth; the free 7-day view above never changes.
+
+            Deliberately carries NO dataDays gate (unlike the two cards above) and
+            no session term: this is the GUEST's data-independent paywall entry
+            (Apple 5.1.1(v)). A "Continue locally" parent — no account, and zero
+            logs on a fresh install — must be able to reach the non-account-based
+            subscription without registering, and every other route fails them: a
+            guest tap on the baby header opens the AccountSheet, not /settings
+            (index.tsx), and /settings hides its Pro card behind `signedIn`. This
+            card is not a Modal and sits inside the tabs ProProvider, so its CTA
+            opens the ONE shared PaywallSheet with no modal stacking.
+
+            Safe to show at zero data because nothing here is fabricated:
+            ExtendedInsightsCard returns its free teaser branch BEFORE reading
+            `viewModel` at all (a static feature description, never premium data),
+            and an entitled parent with no logs yet lands on its honest SPARSE_TEXT
+            ("The 30-day view fills in as you keep logging") — never an empty or
+            invented month. */}
+        {getProMode() === 'enabled' ? (
           <View style={{ marginTop: 13 }}>
             <ExtendedInsightsCard viewModel={extendedViewModel} />
           </View>
