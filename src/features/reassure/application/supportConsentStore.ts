@@ -10,6 +10,14 @@
  * PRIVACY: the consent state is kept LOCAL under AI_SUPPORT_CONSENT_KEY only. It
  * is never sent to analytics, Supabase, an LLM, or a log line — it only decides,
  * on the device, whether the support edge function may be called.
+ *
+ * CHANGE PROPAGATION: the decision is edited from two surfaces (the just-in-time
+ * consent card on the Reassure tab AND the revoke toggle in Settings). Because
+ * the tab screens stay mounted, a write from one surface must reach the other's
+ * already-loaded hook, or a revoke in Settings would leave a stale "granted" in
+ * the Reassure hook and the next ask would send without re-consent. So every
+ * write notifies subscribers with the new value; useAiSupportConsent subscribes
+ * so all consumers converge on the persisted decision immediately.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -19,6 +27,26 @@ import {
   serializeSupportConsent,
   type AiSupportConsent,
 } from '@/features/reassure/domain/supportConsent';
+
+type SupportConsentListener = (value: AiSupportConsent | null) => void;
+
+const listeners = new Set<SupportConsentListener>();
+
+/**
+ * Subscribe to consent changes made anywhere in the app. Returns an unsubscribe
+ * fn. The listener is called with the newly written value (or null on clear) —
+ * synchronously right after the write — so no async re-read/race is involved.
+ */
+export function subscribeSupportConsent(listener: SupportConsentListener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function notifySupportConsent(value: AiSupportConsent | null): void {
+  for (const listener of listeners) listener(value);
+}
 
 /** Load the decided state. Returns null if absent, unreadable, or corrupt. */
 export async function loadSupportConsent(): Promise<AiSupportConsent | null> {
@@ -40,6 +68,9 @@ export async function saveSupportConsent(status: AiSupportConsent): Promise<AiSu
   } catch {
     // best-effort — losing the write only means the notice re-appears next launch
   }
+  // Notify regardless of write success: in-session consumers must converge on the
+  // decision even if the disk write failed (the notice re-appears next launch).
+  notifySupportConsent(status);
   return status;
 }
 
@@ -50,4 +81,5 @@ export async function clearSupportConsent(): Promise<void> {
   } catch {
     // ignore — a stale decision only ever gates the companion, never safety
   }
+  notifySupportConsent(null);
 }

@@ -14,7 +14,11 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import type { AiSupportConsent } from '@/features/reassure/domain/supportConsent';
-import { loadSupportConsent, saveSupportConsent } from './supportConsentStore';
+import {
+  loadSupportConsent,
+  saveSupportConsent,
+  subscribeSupportConsent,
+} from './supportConsentStore';
 
 export type AiSupportConsentState = {
   /** The decided state, or null when the parent has not yet been asked. */
@@ -38,8 +42,16 @@ export function useAiSupportConsent(): AiSupportConsentState {
       setStatus(value);
       setReady(true);
     });
+    // Converge on any write from another surface (e.g. the Settings revoke
+    // toggle) so an already-mounted consumer never keeps a stale decision. The
+    // callback runs on a store event, not synchronously in this effect body, so
+    // it stays clear of the React-Compiler no-setState-in-effect rule.
+    const unsubscribe = subscribeSupportConsent((value) => {
+      if (!cancelled) setStatus(value);
+    });
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, []);
 
