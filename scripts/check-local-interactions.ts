@@ -6676,6 +6676,57 @@ check('XS6. crisis + support copy stay under the review-pending manifest', () =>
   assert.ok(SUPPORT_COPY.fallback.length > 0, 'support has a local, non-AI fallback line');
 });
 
+check('XS7. support consent gates the network: no reassure-support invoke without a consent check', () => {
+  // Structural guard (X13 style): prove the raw-text send to Anthropic is
+  // reachable ONLY through run(), and every run() is behind a granted consent —
+  // so no path calls supabase.functions.invoke('reassure-support', ...) with
+  // consent !== 'granted'.
+  const src = readFileSync(
+    new URL('../src/features/reassure/application/reassureSupport.ts', import.meta.url),
+    'utf8',
+  );
+
+  // 1. Single network boundary. The QUOTED invoke string appears exactly once;
+  //    the header comment names reassure-support UNQUOTED, so this stays
+  //    comment-proof (like X13's identifier-based scan).
+  const invokeMatches = src.match(/'reassure-support'/g) ?? [];
+  assert.equal(invokeMatches.length, 1, 'exactly one reassure-support invoke — a single network boundary');
+
+  // 2. That invoke lives INSIDE fetchSupport (between its definition and the next
+  //    top-level function), so the network is only reachable through fetchSupport.
+  const fetchDefIx = src.indexOf('function fetchSupport');
+  const invokeIx = src.indexOf("'reassure-support'");
+  const nextFnIx = src.indexOf('function redirectFor');
+  assert.ok(fetchDefIx > -1 && nextFnIx > -1, 'fetchSupport and redirectFor are present');
+  assert.ok(fetchDefIx < invokeIx && invokeIx < nextFnIx, 'the invoke sits inside fetchSupport');
+
+  // 3. fetchSupport is reached only via run(): one definition + exactly one call
+  //    site, and that call is inside run().
+  const fetchRefs = src.match(/fetchSupport\(/g) ?? [];
+  assert.equal(fetchRefs.length, 2, 'fetchSupport has one definition + exactly one call site');
+  const runDefIx = src.indexOf('const run = useCallback');
+  const fetchCallIx = src.indexOf('fetchSupport(text)');
+  assert.ok(runDefIx > -1 && fetchCallIx > runDefIx, 'the only fetchSupport call is inside run()');
+
+  // 4. request() path is consent-gated: the !consentGranted early return precedes
+  //    the terminal run(trimmed) — no send before consent.
+  const consentGuardIx = src.indexOf('if (!consentGranted)');
+  const runTrimmedIx = src.indexOf('run(trimmed)');
+  assert.ok(consentGuardIx > -1 && runTrimmedIx > -1, 'request() has the consent guard and the run call');
+  assert.ok(consentGuardIx < runTrimmedIx, 'the consent guard precedes run(trimmed)');
+
+  // 5. grant() path is consent-gated: consent is recorded before the parked ask runs.
+  const grantIx = src.indexOf('consent.grant()');
+  const runPendingIx = src.indexOf('run(pending)');
+  assert.ok(grantIx > -1 && runPendingIx > -1, 'grantConsent records consent and runs the parked ask');
+  assert.ok(grantIx < runPendingIx, 'consent.grant() precedes run(pending)');
+
+  // 6. Consent derives from the STORED decision, and the text is PARKED (not sent)
+  //    until consent is granted.
+  assert.ok(src.includes('consentAllowsSupport(consent.status)'), 'consent derives from the stored decision');
+  assert.ok(src.includes('pendingTextRef'), 'the typed text is parked until consent is granted');
+});
+
 check('X17b. Reassure RN workflow wires every local entry point into the answer path', () => {
   assert.ok(REASSURE_SCREEN_SRC.includes('const ask = useCallback'), 'screen owns one shared ask funnel');
   assert.ok(REASSURE_SCREEN_SRC.includes('const result = route(trimmed'), 'shared ask calls route() locally');
