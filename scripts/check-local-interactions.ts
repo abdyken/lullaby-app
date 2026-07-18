@@ -5851,6 +5851,61 @@ check('EIG2. extended insights gate: Pro sees the real 30-day view, free routes 
   );
 });
 
+check('EIG3. the extended card is the GUEST paywall entry: its render gate has no data and no auth term', () => {
+  // Apple 5.1.1(v). A "Continue locally" parent — no account, zero logs on a
+  // fresh install — must reach the non-account-based subscription. Every other
+  // route fails them: a guest tap on the baby header opens the AccountSheet, not
+  // /settings (AE5), and /settings hides its Pro card behind `signedIn` (X8).
+  // That leaves this card as the ONLY entry needing neither an account nor data,
+  // so its render condition must stay free of both terms.
+  //
+  // X8b pins the same promise for a SIGNED-IN zero-data user ("can always buy
+  // from /settings"); its scope silently excluded guests, which is how the
+  // unreachable-paywall rejection shipped. This check closes that gap.
+  const cardIdx = INSIGHTS_SCREEN_SRC.indexOf('<ExtendedInsightsCard');
+  assert.ok(cardIdx > 0, 'InsightsScreen renders the ExtendedInsightsCard');
+  const gateStart = INSIGHTS_SCREEN_SRC.lastIndexOf('{getProMode()', cardIdx);
+  assert.ok(gateStart > 0, 'the extended card sits behind a getProMode() render gate');
+  // Only the JSX condition itself — the comment above it is deliberately excluded,
+  // so it stays free to EXPLAIN the absent gates without tripping this check.
+  const gate = INSIGHTS_SCREEN_SRC.slice(gateStart, cardIdx);
+  assert.ok(
+    !/dataDays/.test(gate),
+    'the extended card must not gate on dataDays — a fresh guest has 0 and would never see the paywall entry',
+  );
+  assert.ok(
+    !/\bsession\b|\bsignedIn\b|\buserId\b/.test(gate),
+    'the extended card must not gate on auth — a guest with no account must reach the paywall',
+  );
+  // It must remain real-Pro-only: the fake-door preview build never shows a live
+  // paywall entry, and Pro-off shows nothing at all.
+  assert.ok(
+    /getProMode\(\) === 'enabled'/.test(gate),
+    'the extended card stays real-Pro-only (never the preview fake-door)',
+  );
+  // The teaser it renders at zero data must stay data-INDEPENDENT: the free branch
+  // returns before `viewModel` is ever read, so it can never fabricate a month.
+  const freeBranch = EXTENDED_INSIGHTS_CARD_SRC.slice(
+    EXTENDED_INSIGHTS_CARD_SRC.indexOf('if (!canViewExtendedInsights(isPro))'),
+    EXTENDED_INSIGHTS_CARD_SRC.indexOf('if (!viewModel)'),
+  );
+  assert.ok(freeBranch.length > 0, 'the free teaser branch precedes any viewModel read');
+  assert.ok(
+    !/viewModel/.test(freeBranch),
+    'the free teaser must not read viewModel (it must render no data, real or fabricated)',
+  );
+  // ...and an ENTITLED zero-data parent lands on the honest sparse copy, never an
+  // empty or invented 30-day view.
+  assert.ok(
+    EXTENDED_INSIGHTS_CARD_SRC.includes('hasEnoughData'),
+    'the entitled path branches on hasEnoughData',
+  );
+  assert.ok(
+    /fills in as you keep logging/i.test(EXTENDED_INSIGHTS_CARD_SRC),
+    'a sparse entitled view states honestly that the month fills in with more logs',
+  );
+});
+
 // ---------------------------------------------------------------------------
 // §X. Reassure v2 — triage-first router, night window, recap, content guards.
 // The safety property under test: TRIAGE ALWAYS WINS and cannot silently
@@ -6619,6 +6674,57 @@ check('XS6. crisis + support copy stay under the review-pending manifest', () =>
   // Region-agnostic crisis guidance: local emergency number, 988 only as an example.
   assert.ok(/local emergency number/i.test(CRISIS_COPY.body), 'crisis copy is region-agnostic');
   assert.ok(SUPPORT_COPY.fallback.length > 0, 'support has a local, non-AI fallback line');
+});
+
+check('XS7. support consent gates the network: no reassure-support invoke without a consent check', () => {
+  // Structural guard (X13 style): prove the raw-text send to Anthropic is
+  // reachable ONLY through run(), and every run() is behind a granted consent —
+  // so no path calls supabase.functions.invoke('reassure-support', ...) with
+  // consent !== 'granted'.
+  const src = readFileSync(
+    new URL('../src/features/reassure/application/reassureSupport.ts', import.meta.url),
+    'utf8',
+  );
+
+  // 1. Single network boundary. The QUOTED invoke string appears exactly once;
+  //    the header comment names reassure-support UNQUOTED, so this stays
+  //    comment-proof (like X13's identifier-based scan).
+  const invokeMatches = src.match(/'reassure-support'/g) ?? [];
+  assert.equal(invokeMatches.length, 1, 'exactly one reassure-support invoke — a single network boundary');
+
+  // 2. That invoke lives INSIDE fetchSupport (between its definition and the next
+  //    top-level function), so the network is only reachable through fetchSupport.
+  const fetchDefIx = src.indexOf('function fetchSupport');
+  const invokeIx = src.indexOf("'reassure-support'");
+  const nextFnIx = src.indexOf('function redirectFor');
+  assert.ok(fetchDefIx > -1 && nextFnIx > -1, 'fetchSupport and redirectFor are present');
+  assert.ok(fetchDefIx < invokeIx && invokeIx < nextFnIx, 'the invoke sits inside fetchSupport');
+
+  // 3. fetchSupport is reached only via run(): one definition + exactly one call
+  //    site, and that call is inside run().
+  const fetchRefs = src.match(/fetchSupport\(/g) ?? [];
+  assert.equal(fetchRefs.length, 2, 'fetchSupport has one definition + exactly one call site');
+  const runDefIx = src.indexOf('const run = useCallback');
+  const fetchCallIx = src.indexOf('fetchSupport(text)');
+  assert.ok(runDefIx > -1 && fetchCallIx > runDefIx, 'the only fetchSupport call is inside run()');
+
+  // 4. request() path is consent-gated: the !consentGranted early return precedes
+  //    the terminal run(trimmed) — no send before consent.
+  const consentGuardIx = src.indexOf('if (!consentGranted)');
+  const runTrimmedIx = src.indexOf('run(trimmed)');
+  assert.ok(consentGuardIx > -1 && runTrimmedIx > -1, 'request() has the consent guard and the run call');
+  assert.ok(consentGuardIx < runTrimmedIx, 'the consent guard precedes run(trimmed)');
+
+  // 5. grant() path is consent-gated: consent is recorded before the parked ask runs.
+  const grantIx = src.indexOf('consent.grant()');
+  const runPendingIx = src.indexOf('run(pending)');
+  assert.ok(grantIx > -1 && runPendingIx > -1, 'grantConsent records consent and runs the parked ask');
+  assert.ok(grantIx < runPendingIx, 'consent.grant() precedes run(pending)');
+
+  // 6. Consent derives from the STORED decision, and the text is PARKED (not sent)
+  //    until consent is granted.
+  assert.ok(src.includes('consentAllowsSupport(consent.status)'), 'consent derives from the stored decision');
+  assert.ok(src.includes('pendingTextRef'), 'the typed text is parked until consent is granted');
 });
 
 check('X17b. Reassure RN workflow wires every local entry point into the answer path', () => {

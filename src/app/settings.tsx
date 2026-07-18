@@ -22,6 +22,7 @@ import {
   resolveTermsUrl,
 } from '@/lib/appLinks';
 import { SettingsProCard } from '@/components/pro/SettingsProCard';
+import { useAiSupportConsent } from '@/features/reassure/application/useAiSupportConsent';
 import { getProMode } from '@/lib/proConfig';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/state/AuthProvider';
@@ -129,6 +130,12 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { mode, isTransitioning, toggleThemeFromPoint } = useTheme();
   const { session, caregiver, signOut, goToAccountEntry, deleteAccount, busy } = useAuth();
+  // Revoke toggle for the AI support companion (support path only — night-read
+  // keeps its own just-in-time consent). Reads/writes AI_SUPPORT_CONSENT_KEY via
+  // the shared hook; works on this root route (AsyncStorage + React only, no
+  // providers). OFF writes 'declined', which re-arms the blocking consent gate
+  // before the next AI use.
+  const aiSupportConsent = useAiSupportConsent();
   const palette = surfaces[mode];
   const isNight = mode === 'night';
 
@@ -438,6 +445,45 @@ export default function SettingsScreen() {
               with anyone.
             </Text>
             <View style={{ height: 1, backgroundColor: palette.line, marginTop: 12 }} />
+            {/* AI companion (support path) data-sharing revoke. OFF sets
+                'declined', which blocks future support AI calls and re-arms the
+                blocking consent gate on the Reassure tab. Night-read is
+                unaffected — it keeps its own just-in-time consent. */}
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingVertical: 4,
+              }}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={{ fontFamily: fonts.body, fontSize: 14, color: palette.ink }}>
+                  AI companion data sharing
+                </Text>
+                <Text
+                  style={{
+                    fontFamily: fonts.body,
+                    fontSize: 12,
+                    lineHeight: 18,
+                    color: palette.inkFaint,
+                    marginTop: 2,
+                  }}>
+                  {"When off, Lullaby won't send your messages to the AI provider."}
+                </Text>
+              </View>
+              <Switch
+                accessibilityLabel="AI companion data sharing"
+                value={aiSupportConsent.status === 'granted'}
+                disabled={!aiSupportConsent.ready}
+                onValueChange={(next) => {
+                  if (next) aiSupportConsent.grant();
+                  else aiSupportConsent.decline();
+                }}
+                trackColor={{ false: colors.line, true: colors.sleep2 }}
+                thumbColor={colors.white}
+              />
+            </View>
+            <View style={{ height: 1, backgroundColor: palette.line, marginTop: 4 }} />
             <LinkRow palette={palette} label="Privacy Policy" onPress={() => handleOpenLegal(privacyUrl)} />
             <View style={{ height: 1, backgroundColor: palette.line }} />
             <LinkRow palette={palette} label="Terms of Use" onPress={() => handleOpenLegal(termsUrl)} />
